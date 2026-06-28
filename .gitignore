@@ -1,0 +1,15 @@
+.env
+.env.local
+*.db
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.vscode/
+*.egg-info/
+dist/
+build/
+
+# Frontend деплоится отдельно на Vercel (репозиторий Ghos_web)
+webapp/
