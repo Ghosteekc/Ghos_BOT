@@ -1,4 +1,4 @@
-# Как запускать CR Coach Bot + Mini App
+# Как запускать Ghosteek CR Assistant + Mini App
 
 ## Предварительные требования
 
@@ -98,13 +98,13 @@ railway up
 | `TRIAL_DAYS` | `3` | опционально |
 | `SUBSCRIPTION_PRICE_STARS` | `250` | опционально |
 
-> **Важно:** `WEBAPP_URL` должен быть HTTPS URL вашего Railway проекта (например, `https://cr-coach-production.up.railway.app`). Telegram WebApp требует HTTPS.
+> **Важно:** `WEBAPP_URL` должен быть HTTPS URL вашего Railway проекта (например, `https://ghosteek-cr-assistant.up.railway.app`). Telegram WebApp требует HTTPS.
 
 ### Как узнать URL Railway
 
 После деплоя в разделе **Settings → Domains** вы увидите assigned domain, например:
 ```
-https://cr-coach-production.up.railway.app
+https://ghosteek-cr-assistant.up.railway.app
 ```
 
 Именно его укажите в `WEBAPP_URL`.

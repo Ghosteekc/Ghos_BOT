@@ -35,7 +35,7 @@ async def run_api() -> None:
 
 async def main() -> None:
     logger.info("=" * 50)
-    logger.info("Starting Clash Royale Coach Bot")
+    logger.info("Starting Ghosteek CR Assistant")
     logger.info("=" * 50)
 
     logger.info("Initializing database...")

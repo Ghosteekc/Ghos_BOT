@@ -12,11 +12,17 @@ logger = logging.getLogger(__name__)
 
 def filter_pvp_battles(battles: list, player_tag: str) -> list:
     tag = normalize_tag(player_tag)
-    return [
-        b for b in battles
-        if b.get("type") in ("PvP", "pathOfLegend")
-        and b.get("team", [{}])[0].get("tag", "").upper() == tag.upper()
-    ]
+    excluded = {"friendly", "clanMate", "warDay", "boatBattle", "challenge"}
+    result = []
+    for b in battles:
+        battle_type = b.get("type") or ""
+        if battle_type in excluded:
+            continue
+        team_tag = b.get("team", [{}])[0].get("tag", "")
+        if normalize_tag(team_tag) != tag:
+            continue
+        result.append(b)
+    return result
 
 
 async def load_pvp_battles(player_tag: str) -> list | None:
@@ -153,11 +159,42 @@ async def get_cached_stats(player_tag: str) -> CachedStats | None:
     )
 
 
-async def load_and_persist(user: User) -> list | None:
+async def load_and_persist(user: User, *, force_refresh: bool = False) -> list | None:
     if not user.player_tag:
         return None
+
+    from bot.services.battle_cache_reader import get_battles_from_cache
+    from bot.services.battle_session_cache import (
+        get_session_battles,
+        is_fresh,
+        set_session_battles,
+    )
+
+    tag = normalize_tag(user.player_tag)
+
+    if not force_refresh:
+        session_battles = get_session_battles(user.telegram_id)
+        if session_battles is not None and is_fresh(tag):
+            return session_battles
+
+        cached = await get_battles_from_cache(user.player_tag)
+        if cached and is_fresh(tag):
+            set_session_battles(user.telegram_id, tag, cached)
+            return cached
+
     battles = await load_pvp_battles(user.player_tag)
     if battles is None:
-        return None
-    await persist_battles(user, battles)
-    return battles
+        cached = await get_battles_from_cache(user.player_tag)
+        if cached:
+            set_session_battles(user.telegram_id, tag, cached)
+        return cached or None
+
+    if battles:
+        await persist_battles(user, battles)
+        set_session_battles(user.telegram_id, tag, battles)
+        return battles
+
+    cached = await get_battles_from_cache(user.player_tag)
+    if cached:
+        set_session_battles(user.telegram_id, tag, cached)
+    return cached or []

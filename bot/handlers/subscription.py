@@ -32,7 +32,7 @@ async def activate_trial(callback: CallbackQuery) -> None:
 async def pay_subscription(callback: CallbackQuery) -> None:
     logger.info(f"User {callback.from_user.id} initiated payment")
     await callback.message.answer_invoice(
-        title="Clash Royale Coach — Подписка",
+        title="Ghosteek CR Assistant — Подписка",
         description="30 дней полного доступа ко всем функциям анализа колод и боёв",
         payload="cr_sub_30d",
         currency="XTR",

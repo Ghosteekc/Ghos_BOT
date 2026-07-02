@@ -1,7 +1,10 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
+from bot.config import settings
 
-def main_menu() -> ReplyKeyboardMarkup:    return ReplyKeyboardMarkup(
+
+def main_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="💎 Подписка")],
             [KeyboardButton(text="💬 Поддержка")],
@@ -14,7 +17,10 @@ def subscription_keyboard(trial_available: bool, price_stars: int) -> InlineKeyb
     buttons = []
     if trial_available:
         buttons.append([
-            InlineKeyboardButton(text="🎁 Пробный период (3 дня)", callback_data="sub_trial")
+            InlineKeyboardButton(
+                text=f"🎁 Пробный период ({settings.trial_days} дн.)",
+                callback_data="sub_trial",
+            )
         ])
     buttons.append([
         InlineKeyboardButton(

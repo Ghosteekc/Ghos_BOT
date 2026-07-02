@@ -13,15 +13,32 @@ class ProfileResponse(BaseModel):
     trophies: int | None
     exp_level: int | None
     arena_name: str | None
+    arena_icon: str | None = None
+    avatar_url: str | None = None
+    favorite_card: str | None = None
+    favorite_card_icon: str | None = None
+    skill_rating: int | None = None
+    winrate: float | None = None
+    last_rating_change: int | None = None
+    max_trophies: int | None = None
+    clan_name: str | None = None
     subscription: SubscriptionInfo
 
 
 class BattleSummary(BaseModel):
     index: int
     opponent_name: str
+    opponent_tag: str = ""
+    opponent_trophies: int = 0
     won: bool
     trophy_change: int
     matchup_score: float | None = None
+    duration: int = 0
+    avg_elixir: float = 0.0
+    user_deck: list[str] = []
+    opponent_deck: list[str] = []
+    top_reason: str | None = None
+    timestamp: str = ""
 
 
 class BattleListResponse(BaseModel):
@@ -105,6 +122,94 @@ class StatsResponse(BaseModel):
     top_cards: list[dict]
     win_streak: int
     loss_streak: int
+
+
+class StatsOverviewResponse(BaseModel):
+    total_battles: int
+    wins: int
+    losses: int
+    draws: int = 0
+    winrate: float
+    avg_elixir: float = 0.0
+    max_trophies: int = 0
+    avg_time: float = 0.0
+    winrate_by_day: list[dict] = []
+    winrate_by_hour: list[dict] = []
+    best_cards: list[dict] = []
+    most_used_cards: list[dict] = []
+    archetypes: list[dict] = []
+    last_results: list[dict] = []
+    activity_heatmap: list[list[int]] = []
+
+
+class DeckCardInfo(BaseModel):
+    id: str
+    name: str
+    icon: str = ""
+    rarity: str = "common"
+    cost: int = 0
+
+
+class DeckEntry(BaseModel):
+    id: int
+    name: str = ""
+    cards: list[DeckCardInfo]
+    winrate: float
+    total_games: int
+    avg_elixir: float
+    type: str = "rated"
+    category: str = "mine"
+    deck_link: str | None = None
+    description: str = ""
+    best_matchups: list = []
+    worst_matchups: list = []
+
+
+class DeckListResponse(BaseModel):
+    decks: list[DeckEntry]
+
+
+class SearchResult(BaseModel):
+    player_tag: str
+    player_name: str
+    trophies: int
+    arena: str
+
+
+class CardCatalogEntry(BaseModel):
+    name: str
+    name_ru: str
+    icon: str = ""
+    id: int | None = None
+    elixir: int | None = None
+
+
+class CardCatalogResponse(BaseModel):
+    cards: list[CardCatalogEntry]
+
+
+class FavoriteDeckEntry(BaseModel):
+    cards: list[str]
+    deck_link: str | None = None
+
+
+class FavoritesResponse(BaseModel):
+    cards: list[dict] = []
+    decks: list[list[str]] = []
+    entries: list[FavoriteDeckEntry] = []
+
+
+class SettingsResponse(BaseModel):
+    theme: str = "dark"
+    language: str = "ru"
+    notifications: bool = True
+    telegram_notifications: bool = True
+
+
+class HomeResponse(BaseModel):
+    profile: ProfileResponse
+    battles: list[BattleSummary] = []
+    stats: StatsOverviewResponse | None = None
 
 
 class LastBattleSummary(BaseModel):

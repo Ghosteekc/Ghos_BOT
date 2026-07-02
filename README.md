@@ -1,4 +1,4 @@
-# Clash Royale Coach Bot
+# Ghosteek CR Assistant
 
 Telegram-бот + Mini App для анализа Clash Royale с подпиской. Вход по тегу игрока.
 

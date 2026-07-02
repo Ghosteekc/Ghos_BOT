@@ -1,0 +1,16 @@
+# %USERPROFILE%\.cloudflared\config.yml
+# После: cloudflared tunnel create ghosteek-cr-api
+#        cloudflared tunnel route dns ghosteek-cr-api api.example.com
+
+tunnel: TUNNEL-ID-ЗАМЕНИТЬ
+credentials-file: C:\Users\JoJo\.cloudflared\TUNNEL-ID-ЗАМЕНИТЬ.json
+
+# Обязательно на сетях, где QUIC/IPv6 не работает (как у Quick Tunnel с флагами)
+protocol: http2
+edge-ip-version: 4
+ha-connections: 1
+
+ingress:
+  - hostname: api.example.com
+    service: http://127.0.0.1:8080
+  - service: http_status:404

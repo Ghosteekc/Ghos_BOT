@@ -30,6 +30,7 @@ class User(Base):
         back_populates="user", uselist=False
     )
     preferences: Mapped[list["CardPreference"]] = relationship(back_populates="user")
+    favorite_decks: Mapped[list["FavoriteDeck"]] = relationship(back_populates="user")
 
 
 class Subscription(Base):
@@ -66,6 +67,19 @@ class BattleCache(Base):
     user_deck: Mapped[str] = mapped_column(Text)
     opponent_deck: Mapped[str] = mapped_column(Text)
     analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FavoriteDeck(Base):
+    __tablename__ = "favorite_decks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    deck_key: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped["User"] = relationship(back_populates="favorite_decks")
 
 
 engine = create_async_engine(settings.database_url, echo=False)

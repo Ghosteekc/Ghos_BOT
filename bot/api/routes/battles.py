@@ -4,52 +4,79 @@ from bot.api.deps import require_subscription
 from bot.api.schemas import BattleDetailResponse, BattleListResponse, BattleSummary, DeckStatsResponse
 from bot.models.database import User
 from bot.services.battle_service import get_cached_stats, load_and_persist
+from bot.services.battle_session_cache import set_session_battles
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_matchup_score
 
 router = APIRouter(prefix="/api/battles", tags=["battles"])
 
-_battle_cache: dict[int, list] = {}
+
+def _get_battle_cache(user: User) -> list | None:
+    from bot.services.battle_session_cache import get_session_battles
+
+    return get_session_battles(user.telegram_id)
+
+
+def _set_battle_cache(user: User, battles: list) -> None:
+    from bot.services.clash_api import normalize_tag
+
+    set_session_battles(user.telegram_id, normalize_tag(user.player_tag or ""), battles)
+
+
+def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
+    team = battle.get("team", [{}])[0]
+    opponent = battle.get("opponent", [{}])[0]
+    user_deck = [c["name"] for c in team.get("cards", [])]
+    opp_deck = [c["name"] for c in opponent.get("cards", [])]
+    won = team.get("crowns", 0) > opponent.get("crowns", 0)
+    user_stats = analyze_deck(user_deck)
+    analysis = analyze_battle(team, opponent)
+    opp_tag = opponent.get("tag", "") or ""
+    return BattleSummary(
+        index=index,
+        opponent_name=opponent.get("name", "Соперник"),
+        opponent_tag=opp_tag.replace("#", ""),
+        opponent_trophies=opponent.get("startingTrophies") or opponent.get("trophyChange") or 0,
+        won=won,
+        trophy_change=team.get("trophyChange", 0),
+        matchup_score=round(calculate_matchup_score(user_deck, opp_deck), 1),
+        duration=int(battle.get("gameDuration") or 0),
+        avg_elixir=user_stats.avg_elixir,
+        user_deck=user_deck,
+        opponent_deck=opp_deck,
+        top_reason=analysis.reasons[0] if analysis.reasons else None,
+        timestamp=str(battle.get("battleTime") or battle.get("warTime") or ""),
+    )
 
 
 @router.get("", response_model=BattleListResponse)
 async def list_battles(user: User = Depends(require_subscription)) -> BattleListResponse:
     battles = await load_and_persist(user)
     if battles is None:
-        raise HTTPException(status_code=502, detail="Failed to load battles from Clash Royale API")
+        raise HTTPException(
+            status_code=502,
+            detail="Не удалось загрузить бои. Проверьте API-ключ Clash Royale.",
+        )
 
-    _battle_cache[user.telegram_id] = battles
+    _set_battle_cache(user, battles)
 
-    summaries: list[BattleSummary] = []
-    for i, battle in enumerate(battles[:10]):
-        team = battle.get("team", [{}])[0]
-        opponent = battle.get("opponent", [{}])[0]
-        won = team.get("crowns", 0) > opponent.get("crowns", 0)
-        user_deck = [c["name"] for c in team.get("cards", [])]
-        opp_deck = [c["name"] for c in opponent.get("cards", [])]
-        summaries.append(BattleSummary(
-            index=i,
-            opponent_name=opponent.get("name", "Соперник"),
-            won=won,
-            trophy_change=team.get("trophyChange", 0),
-            matchup_score=round(calculate_matchup_score(user_deck, opp_deck), 1),
-        ))
+    summaries = [_build_battle_summary(i, battle) for i, battle in enumerate(battles[:10])]
 
     stats = await get_cached_stats(user.player_tag)
     return BattleListResponse(
         battles=summaries,
-        cached_total=stats.total if stats else None,
+        cached_total=stats.total if stats else len(battles),
         cached_winrate=stats.winrate if stats else None,
     )
 
 
 @router.get("/{index}", response_model=BattleDetailResponse)
 async def battle_detail(index: int, user: User = Depends(require_subscription)) -> BattleDetailResponse:
-    battles = _battle_cache.get(user.telegram_id)
+    battles = _get_battle_cache(user)
     if battles is None:
         battles = await load_and_persist(user)
         if battles is None:
             raise HTTPException(status_code=502, detail="Failed to load battles")
-        _battle_cache[user.telegram_id] = battles
+        _set_battle_cache(user, battles)
 
     if index < 0 or index >= len(battles):
         raise HTTPException(status_code=404, detail="Battle not found")

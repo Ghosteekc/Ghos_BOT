@@ -1,27 +1,37 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+import logging
+from collections import defaultdict
+from datetime import datetime
 
-from bot.api.deps import require_subscription
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from bot.api.deps import require_linked_player, require_subscription
 from bot.api.schemas import (
     CounterDeckResponse,
     CustomizeResponse,
+    DeckCardInfo,
+    DeckEntry,
+    DeckListResponse,
     OpponentEntry,
     RecommendationsResponse,
     StatsDeckEntry,
+    StatsOverviewResponse,
     StatsResponse,
     SynergyResponse,
     WinrateEntry,
 )
 from bot.models.database import User
 from bot.services.battle_service import get_cached_stats, load_and_persist
-from bot.services.clash_api import ClashRoyaleAPIError, normalize_tag
+from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
+from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
+from bot.services.card_data import get_card_elixir
 from bot.services.counter_engine import (
     analyze_opponent_deck_from_battles,
     build_synergy_deck,
     customize_deck_for_arena,
     suggest_counter_deck,
 )
-from bot.services.deck_analyzer import calculate_deck_winrates, get_most_played_cards
+from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates, get_most_played_cards
+from bot.services.meta_decks import META_DECKS
 
 router = APIRouter(prefix="/api", tags=["decks"])
 
@@ -33,6 +43,215 @@ async def _get_battles(user: User) -> list:
     if battles is None:
         raise HTTPException(status_code=502, detail="Failed to load battles from Clash Royale API")
     return battles
+
+
+def _stats_from_battles(battles: list, tag: str):
+    """Minimal stats object when SQLite cache is empty."""
+    from types import SimpleNamespace
+
+    tag_norm = normalize_tag(tag)
+    wins = losses = 0
+    card_counts: dict[str, int] = {}
+    for battle in battles:
+        team = battle.get("team", [{}])[0]
+        if team.get("tag") and normalize_tag(team.get("tag", "")) != tag_norm:
+            continue
+        opponent = battle.get("opponent", [{}])[0]
+        won = team.get("crowns", 0) > opponent.get("crowns", 0)
+        if won:
+            wins += 1
+        else:
+            losses += 1
+        for c in team.get("cards", []):
+            name = c.get("name")
+            if name:
+                card_counts[name] = card_counts.get(name, 0) + 1
+    total = wins + losses
+    wr = round(wins / total * 100, 1) if total else 0.0
+    top_cards = sorted(card_counts.items(), key=lambda x: x[1], reverse=True)[:6]
+    return SimpleNamespace(
+        total=total,
+        wins=wins,
+        losses=losses,
+        winrate=wr,
+        top_decks=[],
+        top_cards=top_cards,
+    )
+
+
+async def _build_meta_deck_entries(start_id: int = 1000) -> list[DeckEntry]:
+    await ensure_cards_loaded()
+    entries: list[DeckEntry] = []
+    for i, meta in enumerate(META_DECKS):
+        cards = list(meta.cards)
+        deck_link = build_deck_share_link(cards)
+        card_infos = []
+        elixirs: list[float] = []
+        for c in cards:
+            info = get_card_info(c)
+            cost = info.get("elixir") if info else get_card_elixir(c)
+            if cost:
+                elixirs.append(float(cost))
+            card_infos.append(DeckCardInfo(
+                id=c.lower().replace(" ", "-"),
+                name=c,
+                icon=info.get("icon", "") if info else "",
+                cost=int(cost or get_card_elixir(c)),
+            ))
+        avg = round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0
+        entries.append(DeckEntry(
+            id=start_id + i,
+            name=meta.name,
+            cards=card_infos,
+            winrate=0.0,
+            total_games=0,
+            avg_elixir=avg,
+            type="meta",
+            category=meta.category,
+            deck_link=deck_link,
+            description=meta.description,
+        ))
+    return entries
+
+
+async def _build_user_deck_entries(battles: list, tag: str) -> list[DeckEntry]:
+    await ensure_cards_loaded()
+    winrates = calculate_deck_winrates(battles, normalize_tag(tag))
+    decks: list[DeckEntry] = []
+    for i, (_, data) in enumerate(winrates.items()):
+        if i >= 12:
+            break
+        cards = data["cards"]
+        deck_link = build_deck_share_link(cards) if len(cards) == 8 else None
+        elixirs = [get_card_elixir(c) for c in cards]
+        avg = round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0
+        card_infos = []
+        for c in cards:
+            info = get_card_info(c)
+            card_infos.append(DeckCardInfo(
+                id=c.lower().replace(" ", "-"),
+                name=c,
+                icon=info.get("icon", "") if info else "",
+                cost=get_card_elixir(c),
+            ))
+        decks.append(DeckEntry(
+            id=i,
+            name=f"Моя колода #{i + 1}",
+            cards=card_infos,
+            winrate=data["winrate"],
+            total_games=data["total"],
+            avg_elixir=avg,
+            type="mine",
+            category="mine",
+            deck_link=deck_link,
+        ))
+    return decks
+
+
+def _build_stats_overview(stats, battles: list, max_trophies: int = 0) -> StatsOverviewResponse:
+    elixirs: list[float] = []
+    durations: list[int] = []
+    last_results: list[dict] = []
+    by_day: dict[str, dict[str, int]] = defaultdict(lambda: {"wins": 0, "losses": 0})
+
+    for battle in battles[:14]:
+        team = battle.get("team", [{}])[0]
+        opponent = battle.get("opponent", [{}])[0]
+        deck = [c["name"] for c in team.get("cards", [])]
+        if deck:
+            elixirs.append(analyze_deck(deck).avg_elixir)
+        durations.append(int(battle.get("gameDuration") or 180))
+        won = team.get("crowns", 0) > opponent.get("crowns", 0)
+        last_results.append({
+            "won": won,
+            "trophy_change": team.get("trophyChange", 0),
+        })
+
+    for battle in battles:
+        team = battle.get("team", [{}])[0]
+        opponent = battle.get("opponent", [{}])[0]
+        won = team.get("crowns", 0) > opponent.get("crowns", 0)
+        raw_time = battle.get("battleTime") or battle.get("warTime") or ""
+        day_key = raw_time[:8] if len(raw_time) >= 8 else "unknown"
+        if day_key != "unknown":
+            try:
+                day_key = datetime.strptime(day_key, "%Y%m%d").strftime("%d.%m")
+            except ValueError:
+                pass
+        if won:
+            by_day[day_key]["wins"] += 1
+        else:
+            by_day[day_key]["losses"] += 1
+
+    winrate_by_day = [
+        {"date": day, **counts}
+        for day, counts in sorted(by_day.items(), key=lambda x: x[0])
+    ][-14:]
+
+    most_used = [
+        {"name": name, "count": count, "winrate": stats.winrate}
+        for name, count in stats.top_cards
+    ]
+    archetypes = [
+        {"name": "Колоды", "value": len(stats.top_decks)},
+        {"name": "Победы", "value": stats.wins},
+        {"name": "Поражения", "value": stats.losses},
+    ]
+
+    return StatsOverviewResponse(
+        total_battles=stats.total,
+        wins=stats.wins,
+        losses=stats.losses,
+        draws=0,
+        winrate=stats.winrate,
+        avg_elixir=round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0,
+        max_trophies=max_trophies,
+        avg_time=round(sum(durations) / len(durations), 0) if durations else 0.0,
+        winrate_by_day=winrate_by_day,
+        best_cards=[{"name": c, "count": n} for c, n in stats.top_cards],
+        most_used_cards=most_used,
+        archetypes=archetypes,
+        last_results=last_results,
+    )
+
+
+@router.get("/decks", response_model=DeckListResponse)
+async def list_decks(
+    user: User = Depends(require_linked_player),
+    type: str | None = Query(None, alias="type"),
+    category: str | None = Query(None),
+) -> DeckListResponse:
+    from bot.models.database import async_session
+    from bot.services.clash_api import SubscriptionService
+
+    filter_type = (type or category or "all").lower()
+    decks: list[DeckEntry] = []
+    needs_mine = filter_type in ("all", "mine", "rated", "classic", "2v2", "tournament", "legend_path")
+
+    if filter_type in ("all", "meta", "control", "beatdown", "cycle", "bait"):
+        meta = await _build_meta_deck_entries()
+        if filter_type == "all":
+            decks.extend(meta)
+        elif filter_type == "meta":
+            decks.extend(meta)
+        else:
+            decks.extend(d for d in meta if d.category == filter_type)
+
+    if needs_mine:
+        async with async_session() as db_session:
+            sub_service = SubscriptionService(db_session)
+            if not await sub_service.has_active_subscription(user):
+                if filter_type == "all" and decks:
+                    return DeckListResponse(decks=decks)
+                raise HTTPException(
+                    status_code=402,
+                    detail="Подписка нужна для ваших колод. Мета-колоды доступны в фильтре «Мета».",
+                )
+        battles = await _get_battles(user)
+        user_decks = await _build_user_deck_entries(battles, user.player_tag or "")
+        decks.extend(user_decks)
+
+    return DeckListResponse(decks=decks)
 
 
 @router.get("/winrates", response_model=list[WinrateEntry])
@@ -140,31 +359,21 @@ async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyRes
     )
 
 
-@router.get("/stats", response_model=StatsResponse)
-async def extended_stats(user: User = Depends(require_subscription)) -> StatsResponse:
+@router.get("/stats", response_model=StatsOverviewResponse)
+async def extended_stats(user: User = Depends(require_subscription)) -> StatsOverviewResponse:
+    battles = await _get_battles(user)
     stats = await get_cached_stats(user.player_tag)
-    if stats is None:
-        battles = await _get_battles(user)
-        if not battles:
-            raise HTTPException(status_code=404, detail="No battle data")
-        stats = await get_cached_stats(user.player_tag)
-        if stats is None:
-            raise HTTPException(status_code=404, detail="No cached stats")
+    if stats is None and battles:
+        stats = _stats_from_battles(battles, user.player_tag or "")
+    if stats is None or stats.total == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="Нет данных о боях. Сыграйте несколько рейтинговых боёв и обновите страницу.",
+        )
 
-    return StatsResponse(
-        player_tag=user.player_tag,
-        total=stats.total,
-        wins=stats.wins,
-        losses=stats.losses,
-        winrate=stats.winrate,
-        top_decks=[
-            StatsDeckEntry(cards=d["cards"], total=d["total"], winrate=d["winrate"])
-            for d in stats.top_decks
-        ],
-        top_cards=[{"name": c, "count": cnt} for c, cnt in stats.top_cards],
-        win_streak=stats.win_streak,
-        loss_streak=stats.loss_streak,
-    )
+    max_trophies = user.trophies or 0
+
+    return _build_stats_overview(stats, battles, max_trophies)
 
 
 @router.get("/recommendations", response_model=RecommendationsResponse)

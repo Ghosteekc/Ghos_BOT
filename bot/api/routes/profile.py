@@ -1,16 +1,53 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.api.deps import get_current_user, get_db, get_subscription_info
-from bot.api.schemas import ProfileResponse, SubscriptionInfo
+from bot.api.schemas import HomeResponse, ProfileResponse, StatsOverviewResponse, SubscriptionInfo
 from bot.models.database import User
-from bot.services.battle_service import get_cached_stats
-from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
+from bot.api.routes.decks import _build_stats_overview, _stats_from_battles
+from bot.api.routes.battles import _build_battle_summary
+from bot.services.battle_service import get_cached_stats, load_and_persist
+from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, SubscriptionService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["profile"])
+
+
+def _profile_from_player(
+    user: User,
+    player: dict,
+    sub_info: dict,
+    winrate: float | None,
+    last_rating_change: int | None = None,
+) -> ProfileResponse:
+    arena = player.get("arena", {})
+    arena_id = arena.get("id")
+    arena_icon = (
+        f"https://royaleapi.github.io/cr-api-assets/arenas/small/{arena_id}.png"
+        if arena_id
+        else None
+    )
+    fav = player.get("currentFavouriteCard") or {}
+    clan = player.get("clan") or {}
+    fav_name = fav.get("name") if isinstance(fav, dict) else None
+
+    return ProfileResponse(
+        player_tag=user.player_tag,
+        player_name=player.get("name"),
+        trophies=player.get("trophies", 0),
+        exp_level=player.get("expLevel"),
+        arena_name=arena.get("name"),
+        arena_icon=arena_icon,
+        favorite_card=fav_name,
+        winrate=winrate,
+        max_trophies=player.get("bestTrophies") or player.get("trophies", 0),
+        clan_name=clan.get("name") if isinstance(clan, dict) else None,
+        last_rating_change=last_rating_change,
+        subscription=SubscriptionInfo(**sub_info),
+    )
 
 
 @router.get("/me", response_model=ProfileResponse)
@@ -19,6 +56,8 @@ async def get_profile(
     session: AsyncSession = Depends(get_db),
 ) -> ProfileResponse:
     sub_info = await get_subscription_info(user, session)
+    cached = await get_cached_stats(user.player_tag) if user.player_tag else None
+    winrate = cached.winrate if cached else None
 
     if not user.player_tag:
         return ProfileResponse(
@@ -31,6 +70,7 @@ async def get_profile(
         )
 
     client = ClashRoyaleClient()
+    last_rating_change: int | None = None
     try:
         player = await client.get_player(user.player_tag)
     except ClashRoyaleAPIError as e:
@@ -40,15 +80,7 @@ async def get_profile(
         await client.close()
 
     if player:
-        arena = player.get("arena", {})
-        return ProfileResponse(
-            player_tag=user.player_tag,
-            player_name=player.get("name"),
-            trophies=player.get("trophies", 0),
-            exp_level=player.get("expLevel"),
-            arena_name=arena.get("name"),
-            subscription=SubscriptionInfo(**sub_info),
-        )
+        return _profile_from_player(user, player, sub_info, winrate, last_rating_change)
 
     arena_name = None
     if user.arena_id:
@@ -67,6 +99,7 @@ async def get_profile(
         trophies=user.trophies,
         exp_level=None,
         arena_name=arena_name,
+        winrate=winrate,
         subscription=SubscriptionInfo(**sub_info),
     )
 
@@ -74,3 +107,34 @@ async def get_profile(
 @router.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@router.get("/home", response_model=HomeResponse)
+async def home_dashboard(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> HomeResponse:
+    """One round-trip for the home screen (profile + battles + stats)."""
+    profile = await get_profile(user=user, session=session)
+
+    battles: list = []
+    stats: StatsOverviewResponse | None = None
+
+    if user.player_tag:
+        sub_service = SubscriptionService(session)
+        if await sub_service.has_active_subscription(user):
+            loaded = await load_and_persist(user)
+            if loaded:
+                battles = loaded
+                cached = await get_cached_stats(user.player_tag)
+                if cached is None:
+                    cached = _stats_from_battles(loaded, user.player_tag)
+                if cached and cached.total > 0:
+                    stats = _build_stats_overview(
+                        cached,
+                        loaded,
+                        user.trophies or profile.max_trophies or 0,
+                    )
+
+    summaries = [_build_battle_summary(i, b) for i, b in enumerate(battles[:10])]
+    return HomeResponse(profile=profile, battles=summaries, stats=stats)

@@ -8,6 +8,7 @@ from bot.services.card_data import (
     get_card_elixir,
     get_card_role,
 )
+from bot.services.clash_api import normalize_tag
 
 
 @dataclass
@@ -182,13 +183,15 @@ def calculate_deck_winrates(battles: list[dict], player_tag: str) -> dict[str, d
     deck_results: dict[str, list[bool]] = {}
 
     for battle in battles:
-        if battle.get("type") not in ("PvP", "PvP_2v2", "pathOfLegend"):
+        battle_type = battle.get("type") or "PvP"
+        if battle_type in ("friendly", "clanMate", "warDay", "boatBattle", "challenge"):
             continue
 
         team = battle.get("team", [{}])[0]
         opponent = battle.get("opponent", [{}])[0]
 
-        if team.get("tag", "").upper() != player_tag.upper():
+        team_tag = team.get("tag") or ""
+        if team_tag and normalize_tag(team_tag) != normalize_tag(player_tag):
             continue
 
         deck_key = "|".join(sorted(extract_deck(team)))

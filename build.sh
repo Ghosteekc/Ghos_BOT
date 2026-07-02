@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== Building CR Coach Bot ==="
+echo "=== Building Ghosteek CR Assistant ==="
 
 echo ">> Installing Python dependencies"
 pip install -r requirements.txt

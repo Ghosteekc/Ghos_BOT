@@ -21,7 +21,7 @@ async def cmd_start(message: Message) -> None:
         user = await sub_service.get_or_create_user(message.from_user.id)
 
     text = (
-        "👑 <b>Clash Royale Coach Bot</b>\n\n"
+        "👑 <b>Ghosteek CR Assistant</b>\n\n"
         "Я помогу улучшить вашу игру с помощью анализа боёв и колод.\n\n"
         "<b>В чате:</b>\n"
         "• Привязка аккаунта по тегу\n"
@@ -73,7 +73,7 @@ async def cmd_subscribe(message: Message) -> None:
 
     trial_available = not info["trial_used"]
     await message.answer(
-        "💎 <b>Подписка Clash Royale Coach</b>\n\n"
+        "💎 <b>Подписка Ghosteek CR Assistant</b>\n\n"
         "Полный доступ ко всем функциям анализа в приложении:\n"
         "• Разбор боёв и колод\n"
         "• Контр-колоды и синергии\n"

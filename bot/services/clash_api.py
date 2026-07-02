@@ -32,6 +32,14 @@ def encode_tag(tag: str) -> str:
     return quote(normalize_tag(tag), safe="")
 
 
+def _utc_aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 class ClashRoyaleClient:
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.clash_royale_api_key
@@ -48,13 +56,19 @@ class ClashRoyaleClient:
         await self.close()
         return False
 
+    def _build_headers(self) -> dict[str, str]:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+        }
+        if settings.clash_royale_proxy_secret:
+            headers["X-CR-Proxy-Secret"] = settings.clash_royale_proxy_secret
+        return headers
+
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Accept": "application/json",
-                },
+                headers=self._build_headers(),
                 timeout=aiohttp.ClientTimeout(total=15),
             )
             logger.debug("Created new aiohttp session for Clash Royale API")
@@ -123,6 +137,13 @@ class ClashRoyaleClient:
                         raise ClashRoyaleAPIError(msg, 403, details=response_text)
 
                     logger.error(f"API 403 error for {url}: {response_text[:500]}")
+                    if reason == "accessDenied" or "Invalid authorization" in response_text:
+                        raise ClashRoyaleAPIError(
+                            "Неверный CLASH_ROYALE_API_KEY на Railway. "
+                            "Скопируйте ключ заново с developer.clashroyale.com.",
+                            403,
+                            details=response_text,
+                        )
                     raise ClashRoyaleAPIError(
                         f"Доступ запрещён (403). Проверьте API ключ.",
                         403,
@@ -268,7 +289,7 @@ class SubscriptionService:
             return False
         if not sub.is_active:
             return False
-        if sub.expires_at and sub.expires_at < datetime.now(timezone.utc):
+        if sub.expires_at and _utc_aware(sub.expires_at) < datetime.now(timezone.utc):
             sub.is_active = False
             await self.session.commit()
             return False
@@ -302,11 +323,25 @@ class SubscriptionService:
             self.session.add(sub)
 
         now = datetime.now(timezone.utc)
-        if sub.expires_at and sub.expires_at > now:
-            sub.expires_at = sub.expires_at + timedelta(days=days)
+        expires_at = _utc_aware(sub.expires_at)
+        if expires_at and expires_at > now:
+            sub.expires_at = expires_at + timedelta(days=days)
         else:
             sub.expires_at = now + timedelta(days=days)
         sub.is_active = True
+        await self.session.commit()
+
+    async def activate_unlimited_subscription(self, user: User) -> None:
+        result = await self.session.execute(
+            select(Subscription).where(Subscription.user_id == user.id)
+        )
+        sub = result.scalar_one_or_none()
+        if sub is None:
+            sub = Subscription(user_id=user.id)
+            self.session.add(sub)
+
+        sub.is_active = True
+        sub.expires_at = None
         await self.session.commit()
 
     async def get_subscription_info(self, user: User) -> dict:
@@ -317,10 +352,7 @@ class SubscriptionService:
         if sub is None or not sub.is_active:
             return {"active": False, "expires_at": None, "trial_used": False}
 
-        expires = sub.expires_at
-        if expires is not None and expires.tzinfo is None:
-            from datetime import timezone as tz
-            expires = expires.replace(tzinfo=tz.utc)
+        expires = _utc_aware(sub.expires_at)
         active = expires is None or expires > datetime.now(timezone.utc)
         return {
             "active": active,

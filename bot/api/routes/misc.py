@@ -1,0 +1,149 @@
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import delete, select
+
+from bot.api.deps import get_current_user
+from bot.api.schemas import CardCatalogResponse, FavoriteDeckEntry, FavoritesResponse, SearchResult, SettingsResponse
+from bot.models.database import BattleCache, FavoriteDeck, User, async_session
+from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_cards_catalog
+from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag, validate_tag
+
+router = APIRouter(prefix="/api", tags=["misc"])
+
+
+@router.get("/cards/catalog", response_model=CardCatalogResponse)
+async def cards_catalog(user: User = Depends(get_current_user)) -> CardCatalogResponse:
+    del user
+    items = await get_cards_catalog()
+    return CardCatalogResponse(cards=items)
+
+
+class FavoriteDeckPayload(BaseModel):
+    deck: list[str]
+
+
+@router.get("/search", response_model=list[SearchResult])
+async def search_player(
+    q: str = Query(..., min_length=3),
+    user: User = Depends(get_current_user),
+) -> list[SearchResult]:
+    del user
+    tag = normalize_tag(q.strip())
+    if not validate_tag(tag):
+        raise HTTPException(
+            status_code=400,
+            detail="Поиск только по тегу игрока, например #ABC123",
+        )
+
+    client = ClashRoyaleClient()
+    try:
+        player = await client.get_player(tag)
+    except ClashRoyaleAPIError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    finally:
+        await client.close()
+
+    arena = player.get("arena", {})
+    return [
+        SearchResult(
+            player_tag=tag.replace("#", ""),
+            player_name=player.get("name", "Игрок"),
+            trophies=player.get("trophies", 0),
+            arena=arena.get("name", "—"),
+        )
+    ]
+
+
+@router.get("/favorites", response_model=FavoritesResponse)
+async def get_favorites(user: User = Depends(get_current_user)) -> FavoritesResponse:
+    await ensure_cards_loaded()
+    async with async_session() as session:
+        res = await session.execute(
+            select(FavoriteDeck).where(FavoriteDeck.user_id == user.id).order_by(FavoriteDeck.created_at.desc())
+        )
+        rows = res.scalars().all()
+
+    decks: list[list[str]] = []
+    entries: list[FavoriteDeckEntry] = []
+    for row in rows:
+        cards = [c for c in row.deck_key.split(",") if c]
+        decks.append(cards)
+        entries.append(FavoriteDeckEntry(
+            cards=cards,
+            deck_link=build_deck_share_link(cards) if len(cards) == 8 else None,
+        ))
+    return FavoritesResponse(decks=decks, entries=entries)
+
+
+@router.post("/favorites")
+async def add_favorite_deck(
+    payload: FavoriteDeckPayload,
+    user: User = Depends(get_current_user),
+) -> dict:
+    cards = [c.strip() for c in payload.deck if c.strip()]
+    if len(cards) != 8:
+        raise HTTPException(status_code=400, detail="Колода должна содержать 8 карт")
+
+    deck_key = ",".join(cards)
+    async with async_session() as session:
+        res = await session.execute(
+            select(FavoriteDeck).where(
+                FavoriteDeck.user_id == user.id,
+                FavoriteDeck.deck_key == deck_key,
+            )
+        )
+        if res.scalar_one_or_none() is None:
+            session.add(FavoriteDeck(user_id=user.id, deck_key=deck_key))
+            await session.commit()
+    return {"ok": True}
+
+
+@router.delete("/favorites")
+async def remove_favorite_deck(
+    payload: FavoriteDeckPayload,
+    user: User = Depends(get_current_user),
+) -> dict:
+    deck_key = ",".join(c.strip() for c in payload.deck if c.strip())
+    async with async_session() as session:
+        res = await session.execute(
+            select(FavoriteDeck).where(
+                FavoriteDeck.user_id == user.id,
+                FavoriteDeck.deck_key == deck_key,
+            )
+        )
+        row = res.scalar_one_or_none()
+        if row:
+            await session.delete(row)
+            await session.commit()
+    return {"ok": True}
+
+
+@router.get("/settings", response_model=SettingsResponse)
+async def get_settings(user: User = Depends(get_current_user)) -> SettingsResponse:
+    del user
+    return SettingsResponse()
+
+
+@router.put("/settings", response_model=SettingsResponse)
+async def update_settings(
+    payload: SettingsResponse,
+    user: User = Depends(get_current_user),
+) -> SettingsResponse:
+    del user
+    return payload
+
+
+@router.post("/cache/clear")
+async def clear_cache(user: User = Depends(get_current_user)) -> dict:
+    from bot.services.battle_session_cache import clear_user
+    from bot.services.clash_api import normalize_tag
+
+    tag = normalize_tag(user.player_tag) if user.player_tag else None
+    clear_user(user.telegram_id, tag)
+
+    if user.player_tag:
+        async with async_session() as session:
+            await session.execute(delete(BattleCache).where(BattleCache.player_tag == tag))
+            await session.commit()
+
+    return {"ok": True}

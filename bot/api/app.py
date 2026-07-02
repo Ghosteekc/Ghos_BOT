@@ -5,13 +5,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from bot.api.routes import battles, decks, profile
+from bot.api.routes import battles, decks, misc, profile
 
 WEBAPP_DIST = Path(__file__).resolve().parents[2] / "webapp" / "dist"
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="CR Coach API", version="1.0.0")
+    app = FastAPI(title="Ghosteek CR Assistant API", version="1.0.0")
 
     app.add_middleware(
         CORSMiddleware,
@@ -24,6 +24,7 @@ def create_app() -> FastAPI:
     app.include_router(profile.router)
     app.include_router(battles.router)
     app.include_router(decks.router)
+    app.include_router(misc.router)
 
     if WEBAPP_DIST.exists():
         assets_dir = WEBAPP_DIST / "assets"

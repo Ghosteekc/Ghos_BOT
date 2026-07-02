@@ -10,11 +10,13 @@ class Settings(BaseSettings):
     bot_token: str
     clash_royale_api_key: str
     clash_royale_api_base: str = "https://api.clashroyale.com/v1"
+    clash_royale_proxy_secret: str | None = None
     database_url: str = "sqlite+aiosqlite:///./cr_bot.db"
-    trial_days: int = 3
+    trial_days: int = 30
     subscription_price_stars: int = 250
     sync_interval_minutes: int = 60
     admin_telegram_id: int | None = None
+    admin_telegram_ids: str = ""
     webapp_url: str = "https://your-domain.com"
     support_username: str | None = None
     api_host: str = "0.0.0.0"
@@ -22,6 +24,17 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_admin_telegram_ids() -> list[int]:
+    ids: list[int] = []
+    if settings.admin_telegram_id is not None:
+        ids.append(settings.admin_telegram_id)
+    for part in settings.admin_telegram_ids.replace(";", ",").split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.append(int(part))
+    return list(dict.fromkeys(ids))
 
 logger.info("Configuration loaded successfully")
 
@@ -36,5 +49,5 @@ logger.debug(f"Database URL: {settings.database_url}")
 logger.debug(f"Trial days: {settings.trial_days}")
 logger.debug(f"Subscription price: {settings.subscription_price_stars} stars")
 logger.debug(f"Sync interval: {settings.sync_interval_minutes} minutes")
-logger.debug(f"Admin Telegram ID: {settings.admin_telegram_id}")
+logger.debug(f"Admin Telegram IDs: {get_admin_telegram_ids()}")
 logger.debug(f"WebApp URL: {settings.webapp_url}")
