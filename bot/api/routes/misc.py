@@ -3,10 +3,11 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select
 
 from bot.api.deps import get_current_user
-from bot.api.schemas import CardCatalogResponse, FavoriteDeckEntry, FavoritesResponse, SearchResult, SettingsResponse
+from bot.api.schemas import CardCatalogResponse, FavoriteDeckEntry, FavoritesResponse, SearchResult, SettingsResponse, SyncResponse
 from bot.models.database import BattleCache, FavoriteDeck, User, async_session
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_cards_catalog
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag, validate_tag
+from bot.services.battle_service import load_and_persist
 
 router = APIRouter(prefix="/api", tags=["misc"])
 
@@ -147,3 +148,12 @@ async def clear_cache(user: User = Depends(get_current_user)) -> dict:
             await session.commit()
 
     return {"ok": True}
+
+
+@router.post("/sync", response_model=SyncResponse)
+async def sync_player_data(user: User = Depends(get_current_user)) -> SyncResponse:
+    if not user.player_tag:
+        raise HTTPException(status_code=400, detail="Сначала привяжите аккаунт в боте: /link #ТЕГ")
+
+    battles = await load_and_persist(user, force_refresh=True)
+    return SyncResponse(ok=True, battles_loaded=len(battles or []))

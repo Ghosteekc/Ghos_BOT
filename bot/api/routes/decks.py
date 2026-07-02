@@ -11,7 +11,9 @@ from bot.api.schemas import (
     DeckCardInfo,
     DeckEntry,
     DeckListResponse,
+    InsightsResponse,
     OpponentEntry,
+    RandomDeckResponse,
     RecommendationsResponse,
     StatsDeckEntry,
     StatsOverviewResponse,
@@ -32,6 +34,8 @@ from bot.services.counter_engine import (
 )
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates, get_most_played_cards
 from bot.services.meta_decks import META_DECKS
+from bot.services.random_deck import generate_random_deck
+from bot.services.battle_insights import build_insights_report
 
 router = APIRouter(prefix="/api", tags=["decks"])
 
@@ -252,6 +256,41 @@ async def list_decks(
         decks.extend(user_decks)
 
     return DeckListResponse(decks=decks)
+
+
+@router.get("/decks/random", response_model=RandomDeckResponse)
+async def random_deck(user: User = Depends(require_linked_player)) -> RandomDeckResponse:
+    del user
+    try:
+        data = await generate_random_deck()
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+    card_infos = [
+        DeckCardInfo(
+            id=c["name"].lower().replace(" ", "-"),
+            name=c["name"],
+            icon=c.get("icon", ""),
+            cost=c.get("cost", 0),
+        )
+        for c in data["card_infos"]
+    ]
+    return RandomDeckResponse(
+        cards=data["cards"],
+        card_infos=card_infos,
+        avg_elixir=data["avg_elixir"],
+        deck_link=data.get("deck_link"),
+    )
+
+
+@router.get("/insights", response_model=InsightsResponse)
+async def battle_insights(user: User = Depends(require_subscription)) -> InsightsResponse:
+    battles = await _get_battles(user)
+    if not battles:
+        raise HTTPException(status_code=404, detail="Нет боёв для анализа")
+
+    report = build_insights_report(battles, user.player_tag or "", limit=10)
+    return InsightsResponse(**report)
 
 
 @router.get("/winrates", response_model=list[WinrateEntry])

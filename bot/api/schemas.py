@@ -228,3 +228,33 @@ class RecommendationsResponse(BaseModel):
     synergy_core: list[str] = []
     synergy_deck: list[str] = []
     last_battle: LastBattleSummary | None = None
+
+
+class RandomDeckResponse(BaseModel):
+    cards: list[str]
+    card_infos: list[DeckCardInfo]
+    avg_elixir: float
+    deck_link: str | None = None
+
+
+class BattleInsightEntry(BaseModel):
+    battle_index: int
+    won: bool
+    opponent_name: str
+    summary: str
+    matchup_score: float = 0.0
+    details: list[str] = []
+    timestamp: str = ""
+
+
+class InsightsResponse(BaseModel):
+    insights: list[BattleInsightEntry]
+    patterns: list[str] = []
+    sample_size: int = 0
+    wins: int = 0
+    losses: int = 0
+
+
+class SyncResponse(BaseModel):
+    ok: bool = True
+    battles_loaded: int = 0
