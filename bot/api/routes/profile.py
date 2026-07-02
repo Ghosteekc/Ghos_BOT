@@ -16,6 +16,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["profile"])
 
 
+def _player_avatar_url(player: dict) -> tuple[str | None, str | None]:
+    """Favorite card icon as player avatar; fallback to clan badge."""
+    fav = player.get("currentFavouriteCard") or {}
+    fav_icon: str | None = None
+    if isinstance(fav, dict):
+        icons = fav.get("iconUrls") or {}
+        fav_icon = icons.get("medium") or icons.get("evolutionMedium") or icons.get("small")
+
+    clan = player.get("clan") or {}
+    badge_icon: str | None = None
+    if isinstance(clan, dict):
+        badges = clan.get("badgeUrls") or {}
+        badge_icon = badges.get("medium") or badges.get("large")
+
+    return fav_icon or badge_icon, fav_icon
+
+
 def _profile_from_player(
     user: User,
     player: dict,
@@ -33,6 +50,7 @@ def _profile_from_player(
     fav = player.get("currentFavouriteCard") or {}
     clan = player.get("clan") or {}
     fav_name = fav.get("name") if isinstance(fav, dict) else None
+    avatar_url, favorite_card_icon = _player_avatar_url(player)
 
     return ProfileResponse(
         player_tag=user.player_tag,
@@ -41,7 +59,9 @@ def _profile_from_player(
         exp_level=player.get("expLevel"),
         arena_name=arena.get("name"),
         arena_icon=arena_icon,
+        avatar_url=avatar_url,
         favorite_card=fav_name,
+        favorite_card_icon=favorite_card_icon,
         winrate=winrate,
         max_trophies=player.get("bestTrophies") or player.get("trophies", 0),
         clan_name=clan.get("name") if isinstance(clan, dict) else None,

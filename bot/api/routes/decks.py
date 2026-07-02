@@ -176,19 +176,23 @@ def _build_stats_overview(stats, battles: list, max_trophies: int = 0) -> StatsO
         opponent = battle.get("opponent", [{}])[0]
         won = team.get("crowns", 0) > opponent.get("crowns", 0)
         raw_time = battle.get("battleTime") or battle.get("warTime") or ""
-        day_key = raw_time[:8] if len(raw_time) >= 8 else "unknown"
-        if day_key != "unknown":
-            try:
-                day_key = datetime.strptime(day_key, "%Y%m%d").strftime("%d.%m")
-            except ValueError:
-                pass
+        day_key = raw_time[:8] if len(raw_time) >= 8 else ""
+        if not day_key:
+            continue
+        try:
+            datetime.strptime(day_key, "%Y%m%d")
+        except ValueError:
+            continue
         if won:
             by_day[day_key]["wins"] += 1
         else:
             by_day[day_key]["losses"] += 1
 
     winrate_by_day = [
-        {"date": day, **counts}
+        {
+            "date": datetime.strptime(day, "%Y%m%d").strftime("%d.%m"),
+            **counts,
+        }
         for day, counts in sorted(by_day.items(), key=lambda x: x[0])
     ][-14:]
 
@@ -197,7 +201,7 @@ def _build_stats_overview(stats, battles: list, max_trophies: int = 0) -> StatsO
         for name, count in stats.top_cards
     ]
     archetypes = [
-        {"name": "Колоды", "value": len(stats.top_decks)},
+        {"name": "Игры", "value": stats.total},
         {"name": "Победы", "value": stats.wins},
         {"name": "Поражения", "value": stats.losses},
     ]

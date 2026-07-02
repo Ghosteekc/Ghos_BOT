@@ -179,6 +179,7 @@ class SearchResult(BaseModel):
 class CardCatalogEntry(BaseModel):
     name: str
     name_ru: str
+    name_short: str = ""
     icon: str = ""
     id: int | None = None
     elixir: int | None = None

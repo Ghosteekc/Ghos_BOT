@@ -57,9 +57,11 @@ async def get_cards_catalog() -> list[dict]:
     cards = await ensure_cards_loaded()
     catalog = []
     for info in cards.values():
+        name = info["name"]
         catalog.append({
-            "name": info["name"],
-            "name_ru": card_name_ru(info["name"]),
+            "name": name,
+            "name_ru": card_name_ru(name),
+            "name_short": card_name_ru(name, short=True),
             "icon": info.get("icon") or "",
             "id": info.get("id"),
             "elixir": info.get("elixir"),
