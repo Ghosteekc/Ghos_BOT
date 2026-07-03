@@ -300,11 +300,26 @@ async def list_arena_decks(
     user: User = Depends(require_linked_player),
 ) -> ArenaDecksResponse:
     battles = await _get_battles(user)
+    arena_name: str | None = None
+    trophies = user.trophies or 0
+    if user.player_tag:
+        client = ClashRoyaleClient()
+        try:
+            player = await client.get_player(user.player_tag)
+            arena = player.get("arena") or {}
+            arena_name = arena.get("name")
+            trophies = int(player.get("trophies") or trophies)
+        except ClashRoyaleAPIError:
+            pass
+        finally:
+            await client.close()
+
     data = await get_arena_popular_decks(
         battles,
         user.player_tag or "",
-        user.trophies or 0,
+        trophies,
         user.arena_id,
+        arena_name=arena_name,
     )
     decks = [
         DeckEntry(
@@ -366,9 +381,10 @@ async def compare_user_deck(
 async def list_top_players(
     user: User = Depends(require_linked_player),
     limit: int = Query(30, ge=5, le=50),
+    refresh: bool = Query(False),
 ) -> TopPlayersResponse:
     del user
-    cache = await get_top_players(limit=limit)
+    cache = await get_top_players(limit=limit, force=refresh)
     players = [
         TopPlayerEntry(
             rank=p["rank"],

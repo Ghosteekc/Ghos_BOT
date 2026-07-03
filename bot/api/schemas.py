@@ -35,24 +35,21 @@ class CollectionCardEntry(BaseModel):
     rarity: str = ""
     evolution_level: int = 0
     max_evolution_level: int = 0
-    has_evo: bool = False
-    has_hero: bool = False
-    has_evo_and_hero: bool = False
+    display_mode: str = "base"
     icon: str = ""
-
-
-class CollectionEmoteEntry(BaseModel):
-    id: str
-    name: str
-    owned: bool
-    exclusive: bool = False
-    icon: str = ""
+    icon_base: str = ""
+    icon_evo: str = ""
+    icon_hero: str = ""
 
 
 class CollectionMasteryEntry(BaseModel):
     card_name: str
     card_name_ru: str
     icon: str = ""
+    icon_base: str = ""
+    icon_evo: str = ""
+    icon_hero: str = ""
+    display_mode: str = "base"
     level: int
     max_level: int
     progress: int
@@ -65,13 +62,6 @@ class PlayerCollectionResponse(BaseModel):
     cards: list[CollectionCardEntry]
     cards_owned: int
     cards_total: int
-    emotes: list[CollectionEmoteEntry]
-    emotes_owned: int
-    emotes_total: int
-    emote_collection_level: int = 0
-    emote_collection_progress: int = 0
-    emote_collection_target: int | None = None
-    emotes_api_note: str | None = None
     masteries: list[CollectionMasteryEntry]
 
 

@@ -1,4 +1,4 @@
-"""Top ladder players with current decks and recent winrate."""
+"""Top ladder players by global trophies with current decks."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from bot.config import settings
 from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed, normalize_deck_upgrades
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
-from bot.services.meta_analyzer import _current_season_id, _is_competitive_battle
+from bot.services.meta_analyzer import _is_competitive_battle
 
 logger = logging.getLogger(__name__)
 
 _refresh_lock = asyncio.Lock()
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 @dataclass
@@ -37,14 +37,11 @@ class TopPlayersCache:
 _cache = TopPlayersCache()
 
 
-async def _fetch_ranked_players(client: ClashRoyaleClient, limit: int) -> list[dict]:
-    season = _current_season_id()
+async def _fetch_global_trophy_rankings(client: ClashRoyaleClient, limit: int) -> list[dict]:
+    """Global trophy leaderboard — best players by trophies."""
     paths = [
-        f"/locations/global/pathoflegend/{season}/rankings/players?limit={limit}",
-        f"/locations/57000006/pathoflegend/players?limit={limit}",
-        f"/locations/57000249/pathoflegend/players?limit={limit}",
-        f"/locations/57000193/pathoflegend/players?limit={limit}",
-        f"/locations/57000249/rankings/players?limit={limit}",
+        f"/locations/global/rankings/players?limit={limit}",
+        f"/locations/57000006/rankings/players?limit={limit}",
     ]
     for path in paths:
         try:
@@ -52,13 +49,9 @@ async def _fetch_ranked_players(client: ClashRoyaleClient, limit: int) -> list[d
             items = data.get("items", []) if isinstance(data, dict) else []
             if items:
                 return items
-        except ClashRoyaleAPIError:
-            continue
+        except ClashRoyaleAPIError as e:
+            logger.debug("Trophy rankings unavailable at %s: %s", path, e)
     return []
-
-
-def _player_score(item: dict) -> int:
-    return int(item.get("eloRating") or item.get("trophies") or 0)
 
 
 async def _refresh_top_players(limit: int = 30) -> TopPlayersCache:
@@ -67,14 +60,17 @@ async def _refresh_top_players(limit: int = 30) -> TopPlayersCache:
     entries: list[dict] = []
 
     try:
-        ranked = await _fetch_ranked_players(client, limit)
+        ranked = await _fetch_global_trophy_rankings(client, limit)
+        ranked.sort(key=lambda x: int(x.get("rank") or 999))
         for item in ranked[:limit]:
             tag = item.get("tag") or ""
             if not tag:
                 continue
             name = item.get("name") or "Игрок"
             rank = int(item.get("rank") or len(entries) + 1)
-            score = _player_score(item)
+            trophies = int(item.get("trophies") or 0)
+            if trophies <= 0:
+                continue
             clan = item.get("clan") or {}
             clan_name = clan.get("name") or ""
 
@@ -115,7 +111,7 @@ async def _refresh_top_players(limit: int = 30) -> TopPlayersCache:
                 "rank": rank,
                 "player_tag": tag.replace("#", ""),
                 "player_name": name,
-                "trophies": score,
+                "trophies": trophies,
                 "clan_name": clan_name,
                 "winrate": wr,
                 "total_games": total,
