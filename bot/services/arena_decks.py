@@ -299,3 +299,26 @@ async def get_arena_popular_decks(
         "source": source,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+async def build_classic_meta_entries() -> tuple[list[dict], str | None, str]:
+    """Static classic meta decks only (no live ladder scan)."""
+    await ensure_cards_loaded()
+    entries: list[dict] = []
+    for i, meta in enumerate(META_DECKS):
+        cards = list(meta.cards)
+        card_infos, avg = _cards_to_infos(cards)
+        entries.append({
+            "id": 1000 + i,
+            "name": meta.name,
+            "cards": card_infos,
+            "winrate": 0.0,
+            "total_games": 0,
+            "avg_elixir": avg,
+            "type": "meta",
+            "category": meta.category,
+            "deck_link": build_deck_share_link(cards),
+            "description": meta.description,
+        })
+    updated = datetime.now(timezone.utc).isoformat()
+    return entries, updated, "classic"
