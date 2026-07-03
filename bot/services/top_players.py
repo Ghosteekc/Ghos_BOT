@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from bot.config import settings
-from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed
+from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed, normalize_deck_upgrades
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
 from bot.services.meta_analyzer import _current_season_id, _is_competitive_battle
@@ -16,14 +16,18 @@ from bot.services.meta_analyzer import _current_season_id, _is_competitive_battl
 logger = logging.getLogger(__name__)
 
 _refresh_lock = asyncio.Lock()
+CACHE_VERSION = 2
 
 
 @dataclass
 class TopPlayersCache:
     players: list[dict] = field(default_factory=list)
     updated_at: datetime | None = None
+    version: int = 0
 
     def expired(self) -> bool:
+        if self.version != CACHE_VERSION:
+            return True
         if self.updated_at is None:
             return True
         ttl = max(30, settings.meta_refresh_hours * 60)
@@ -99,6 +103,7 @@ async def _refresh_top_players(limit: int = 30) -> TopPlayersCache:
             if not deck_cards:
                 continue
 
+            deck_cards = normalize_deck_upgrades(deck_cards)
             names = [c["name"] for c in deck_cards]
             card_infos = [deck_card_info_from_parsed(c, slot=i) for i, c in enumerate(deck_cards)]
             elixirs = [c["cost"] for c in card_infos if c["cost"]]
@@ -122,7 +127,11 @@ async def _refresh_top_players(limit: int = 30) -> TopPlayersCache:
         await client.close()
 
     entries.sort(key=lambda p: p.get("rank", 999))
-    return TopPlayersCache(players=entries, updated_at=datetime.now(timezone.utc))
+    return TopPlayersCache(
+        players=entries,
+        updated_at=datetime.now(timezone.utc),
+        version=CACHE_VERSION,
+    )
 
 
 async def get_top_players(*, limit: int = 30, force: bool = False) -> TopPlayersCache:

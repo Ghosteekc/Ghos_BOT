@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from bot.config import settings
-from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed, parse_battle_card
+from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed, normalize_deck_upgrades
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
@@ -19,6 +19,7 @@ from bot.services.meta_decks import META_DECKS
 logger = logging.getLogger(__name__)
 
 _refresh_lock = asyncio.Lock()
+CACHE_VERSION = 2
 
 
 @dataclass
@@ -26,8 +27,11 @@ class MetaCache:
     decks: list[dict] = field(default_factory=list)
     updated_at: datetime | None = None
     source: str = "static"
+    version: int = 0
 
     def expired(self) -> bool:
+        if self.version != CACHE_VERSION:
+            return True
         if self.updated_at is None:
             return True
         ttl = max(1, settings.meta_refresh_hours) * 3600
@@ -108,44 +112,45 @@ def _merge_slot_variants(variants: list[list[dict]]) -> list[dict]:
     for slot, card in enumerate(base):
         evo_votes: Counter[int] = Counter()
         hero_votes = 0
-        icon_votes: Counter[str] = Counter()
         for variant in matching:
             if slot >= len(variant):
                 continue
             item = variant[slot]
             if item["name"] != card["name"]:
                 continue
-            evo_votes[int(item.get("evolution_level") or 0)] += 1
             if item.get("is_hero"):
                 hero_votes += 1
-            if item.get("icon"):
-                icon_votes[item["icon"]] += 1
-        best_evo = evo_votes.most_common(1)[0][0] if evo_votes else 0
+            else:
+                evo_votes[int(item.get("evolution_level") or 0)] += 1
         is_hero = hero_votes > len(matching) / 2
+        best_evo = 0 if is_hero else (evo_votes.most_common(1)[0][0] if evo_votes else 0)
         parsed = {
             "name": card["name"],
-            "icon": icon_votes.most_common(1)[0][0] if icon_votes else card.get("icon", ""),
+            "icon": "",
             "evolution_level": best_evo,
             "is_hero": is_hero,
             "cost": card.get("cost") or get_card_elixir(card["name"]),
             "slot": slot,
         }
-        if not parsed["icon"]:
-            reg = get_card_info(card["name"]) or {}
-            icons = {
-                "medium": reg.get("icon") or "",
-                "evolutionMedium": reg.get("evolution_icon") or "",
-                "heroMedium": reg.get("hero_icon") or "",
-            }
-            from bot.services.card_icons import pick_icon_urls
+        reg = get_card_info(card["name"]) or {}
+        icons = {
+            "medium": reg.get("icon") or "",
+            "evolutionMedium": reg.get("evolution_icon") or "",
+            "heroMedium": reg.get("hero_icon") or "",
+        }
+        from bot.services.card_icons import pick_icon_urls
 
-            parsed["icon"] = pick_icon_urls(
-                icons,
-                evolution_level=parsed["evolution_level"],
-                hero_level=1 if is_hero else 0,
-            )
+        if is_hero:
+            parsed["evolution_level"] = 0
+        parsed["icon"] = pick_icon_urls(
+            icons,
+            evolution_level=parsed["evolution_level"],
+            hero_level=1 if is_hero else 0,
+        )
+        if parsed["evolution_level"] < 1 and not is_hero:
+            parsed["icon"] = icons["medium"] or parsed["icon"]
         merged.append(parsed)
-    return merged
+    return normalize_deck_upgrades(merged)
 
 
 async def _collect_player_tags(client: ClashRoyaleClient) -> tuple[list[dict], str]:
@@ -255,7 +260,12 @@ async def _refresh_meta() -> MetaCache:
                 "description": f"Встречается у топов: {usage} боёв · WR {wr:.0f}%",
             })
         if entries:
-            return MetaCache(decks=entries, updated_at=datetime.now(timezone.utc), source=source)
+            return MetaCache(
+                decks=entries,
+                updated_at=datetime.now(timezone.utc),
+                source=source,
+                version=CACHE_VERSION,
+            )
 
     # Fallback: enriched static list
     static_entries: list[dict] = []
@@ -289,7 +299,12 @@ async def _refresh_meta() -> MetaCache:
             "deck_link": build_deck_share_link(cards),
             "description": meta.description,
         })
-    return MetaCache(decks=static_entries, updated_at=datetime.now(timezone.utc), source="static")
+    return MetaCache(
+        decks=static_entries,
+        updated_at=datetime.now(timezone.utc),
+        source="static",
+        version=CACHE_VERSION,
+    )
 
 
 async def get_live_meta_decks(*, force: bool = False) -> MetaCache:

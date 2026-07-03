@@ -64,7 +64,7 @@ CARD_NAMES_RU: dict[str, str] = {
     "Royal Hogs": "Кабаны",
     "Goblin Giant": "Гоблин-Гигант",
     "Fisherman": "Рыбак",
-    "Magic Archer": "Маг-Лучник",
+    "Magic Archer": "Лучник",
     "Electro Dragon": "Электродракон",
     "Firecracker": "Ракетчица",
     "Mighty Miner": "Шахтёр",
