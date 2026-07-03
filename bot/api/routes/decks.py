@@ -19,6 +19,8 @@ from bot.api.schemas import (
     StatsOverviewResponse,
     StatsResponse,
     SynergyResponse,
+    TopPlayerEntry,
+    TopPlayersResponse,
     WinrateEntry,
 )
 from bot.models.database import User
@@ -33,7 +35,8 @@ from bot.services.counter_engine import (
     suggest_counter_deck,
 )
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates, get_most_played_cards
-from bot.services.meta_decks import META_DECKS
+from bot.services.meta_analyzer import get_live_meta_decks
+from bot.services.top_players import get_top_players
 from bot.services.random_deck import generate_random_deck
 from bot.services.battle_insights import build_insights_report
 
@@ -83,39 +86,36 @@ def _stats_from_battles(battles: list, tag: str):
     )
 
 
-async def _build_meta_deck_entries(start_id: int = 1000) -> list[DeckEntry]:
-    await ensure_cards_loaded()
+async def _build_meta_deck_entries() -> tuple[list[DeckEntry], str | None, str | None]:
+    cache = await get_live_meta_decks()
     entries: list[DeckEntry] = []
-    for i, meta in enumerate(META_DECKS):
-        cards = list(meta.cards)
-        deck_link = build_deck_share_link(cards)
-        card_infos = []
-        elixirs: list[float] = []
-        for c in cards:
-            info = get_card_info(c)
-            cost = info.get("elixir") if info else get_card_elixir(c)
-            if cost:
-                elixirs.append(float(cost))
-            card_infos.append(DeckCardInfo(
-                id=c.lower().replace(" ", "-"),
-                name=c,
-                icon=info.get("icon", "") if info else "",
-                cost=int(cost or get_card_elixir(c)),
-            ))
-        avg = round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0
+    for item in cache.decks:
+        cards = [
+            DeckCardInfo(
+                id=c["id"],
+                name=c["name"],
+                icon=c.get("icon", ""),
+                cost=c.get("cost", 0),
+                evolution_level=c.get("evolution_level", 0),
+                is_hero=c.get("is_hero", False),
+                slot=c.get("slot", 0),
+            )
+            for c in item["cards"]
+        ]
         entries.append(DeckEntry(
-            id=start_id + i,
-            name=meta.name,
-            cards=card_infos,
-            winrate=0.0,
-            total_games=0,
-            avg_elixir=avg,
+            id=item["id"],
+            name=item["name"],
+            cards=cards,
+            winrate=item.get("winrate", 0.0),
+            total_games=item.get("total_games", 0),
+            avg_elixir=item.get("avg_elixir", 0.0),
             type="meta",
-            category=meta.category,
-            deck_link=deck_link,
-            description=meta.description,
+            category=item.get("category", "meta"),
+            deck_link=item.get("deck_link"),
+            description=item.get("description", ""),
         ))
-    return entries
+    updated = cache.updated_at.isoformat() if cache.updated_at else None
+    return entries, updated, cache.source
 
 
 async def _build_user_deck_entries(battles: list, tag: str) -> list[DeckEntry]:
@@ -234,10 +234,12 @@ async def list_decks(
 
     filter_type = (type or category or "all").lower()
     decks: list[DeckEntry] = []
+    meta_updated_at: str | None = None
+    meta_source: str | None = None
     needs_mine = filter_type in ("all", "mine", "rated", "classic", "2v2", "tournament", "legend_path")
 
     if filter_type in ("all", "meta", "control", "beatdown", "cycle", "bait"):
-        meta = await _build_meta_deck_entries()
+        meta, meta_updated_at, meta_source = await _build_meta_deck_entries()
         if filter_type == "all":
             decks.extend(meta)
         elif filter_type == "meta":
@@ -250,7 +252,11 @@ async def list_decks(
             sub_service = SubscriptionService(db_session)
             if not await sub_service.has_active_subscription(user):
                 if filter_type == "all" and decks:
-                    return DeckListResponse(decks=decks)
+                    return DeckListResponse(
+                        decks=decks,
+                        meta_updated_at=meta_updated_at,
+                        meta_source=meta_source,
+                    )
                 raise HTTPException(
                     status_code=402,
                     detail="Подписка нужна для ваших колод. Мета-колоды доступны в фильтре «Мета».",
@@ -259,7 +265,37 @@ async def list_decks(
         user_decks = await _build_user_deck_entries(battles, user.player_tag or "")
         decks.extend(user_decks)
 
-    return DeckListResponse(decks=decks)
+    return DeckListResponse(
+        decks=decks,
+        meta_updated_at=meta_updated_at,
+        meta_source=meta_source,
+    )
+
+
+@router.get("/decks/top-players", response_model=TopPlayersResponse)
+async def list_top_players(
+    user: User = Depends(require_linked_player),
+    limit: int = Query(30, ge=5, le=50),
+) -> TopPlayersResponse:
+    del user
+    cache = await get_top_players(limit=limit)
+    players = [
+        TopPlayerEntry(
+            rank=p["rank"],
+            player_tag=p["player_tag"],
+            player_name=p["player_name"],
+            trophies=p.get("trophies", 0),
+            clan_name=p.get("clan_name", ""),
+            winrate=p.get("winrate", 0.0),
+            total_games=p.get("total_games", 0),
+            avg_elixir=p.get("avg_elixir", 0.0),
+            cards=[DeckCardInfo(**c) for c in p.get("cards", [])],
+            deck_link=p.get("deck_link"),
+        )
+        for p in cache.players
+    ]
+    updated = cache.updated_at.isoformat() if cache.updated_at else None
+    return TopPlayersResponse(players=players, updated_at=updated)
 
 
 @router.get("/decks/random", response_model=RandomDeckResponse)

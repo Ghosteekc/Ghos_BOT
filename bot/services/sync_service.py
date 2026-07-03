@@ -101,6 +101,8 @@ async def run_periodic(stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         try:
             await sync_all_once()
+            from bot.services.meta_analyzer import refresh_meta_background
+            await refresh_meta_background()
         except Exception:
             logger.exception("Unhandled error during battle sync")
 

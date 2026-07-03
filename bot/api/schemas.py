@@ -148,6 +148,9 @@ class DeckCardInfo(BaseModel):
     icon: str = ""
     rarity: str = "common"
     cost: int = 0
+    evolution_level: int = 0
+    is_hero: bool = False
+    slot: int = 0
 
 
 class DeckEntry(BaseModel):
@@ -167,6 +170,26 @@ class DeckEntry(BaseModel):
 
 class DeckListResponse(BaseModel):
     decks: list[DeckEntry]
+    meta_updated_at: str | None = None
+    meta_source: str | None = None
+
+
+class TopPlayerEntry(BaseModel):
+    rank: int
+    player_tag: str
+    player_name: str
+    trophies: int = 0
+    clan_name: str = ""
+    winrate: float = 0.0
+    total_games: int = 0
+    avg_elixir: float = 0.0
+    cards: list[DeckCardInfo] = []
+    deck_link: str | None = None
+
+
+class TopPlayersResponse(BaseModel):
+    players: list[TopPlayerEntry]
+    updated_at: str | None = None
 
 
 class SearchResult(BaseModel):

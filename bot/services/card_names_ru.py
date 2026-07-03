@@ -111,6 +111,18 @@ CARD_NAMES_RU: dict[str, str] = {
     "Furnace": "Печь",
     "Goblin Cage": "Клетка",
     "Goblin Drill": "Бур",
+    "Goblin Demolisher": "Подрывник",
+    "Goblin Machine": "Гоб-Машина",
+    "Goblinstein": "Гоблинштейн",
+    "Goblin Curse": "Проклятие",
+    "Berserker": "Берсерк",
+    "Boss Bandit": "Гл-Бандитка",
+    "Rune Giant": "РунГиг",
+    "Spirit Empress": "Императрица",
+    "Suspicious Bush": "Куст",
+    "Vines": "Лоза",
+    "Void": "Бездна",
+    "Rage": "Ярость",
 }
 
 # Короткие подписи под картинкой (чтобы не налезали)
@@ -169,6 +181,18 @@ CARD_NAMES_SHORT: dict[str, str] = {
     "Mighty Miner": "Шахтёр",
     "Little Prince": "Мал-Принц",
     "Baby Dragon": "Дракончик",
+    "Goblin Demolisher": "Подрывник",
+    "Goblin Machine": "Гоб-Машина",
+    "Goblinstein": "Гоблинштейн",
+    "Goblin Curse": "Проклятие",
+    "Berserker": "Берсерк",
+    "Boss Bandit": "Гл-Бандитка",
+    "Rune Giant": "РунГиг",
+    "Spirit Empress": "Императрица",
+    "Suspicious Bush": "Куст",
+    "Vines": "Лоза",
+    "Void": "Бездна",
+    "Rage": "Ярость",
 }
 
 

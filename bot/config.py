@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     webapp_url: str = "https://your-domain.com"
     support_username: str | None = None
     api_host: str = "0.0.0.0"
-    api_port: int = 8080
+    meta_refresh_hours: int = 6
+    meta_top_players_scan: int = 20
+    meta_seed_tags: str = ""
 
 
 settings = Settings()

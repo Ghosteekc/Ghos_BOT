@@ -38,6 +38,9 @@ async def ensure_cards_loaded() -> dict[str, dict]:
             "name": name,
             "id": item.get("id"),
             "icon": icons.get("medium") or icons.get("small") or "",
+            "evolution_icon": icons.get("evolutionMedium") or "",
+            "hero_icon": icons.get("heroMedium") or "",
+            "max_evolution_level": int(item.get("maxEvolutionLevel") or 0),
             "elixir": item.get("elixirCost"),
         }
     _cards_by_name = result

@@ -110,6 +110,18 @@ CARD_META: dict[str, dict] = {
     "Furnace": {"elixir": 4, "type": "building", "role": "building"},
     "Goblin Cage": {"elixir": 4, "type": "building", "role": "building"},
     "Goblin Drill": {"elixir": 4, "type": "building", "role": "win_condition"},
+    "Goblin Demolisher": {"elixir": 4, "type": "troop", "role": "splash"},
+    "Goblin Machine": {"elixir": 5, "type": "troop", "role": "win_condition"},
+    "Goblinstein": {"elixir": 5, "type": "troop", "role": "tank"},
+    "Goblin Curse": {"elixir": 2, "type": "spell", "role": "spell"},
+    "Berserker": {"elixir": 2, "type": "troop", "role": "support"},
+    "Boss Bandit": {"elixir": 6, "type": "troop", "role": "win_condition"},
+    "Rune Giant": {"elixir": 4, "type": "troop", "role": "win_condition"},
+    "Spirit Empress": {"elixir": 6, "type": "troop", "role": "support"},
+    "Suspicious Bush": {"elixir": 2, "type": "troop", "role": "support"},
+    "Vines": {"elixir": 3, "type": "spell", "role": "spell"},
+    "Void": {"elixir": 3, "type": "spell", "role": "spell"},
+    "Rage": {"elixir": 2, "type": "spell", "role": "spell"},
 }
 
 COUNTERS: dict[str, list[str]] = {
