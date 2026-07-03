@@ -6,7 +6,7 @@ import random
 
 from bot.services.card_data import CARD_META, get_card_elixir
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
-from bot.services.rofl_decks import ROFL_DECKS
+from bot.services.rofl_decks import ROFL_DECKS, RoflDeck
 
 MAX_ATTEMPTS = 400
 TARGET_AVG_MIN = 3.0
@@ -14,8 +14,16 @@ TARGET_AVG_MAX = 4.4
 
 RANDOM_DECK_BLOCKLIST = frozenset({"Zombie"})
 
+_valid_rofl_cache: list[tuple[RoflDeck, list[str]]] | None = None
 
-def _pack_deck(cards: list[str], *, rofl_name: str | None = None, rofl_tagline: str | None = None) -> dict:
+
+def _pack_deck(
+    cards: list[str],
+    *,
+    rofl_name: str | None = None,
+    rofl_tagline: str | None = None,
+    rofl_key: str | None = None,
+) -> dict:
     elixirs = [get_card_elixir(c) for c in cards]
     avg = sum(elixirs) / len(elixirs)
     card_infos = []
@@ -34,6 +42,7 @@ def _pack_deck(cards: list[str], *, rofl_name: str | None = None, rofl_tagline: 
         "rofl": rofl_name is not None,
         "rofl_name": rofl_name,
         "rofl_tagline": rofl_tagline,
+        "rofl_key": rofl_key,
     }
 
 
@@ -66,19 +75,39 @@ async def _rofl_cards_valid(cards: tuple[str, ...]) -> list[str] | None:
     return resolved
 
 
-async def generate_rofl_deck() -> dict:
-    shuffled = list(ROFL_DECKS)
-    random.shuffle(shuffled)
-    for preset in shuffled:
-        cards = await _rofl_cards_valid(preset.cards)
-        if cards:
-            return _pack_deck(cards, rofl_name=preset.name, rofl_tagline=preset.tagline)
-    raise ValueError("Не удалось собрать рофл-колоду")
+async def _valid_rofl_presets() -> list[tuple[RoflDeck, list[str]]]:
+    global _valid_rofl_cache
+    if _valid_rofl_cache is None:
+        presets: list[tuple[RoflDeck, list[str]]] = []
+        for preset in ROFL_DECKS:
+            cards = await _rofl_cards_valid(preset.cards)
+            if cards:
+                presets.append((preset, cards))
+        _valid_rofl_cache = presets
+    return _valid_rofl_cache
 
 
-async def generate_random_deck(*, rofl: bool = False) -> dict:
+async def generate_rofl_deck(*, exclude_key: str | None = None) -> dict:
+    valid = await _valid_rofl_presets()
+    if not valid:
+        raise ValueError("Не удалось собрать рофл-колоду")
+
+    pool = [(preset, cards) for preset, cards in valid if preset.key != exclude_key]
+    if len(pool) < 2:
+        pool = valid
+
+    preset, cards = random.choice(pool)
+    return _pack_deck(
+        cards,
+        rofl_name=preset.name,
+        rofl_tagline=preset.tagline,
+        rofl_key=preset.key,
+    )
+
+
+async def generate_random_deck(*, rofl: bool = False, exclude_key: str | None = None) -> dict:
     if rofl:
-        return await generate_rofl_deck()
+        return await generate_rofl_deck(exclude_key=exclude_key)
 
     pool = await _playable_pool()
     if len(pool) < 8:

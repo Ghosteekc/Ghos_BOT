@@ -27,7 +27,7 @@ from bot.api.schemas import (
     WinrateEntry,
 )
 from bot.models.database import User
-from bot.services.battle_service import get_cached_stats, load_and_persist
+from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.card_data import get_card_elixir
@@ -187,7 +187,7 @@ def _build_stats_overview(stats, battles: list, max_trophies: int = 0) -> StatsO
     last_results: list[dict] = []
     by_day: dict[str, dict[str, int]] = defaultdict(lambda: {"wins": 0, "losses": 0})
 
-    for battle in battles[:14]:
+    for battle in battles[:BATTLE_LOG_LIMIT]:
         team = battle.get("team", [{}])[0]
         opponent = battle.get("opponent", [{}])[0]
         deck = [c["name"] for c in team.get("cards", [])]
@@ -408,10 +408,11 @@ async def list_top_players(
 async def random_deck(
     user: User = Depends(require_linked_player),
     rofl: bool = Query(False),
+    exclude_key: str | None = Query(None, max_length=64),
 ) -> RandomDeckResponse:
     del user
     try:
-        data = await generate_random_deck(rofl=rofl)
+        data = await generate_random_deck(rofl=rofl, exclude_key=exclude_key)
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
 
@@ -432,6 +433,7 @@ async def random_deck(
         rofl=data.get("rofl", False),
         rofl_name=data.get("rofl_name"),
         rofl_tagline=data.get("rofl_tagline"),
+        rofl_key=data.get("rofl_key"),
     )
 
 
@@ -441,7 +443,7 @@ async def battle_insights(user: User = Depends(require_subscription)) -> Insight
     if not battles:
         raise HTTPException(status_code=404, detail="Нет боёв для анализа")
 
-    report = build_insights_report(battles, user.player_tag or "", limit=10)
+    report = build_insights_report(battles, user.player_tag or "", limit=BATTLE_LOG_LIMIT)
     return InsightsResponse(**report)
 
 

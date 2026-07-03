@@ -8,7 +8,7 @@ from bot.api.schemas import HomeResponse, PlayerCollectionResponse, ProfileRespo
 from bot.models.database import User
 from bot.api.routes.decks import _build_stats_overview, _stats_from_battles
 from bot.api.routes.battles import _build_battle_summary
-from bot.services.battle_service import get_cached_stats, load_and_persist
+from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 from bot.services.player_collection import build_player_collection
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, SubscriptionService
 
@@ -173,5 +173,5 @@ async def home_dashboard(
                         user.trophies or profile.max_trophies or 0,
                     )
 
-    summaries = [_build_battle_summary(i, b) for i, b in enumerate(battles[:10])]
+    summaries = [_build_battle_summary(i, b) for i, b in enumerate(battles[:BATTLE_LOG_LIMIT])]
     return HomeResponse(profile=profile, battles=summaries, stats=stats)

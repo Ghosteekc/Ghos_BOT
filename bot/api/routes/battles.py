@@ -3,8 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from bot.api.deps import require_subscription
 from bot.api.schemas import BattleDetailResponse, BattleListResponse, BattleSummary, DeckStatsResponse
 from bot.models.database import User
-from bot.services.battle_service import get_cached_stats, load_and_persist
+from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 from bot.services.battle_session_cache import set_session_battles
+from bot.services.battle_time import format_battle_played_at
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_matchup_score
 
 router = APIRouter(prefix="/api/battles", tags=["battles"])
@@ -31,6 +32,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
     user_stats = analyze_deck(user_deck)
     analysis = analyze_battle(team, opponent)
     opp_tag = opponent.get("tag", "") or ""
+    raw_time = str(battle.get("battleTime") or battle.get("warTime") or "")
     return BattleSummary(
         index=index,
         opponent_name=opponent.get("name", "Соперник"),
@@ -44,7 +46,8 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         user_deck=user_deck,
         opponent_deck=opp_deck,
         top_reason=analysis.reasons[0] if analysis.reasons else None,
-        timestamp=str(battle.get("battleTime") or battle.get("warTime") or ""),
+        timestamp=raw_time,
+        played_at=format_battle_played_at(raw_time),
     )
 
 
@@ -59,7 +62,7 @@ async def list_battles(user: User = Depends(require_subscription)) -> BattleList
 
     _set_battle_cache(user, battles)
 
-    summaries = [_build_battle_summary(i, battle) for i, battle in enumerate(battles[:10])]
+    summaries = [_build_battle_summary(i, battle) for i, battle in enumerate(battles[:BATTLE_LOG_LIMIT])]
 
     stats = await get_cached_stats(user.player_tag)
     return BattleListResponse(
@@ -101,6 +104,10 @@ async def battle_detail(index: int, user: User = Depends(require_subscription)) 
         opponent_name=analysis.opponent_name,
         trophy_change=analysis.trophy_change,
         matchup_score=analysis.matchup_score,
+        duration=int(battle.get("gameDuration") or 0),
+        played_at=format_battle_played_at(
+            str(battle.get("battleTime") or battle.get("warTime") or "")
+        ),
         user_deck=analysis.user_deck,
         opponent_deck=analysis.opponent_deck,
         user_stats=_stats(user_stats),

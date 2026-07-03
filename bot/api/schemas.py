@@ -79,6 +79,7 @@ class BattleSummary(BaseModel):
     opponent_deck: list[str] = []
     top_reason: str | None = None
     timestamp: str = ""
+    played_at: str = ""
 
 
 class BattleListResponse(BaseModel):
@@ -99,6 +100,8 @@ class BattleDetailResponse(BaseModel):
     opponent_name: str
     trophy_change: int
     matchup_score: float
+    duration: int = 0
+    played_at: str = ""
     user_deck: list[str]
     opponent_deck: list[str]
     user_stats: DeckStatsResponse
@@ -325,6 +328,7 @@ class RandomDeckResponse(BaseModel):
     rofl: bool = False
     rofl_name: str | None = None
     rofl_tagline: str | None = None
+    rofl_key: str | None = None
 
 
 class BattleInsightEntry(BaseModel):

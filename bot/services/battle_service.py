@@ -9,6 +9,9 @@ from bot.services.deck_analyzer import analyze_battle
 
 logger = logging.getLogger(__name__)
 
+# Clash Royale battle log API returns up to 25 recent battles.
+BATTLE_LOG_LIMIT = 25
+
 
 def filter_pvp_battles(battles: list, player_tag: str) -> list:
     tag = normalize_tag(player_tag)

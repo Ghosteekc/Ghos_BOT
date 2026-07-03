@@ -155,5 +155,14 @@ async def sync_player_data(user: User = Depends(get_current_user)) -> SyncRespon
     if not user.player_tag:
         raise HTTPException(status_code=400, detail="Сначала привяжите аккаунт в боте: /link #ТЕГ")
 
+    from bot.services.battle_session_cache import clear_user, set_session_battles
+    from bot.services.clash_api import normalize_tag
+
+    tag = normalize_tag(user.player_tag)
+    clear_user(user.telegram_id, tag)
+
     battles = await load_and_persist(user, force_refresh=True)
+    if battles:
+        set_session_battles(user.telegram_id, tag, battles)
+
     return SyncResponse(ok=True, battles_loaded=len(battles or []))
