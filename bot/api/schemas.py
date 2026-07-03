@@ -25,6 +25,56 @@ class ProfileResponse(BaseModel):
     subscription: SubscriptionInfo
 
 
+class CollectionCardEntry(BaseModel):
+    name: str
+    name_ru: str
+    owned: bool
+    level: int | None = None
+    max_level: int | None = None
+    count: int = 0
+    rarity: str = ""
+    evolution_level: int = 0
+    max_evolution_level: int = 0
+    has_evo: bool = False
+    has_hero: bool = False
+    has_evo_and_hero: bool = False
+    icon: str = ""
+
+
+class CollectionEmoteEntry(BaseModel):
+    id: str
+    name: str
+    owned: bool
+    exclusive: bool = False
+    icon: str = ""
+
+
+class CollectionMasteryEntry(BaseModel):
+    card_name: str
+    card_name_ru: str
+    icon: str = ""
+    level: int
+    max_level: int
+    progress: int
+    target: int | None = None
+    progress_percent: float = 0.0
+    next_hint: str = ""
+
+
+class PlayerCollectionResponse(BaseModel):
+    cards: list[CollectionCardEntry]
+    cards_owned: int
+    cards_total: int
+    emotes: list[CollectionEmoteEntry]
+    emotes_owned: int
+    emotes_total: int
+    emote_collection_level: int = 0
+    emote_collection_progress: int = 0
+    emote_collection_target: int | None = None
+    emotes_api_note: str | None = None
+    masteries: list[CollectionMasteryEntry]
+
+
 class BattleSummary(BaseModel):
     index: int
     opponent_name: str
@@ -190,6 +240,29 @@ class TopPlayerEntry(BaseModel):
 class TopPlayersResponse(BaseModel):
     players: list[TopPlayerEntry]
     updated_at: str | None = None
+
+
+class ArenaDecksResponse(BaseModel):
+    arena_name: str
+    arena_id: int | None = None
+    trophies: int = 0
+    decks: list[DeckEntry]
+    source: str = "curated"
+    updated_at: str | None = None
+
+
+class DeckCompareRequest(BaseModel):
+    reference_cards: list[str]
+
+
+class DeckCompareResponse(BaseModel):
+    reference_name: str = ""
+    user_deck: list[DeckCardInfo]
+    reference_deck: list[DeckCardInfo]
+    user_better: list[str]
+    user_worse: list[str]
+    reference_better: list[str]
+    reference_worse: list[str]
 
 
 class SearchResult(BaseModel):

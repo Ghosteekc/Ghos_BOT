@@ -1,7 +1,15 @@
-# Стабильный запуск localtunnel к боту на :8080
-# Запускайте в ОТДЕЛЬНОМ окне PowerShell (Win+R -> powershell), не закрывайте окно.
+# Стабильный localtunnel к боту на :8080
+# Запускайте в ОТДЕЛЬНОМ окне Windows PowerShell — НЕ в терминале Cursor.
+#
+# Примеры:
+#   .\start-tunnel.ps1
+#   .\start-tunnel.ps1 -Subdomain ghosteekcr   # тот же URL после перезапуска (если имя свободно)
 
-$Port = 8080
+param(
+    [int]$Port = 8080,
+    [string]$Subdomain = ""
+)
+
 $Root = (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent)
 $UrlFile = Join-Path $PSScriptRoot "tunnel-url.txt"
 
@@ -24,7 +32,18 @@ function Stop-ExistingTunnels {
     Start-Sleep -Seconds 1
 }
 
+function Save-TunnelUrl {
+    param([string]$Url)
+    if (-not $Url) { return }
+    Set-Content -Path $UrlFile -Value $Url -Encoding UTF8
+    Write-Host ""
+    Write-Host ">>> URL: $Url <<<" -ForegroundColor Green
+    Write-Host "Сохранено в: $UrlFile" -ForegroundColor DarkGray
+    Write-Host "Vercel -> VITE_API_URL -> Redeploy (только если URL изменился)`n" -ForegroundColor Yellow
+}
+
 Write-Host "=== Ghosteek localtunnel ===" -ForegroundColor Cyan
+Write-Host "Не закрывайте это окно. Cursor убивает фоновые npx при завершении сессии.`n" -ForegroundColor DarkGray
 
 if (-not (Test-Backend)) {
     Write-Host "Backend не отвечает на :$Port. Сначала: cd `"$Root`"; python -m bot.main" -ForegroundColor Red
@@ -33,8 +52,13 @@ if (-not (Test-Backend)) {
 
 Stop-ExistingTunnels
 
-Write-Host "Backend OK. Туннель перезапускается автоматически при падении." -ForegroundColor Green
-Write-Host "URL -> Vercel VITE_API_URL -> Redeploy`n" -ForegroundColor Yellow
+$ltArgs = @("--yes", "localtunnel", "--port", "$Port")
+if ($Subdomain) {
+    $ltArgs += @("--subdomain", $Subdomain)
+    Write-Host "Запрошен subdomain: $Subdomain (URL стабильнее между перезапусками)" -ForegroundColor Cyan
+}
+
+Write-Host "Backend OK. Автоперезапуск при обрыве loca.lt.`n" -ForegroundColor Green
 
 $attempt = 0
 while ($true) {
@@ -47,36 +71,22 @@ while ($true) {
         continue
     }
 
-    # npx блокирует окно, пока туннель жив; при выходе — цикл перезапустит
-    $job = Start-Job -ScriptBlock {
-        param($Root, $Port)
-        Set-Location $Root
-        npx --yes localtunnel --port $Port 2>&1
-    } -ArgumentList $Root, $Port
+    Set-Location $Root
+    $savedUrl = $false
 
-    $url = $null
-    $deadline = (Get-Date).AddSeconds(60)
-    while ((Get-Date) -lt $deadline) {
-        $lines = Receive-Job $job -ErrorAction SilentlyContinue
-        foreach ($line in $lines) {
-            Write-Host $line
-            if ($line -match "(https://[\w-]+\.loca\.lt)") {
-                $url = $Matches[1]
+    # npx в foreground: пока процесс жив — туннель работает; при exit — цикл перезапустит
+    & npx @ltArgs 2>&1 | ForEach-Object {
+        $line = "$_"
+        Write-Host $line
+        if ($line -match "(https://[\w-]+\.loca\.lt)") {
+            if (-not $savedUrl) {
+                Save-TunnelUrl -Url $Matches[1]
+                $savedUrl = $true
             }
         }
-        if ($url) {
-            Set-Content -Path $using:UrlFile -Value $url -Encoding UTF8
-            Write-Host "`n>>> URL: $url <<<`n" -ForegroundColor Green
-            Write-Host "Скопируйте в Vercel -> Environment Variables -> VITE_API_URL -> Redeploy`n" -ForegroundColor Yellow
-            break
-        }
-        if ($job.State -eq "Completed" -or $job.State -eq "Failed") { break }
-        Start-Sleep -Milliseconds 400
     }
 
-    Wait-Job $job | Out-Null
-    Remove-Job $job -Force -ErrorAction SilentlyContinue
-
-    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Туннель упал. Перезапуск через 5 сек...`n" -ForegroundColor Yellow
+    $exitCode = $LASTEXITCODE
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Туннель завершился (код $exitCode). Перезапуск через 5 сек...`n" -ForegroundColor Yellow
     Start-Sleep -Seconds 5
 }

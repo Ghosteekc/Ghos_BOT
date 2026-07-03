@@ -6,9 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from bot.api.deps import require_linked_player, require_subscription
 from bot.api.schemas import (
+    ArenaDecksResponse,
     CounterDeckResponse,
     CustomizeResponse,
     DeckCardInfo,
+    DeckCompareRequest,
+    DeckCompareResponse,
     DeckEntry,
     DeckListResponse,
     InsightsResponse,
@@ -35,7 +38,8 @@ from bot.services.counter_engine import (
     suggest_counter_deck,
 )
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates, get_most_played_cards
-from bot.services.meta_analyzer import get_live_meta_decks
+from bot.services.arena_decks import build_classic_meta_entries, get_arena_popular_decks
+from bot.services.deck_compare import compare_decks
 from bot.services.top_players import get_top_players
 from bot.services.random_deck import generate_random_deck
 from bot.services.battle_insights import build_insights_report
@@ -87,9 +91,9 @@ def _stats_from_battles(battles: list, tag: str):
 
 
 async def _build_meta_deck_entries() -> tuple[list[DeckEntry], str | None, str | None]:
-    cache = await get_live_meta_decks()
+    items, updated, source = await build_classic_meta_entries()
     entries: list[DeckEntry] = []
-    for item in cache.decks:
+    for item in items:
         cards = [
             DeckCardInfo(
                 id=c["id"],
@@ -114,8 +118,33 @@ async def _build_meta_deck_entries() -> tuple[list[DeckEntry], str | None, str |
             deck_link=item.get("deck_link"),
             description=item.get("description", ""),
         ))
-    updated = cache.updated_at.isoformat() if cache.updated_at else None
-    return entries, updated, cache.source
+    return entries, updated, source
+
+
+def _user_current_deck(battles: list, tag: str) -> list[str]:
+    tag_norm = normalize_tag(tag)
+    for battle in battles:
+        team = battle.get("team", [{}])[0]
+        if team.get("tag") and normalize_tag(team.get("tag", "")) == tag_norm:
+            deck = [c.get("name") for c in team.get("cards", []) if c.get("name")]
+            if len(deck) == 8:
+                return deck
+    return []
+
+
+async def _cards_to_deck_infos(cards: list[str]) -> list[DeckCardInfo]:
+    await ensure_cards_loaded()
+    infos: list[DeckCardInfo] = []
+    for slot, name in enumerate(cards):
+        info = get_card_info(name) or {}
+        infos.append(DeckCardInfo(
+            id=f"{name.lower().replace(' ', '-')}-{slot}",
+            name=name,
+            icon=info.get("icon", ""),
+            cost=int(info.get("elixir") or get_card_elixir(name)),
+            slot=slot,
+        ))
+    return infos
 
 
 async def _build_user_deck_entries(battles: list, tag: str) -> list[DeckEntry]:
@@ -232,22 +261,16 @@ async def list_decks(
     from bot.models.database import async_session
     from bot.services.clash_api import SubscriptionService
 
-    filter_type = (type or category or "all").lower()
+    filter_type = (type or category or "meta").lower()
     decks: list[DeckEntry] = []
     meta_updated_at: str | None = None
     meta_source: str | None = None
-    needs_mine = filter_type in ("all", "mine", "rated", "classic", "2v2", "tournament", "legend_path")
 
-    if filter_type in ("all", "meta", "control", "beatdown", "cycle", "bait"):
+    if filter_type in ("all", "meta"):
         meta, meta_updated_at, meta_source = await _build_meta_deck_entries()
-        if filter_type == "all":
-            decks.extend(meta)
-        elif filter_type == "meta":
-            decks.extend(meta)
-        else:
-            decks.extend(d for d in meta if d.category == filter_type)
+        decks.extend(meta)
 
-    if needs_mine:
+    if filter_type in ("all", "mine"):
         async with async_session() as db_session:
             sub_service = SubscriptionService(db_session)
             if not await sub_service.has_active_subscription(user):
@@ -269,6 +292,73 @@ async def list_decks(
         decks=decks,
         meta_updated_at=meta_updated_at,
         meta_source=meta_source,
+    )
+
+
+@router.get("/decks/arena", response_model=ArenaDecksResponse)
+async def list_arena_decks(
+    user: User = Depends(require_linked_player),
+) -> ArenaDecksResponse:
+    battles = await _get_battles(user)
+    data = await get_arena_popular_decks(
+        battles,
+        user.player_tag or "",
+        user.trophies or 0,
+        user.arena_id,
+    )
+    decks = [
+        DeckEntry(
+            id=d["id"],
+            name=d["name"],
+            cards=[DeckCardInfo(**c) for c in d["cards"]],
+            winrate=d.get("winrate", 0.0),
+            total_games=d.get("total_games", 0),
+            avg_elixir=d.get("avg_elixir", 0.0),
+            type="arena",
+            category=d.get("category", "arena"),
+            deck_link=d.get("deck_link"),
+            description=d.get("description", ""),
+        )
+        for d in data["decks"]
+    ]
+    return ArenaDecksResponse(
+        arena_name=data["arena_name"],
+        arena_id=data.get("arena_id"),
+        trophies=data.get("trophies", 0),
+        decks=decks,
+        source=data.get("source", "curated"),
+        updated_at=data.get("updated_at"),
+    )
+
+
+@router.post("/decks/compare", response_model=DeckCompareResponse)
+async def compare_user_deck(
+    body: DeckCompareRequest,
+    user: User = Depends(require_linked_player),
+) -> DeckCompareResponse:
+    ref_cards = [c.strip() for c in body.reference_cards if c.strip()]
+    if len(ref_cards) != 8:
+        raise HTTPException(status_code=400, detail="Нужно ровно 8 карт для сравнения")
+
+    battles = await _get_battles(user)
+    user_cards = _user_current_deck(battles, user.player_tag or "")
+    if len(user_cards) != 8:
+        raise HTTPException(
+            status_code=404,
+            detail="Не найдена ваша текущая колода в последних боях",
+        )
+
+    result = compare_decks(user_cards, ref_cards)
+    from bot.services.meta_analyzer import _guess_deck_name
+
+    return DeckCompareResponse(
+        reference_name=_guess_deck_name(ref_cards),
+        user_deck=await _cards_to_deck_infos(user_cards),
+        reference_deck=await _cards_to_deck_infos(ref_cards),
+        user_better=result["user_better"],
+        user_worse=result["user_worse"],
+        reference_better=result["reference_better"],
+        reference_worse=result["reference_worse"],
     )
 
 

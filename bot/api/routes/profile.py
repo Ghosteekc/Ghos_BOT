@@ -1,14 +1,15 @@
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.api.deps import get_current_user, get_db, get_subscription_info
-from bot.api.schemas import HomeResponse, ProfileResponse, StatsOverviewResponse, SubscriptionInfo
+from bot.api.deps import get_current_user, get_db, get_subscription_info, require_linked_player
+from bot.api.schemas import HomeResponse, PlayerCollectionResponse, ProfileResponse, StatsOverviewResponse, SubscriptionInfo
 from bot.models.database import User
 from bot.api.routes.decks import _build_stats_overview, _stats_from_battles
 from bot.api.routes.battles import _build_battle_summary
 from bot.services.battle_service import get_cached_stats, load_and_persist
+from bot.services.player_collection import build_player_collection
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, SubscriptionService
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,22 @@ async def get_profile(
         winrate=winrate,
         subscription=SubscriptionInfo(**sub_info),
     )
+
+
+@router.get("/profile/collection", response_model=PlayerCollectionResponse)
+async def get_player_collection(
+    user: User = Depends(require_linked_player),
+) -> PlayerCollectionResponse:
+    client = ClashRoyaleClient()
+    try:
+        player = await client.get_player(user.player_tag or "")
+    except ClashRoyaleAPIError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    finally:
+        await client.close()
+
+    data = await build_player_collection(player)
+    return PlayerCollectionResponse(**data)
 
 
 @router.get("/health")

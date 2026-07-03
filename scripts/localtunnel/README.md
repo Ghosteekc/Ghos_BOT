@@ -1,27 +1,27 @@
 # localtunnel для Ghosteek CR Assistant
 
-## Почему туннель «постоянно умирает»
-
-Это **не проблема бота**. Типичные причины:
+## Почему `npx localtunnel` постоянно завершается
 
 | Причина | Что происходит |
 |--------|----------------|
-| **Закрыли окно PowerShell** | Процесс `npx localtunnel` завершился → URL мёртв (503) |
-| **Терминал Cursor** | «connection to shell process was lost» **убивает** фоновые процессы |
+| **Терминал Cursor / фоновый агент** | При завершении сессии Cursor **убивает** дочерние `npx`/`node` → туннель мёртв через 1–3 мин |
+| **Сервис loca.lt** | Проект **не поддерживается**; сервер сам рвёт idle-соединения (exit code 0) |
+| **Закрыли окно PowerShell** | Процесс завершился → 503 на старом URL |
 | **Сон / перезагрузка ПК** | Туннель обрывается |
-| **Несколько копий localtunnel** | Два `npx localtunnel --port 8080` → путаница с URL |
-| **Сервис loca.lt** | Проект **не поддерживается**, бывают массовые 503 |
-| **Смена URL** | Каждый перезапуск = **новый** `*.loca.lt` → на Vercel старый `VITE_API_URL` |
+| **Несколько копий** | Два `npx localtunnel --port 8080` → конфликты и путаница с URL |
+| **Смена URL** | Без `--subdomain` каждый перезапуск = **новый** `*.loca.lt` → обновить `VITE_API_URL` на Vercel |
+
+**Вывод:** голый `npx localtunnel` в Cursor — не «постоянный» режим. Нужно отдельное окно + автоперезапуск (скрипт ниже) или Cloudflare Tunnel.
 
 Проверка:
 
 ```powershell
-Invoke-WebRequest "https://ВАШ-URL.loca.lt/api/health" -Headers @{"Bypass-Tunnel-Reminder"="true"}
+curl.exe -H "Bypass-Tunnel-Reminder: true" "https://ВАШ-URL.loca.lt/api/health"
 ```
 
 ---
 
-## Как запускать
+## Как запускать (рекомендуется)
 
 **Окно 1 — бот:**
 
@@ -30,17 +30,36 @@ cd G:\проги\ss
 python -m bot.main
 ```
 
-**Окно 2 — туннель (отдельное окно Windows, не Cursor):**
+**Окно 2 — туннель (Win+R → powershell, или двойной клик `start-tunnel.cmd`):**
 
 ```powershell
 cd G:\проги\ss\scripts\localtunnel
 .\start-tunnel.ps1
 ```
 
+С **фиксированным subdomain** (URL не меняется при перезапуске, если имя свободно):
+
+```powershell
+.\start-tunnel.ps1 -Subdomain ghosteekcr
+```
+
+Скрипт:
+- проверяет, что бот на `:8080` жив;
+- перезапускает localtunnel при обрыве;
+- пишет URL в `tunnel-url.txt`.
+
+**Не закрывайте окно 2.**
+
 ---
 
-## Альтернативы
+## Более стабильная альтернатива
 
-- `scripts/cloudflare-tunnel/start-quick.ps1`
-- Named Tunnel — постоянный URL
-- Статус: https://status.loca.lt
+Cloudflare Tunnel реже падает, чем loca.lt:
+
+```powershell
+.\scripts\cloudflare-tunnel\start-quick.ps1
+```
+
+Named Tunnel — **постоянный** URL на своём домене (см. `scripts/cloudflare-tunnel/README.md`).
+
+Статус loca.lt: https://status.loca.lt
