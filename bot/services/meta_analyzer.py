@@ -19,7 +19,7 @@ from bot.services.meta_decks import META_DECKS
 logger = logging.getLogger(__name__)
 
 _refresh_lock = asyncio.Lock()
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 
 @dataclass

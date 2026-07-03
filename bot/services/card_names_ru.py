@@ -168,7 +168,7 @@ CARD_NAMES_SHORT: dict[str, str] = {
     "Minion Horde": "Орда",
     "Mega Knight": "МегаНайт",
     "Mega Minion": "МегаМуха",
-    "Magic Archer": "Маг-Лучник",
+    "Magic Archer": "Лучник",
     "Dark Prince": "Тём-принц",
     "Night Witch": "Ночь-Ведьма",
     "Lava Hound": "Лава",

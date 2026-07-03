@@ -22,7 +22,7 @@ META_DECKS: list[MetaDeck] = [
     ),
     MetaDeck(
         "log-bait",
-        "Приманка",
+        "Бейт",
         "bait",
         ("Goblin Barrel", "Princess", "Goblin Gang", "Ice Spirit", "Knight", "Inferno Tower", "Rocket", "The Log"),
         "Провокация заклинаний и гоблинская бочка",
@@ -104,6 +104,6 @@ CATEGORY_LABELS = {
     "control": "Контроль",
     "beatdown": "Битдаун",
     "cycle": "Цикл",
-    "bait": "Приманка",
+    "bait": "Бейт",
     "mine": "Мои колоды",
 }
