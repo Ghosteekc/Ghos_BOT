@@ -1,19 +1,21 @@
 """Random 8-card deck generator (in-game style)."""
 
+from __future__ import annotations
+
 import random
 
 from bot.services.card_data import CARD_META, get_card_elixir
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
+from bot.services.rofl_decks import ROFL_DECKS
 
 MAX_ATTEMPTS = 400
 TARGET_AVG_MIN = 3.0
 TARGET_AVG_MAX = 4.4
 
-# Неигровые / без id в API — нельзя импортировать в Clash Royale
 RANDOM_DECK_BLOCKLIST = frozenset({"Zombie"})
 
 
-def _pack_deck(cards: list[str]) -> dict:
+def _pack_deck(cards: list[str], *, rofl_name: str | None = None, rofl_tagline: str | None = None) -> dict:
     elixirs = [get_card_elixir(c) for c in cards]
     avg = sum(elixirs) / len(elixirs)
     card_infos = []
@@ -29,6 +31,9 @@ def _pack_deck(cards: list[str]) -> dict:
         "card_infos": card_infos,
         "avg_elixir": round(avg, 1),
         "deck_link": build_deck_share_link(cards),
+        "rofl": rofl_name is not None,
+        "rofl_name": rofl_name,
+        "rofl_tagline": rofl_tagline,
     }
 
 
@@ -47,7 +52,34 @@ async def _playable_pool() -> list[str]:
     return pool
 
 
-async def generate_random_deck() -> dict:
+async def _rofl_cards_valid(cards: tuple[str, ...]) -> list[str] | None:
+    await ensure_cards_loaded()
+    resolved: list[str] = []
+    for card in cards:
+        info = get_card_info(card)
+        if info and info.get("id") is not None and card in CARD_META:
+            resolved.append(card)
+    if len(resolved) != 8:
+        return None
+    if build_deck_share_link(resolved) is None:
+        return None
+    return resolved
+
+
+async def generate_rofl_deck() -> dict:
+    shuffled = list(ROFL_DECKS)
+    random.shuffle(shuffled)
+    for preset in shuffled:
+        cards = await _rofl_cards_valid(preset.cards)
+        if cards:
+            return _pack_deck(cards, rofl_name=preset.name, rofl_tagline=preset.tagline)
+    raise ValueError("Не удалось собрать рофл-колоду")
+
+
+async def generate_random_deck(*, rofl: bool = False) -> dict:
+    if rofl:
+        return await generate_rofl_deck()
+
     pool = await _playable_pool()
     if len(pool) < 8:
         raise ValueError("Not enough playable cards in catalog")

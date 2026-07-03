@@ -322,6 +322,9 @@ class RandomDeckResponse(BaseModel):
     card_infos: list[DeckCardInfo]
     avg_elixir: float
     deck_link: str | None = None
+    rofl: bool = False
+    rofl_name: str | None = None
+    rofl_tagline: str | None = None
 
 
 class BattleInsightEntry(BaseModel):

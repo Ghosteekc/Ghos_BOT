@@ -10,13 +10,16 @@ from datetime import datetime, timezone
 from bot.config import settings
 from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed, normalize_deck_upgrades
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded
-from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
-from bot.services.meta_analyzer import _is_competitive_battle
+from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 
 logger = logging.getLogger(__name__)
 
 _refresh_lock = asyncio.Lock()
-CACHE_VERSION = 3
+CACHE_VERSION = 4
+
+_SKIP_BATTLE_TYPES = frozenset({
+    "friendly", "clanmate", "warday", "boatbattle", "challenge", "tournament",
+})
 
 
 @dataclass
@@ -38,20 +41,53 @@ _cache = TopPlayersCache()
 
 
 async def _fetch_global_trophy_rankings(client: ClashRoyaleClient, limit: int) -> list[dict]:
-    """Global trophy leaderboard — best players by trophies."""
     paths = [
         f"/locations/global/rankings/players?limit={limit}",
         f"/locations/57000006/rankings/players?limit={limit}",
+        f"/locations/57000249/rankings/players?limit={limit}",
     ]
     for path in paths:
         try:
             data = await client._request(path)
             items = data.get("items", []) if isinstance(data, dict) else []
             if items:
+                logger.info("Top players source: %s (%d entries)", path, len(items))
                 return items
         except ClashRoyaleAPIError as e:
             logger.debug("Trophy rankings unavailable at %s: %s", path, e)
     return []
+
+
+def _parse_battlelog(tag: str, battles: list) -> tuple[list[dict], int, int]:
+    """Pick latest deck + ladder winrate from battle log."""
+    tag_norm = normalize_tag(tag)
+    deck_cards: list[dict] = []
+    wins = losses = 0
+
+    for battle in battles:
+        team = battle.get("team", [{}])[0]
+        if normalize_tag(team.get("tag") or "") != tag_norm:
+            continue
+        btype = (battle.get("type") or "").lower()
+        if btype in _SKIP_BATTLE_TYPES:
+            continue
+
+        parsed = cards_from_team(team)
+        if len(parsed) == 8 and not deck_cards:
+            deck_cards = parsed
+
+        if btype not in ("pvp", "pathoflegend", "trail"):
+            continue
+        trophies = int(team.get("startingTrophies") or 0)
+        if btype == "pvp" and trophies < 4000:
+            continue
+        opponent = battle.get("opponent", [{}])[0]
+        if team.get("crowns", 0) > opponent.get("crowns", 0):
+            wins += 1
+        else:
+            losses += 1
+
+    return deck_cards, wins, losses
 
 
 async def _refresh_top_players(limit: int = 30) -> TopPlayersCache:
@@ -61,6 +97,17 @@ async def _refresh_top_players(limit: int = 30) -> TopPlayersCache:
 
     try:
         ranked = await _fetch_global_trophy_rankings(client, limit)
+        if not ranked:
+            for raw_tag in settings.meta_seed_tags.split(","):
+                tag = raw_tag.strip()
+                if tag:
+                    ranked.append({
+                        "tag": tag if tag.startswith("#") else f"#{tag}",
+                        "name": tag,
+                        "rank": len(ranked) + 1,
+                        "trophies": 0,
+                    })
+
         ranked.sort(key=lambda x: int(x.get("rank") or 999))
         for item in ranked[:limit]:
             tag = item.get("tag") or ""
@@ -69,8 +116,6 @@ async def _refresh_top_players(limit: int = 30) -> TopPlayersCache:
             name = item.get("name") or "Игрок"
             rank = int(item.get("rank") or len(entries) + 1)
             trophies = int(item.get("trophies") or 0)
-            if trophies <= 0:
-                continue
             clan = item.get("clan") or {}
             clan_name = clan.get("name") or ""
 
@@ -78,23 +123,10 @@ async def _refresh_top_players(limit: int = 30) -> TopPlayersCache:
             wins = losses = 0
             try:
                 battles = await client.get_battlelog(tag)
-                tag_norm = tag.upper()
-                for battle in battles:
-                    if not _is_competitive_battle(battle, tag_norm):
-                        continue
-                    team = battle.get("team", [{}])[0]
-                    opponent = battle.get("opponent", [{}])[0]
-                    if team.get("crowns", 0) > opponent.get("crowns", 0):
-                        wins += 1
-                    else:
-                        losses += 1
-                    if not deck_cards:
-                        parsed = cards_from_team(team)
-                        if len(parsed) == 8:
-                            deck_cards = parsed
-                await asyncio.sleep(0.12)
-            except ClashRoyaleAPIError:
-                pass
+                deck_cards, wins, losses = _parse_battlelog(tag, battles)
+                await asyncio.sleep(0.1)
+            except ClashRoyaleAPIError as e:
+                logger.debug("Battlelog for %s: %s", tag, e)
 
             if not deck_cards:
                 continue
@@ -123,6 +155,8 @@ async def _refresh_top_players(limit: int = 30) -> TopPlayersCache:
         await client.close()
 
     entries.sort(key=lambda p: p.get("rank", 999))
+    if not entries:
+        logger.warning("Top players cache empty after refresh")
     return TopPlayersCache(
         players=entries,
         updated_at=datetime.now(timezone.utc),

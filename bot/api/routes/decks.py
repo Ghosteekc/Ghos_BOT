@@ -405,10 +405,13 @@ async def list_top_players(
 
 
 @router.get("/decks/random", response_model=RandomDeckResponse)
-async def random_deck(user: User = Depends(require_linked_player)) -> RandomDeckResponse:
+async def random_deck(
+    user: User = Depends(require_linked_player),
+    rofl: bool = Query(False),
+) -> RandomDeckResponse:
     del user
     try:
-        data = await generate_random_deck()
+        data = await generate_random_deck(rofl=rofl)
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
 
@@ -426,6 +429,9 @@ async def random_deck(user: User = Depends(require_linked_player)) -> RandomDeck
         card_infos=card_infos,
         avg_elixir=data["avg_elixir"],
         deck_link=data.get("deck_link"),
+        rofl=data.get("rofl", False),
+        rofl_name=data.get("rofl_name"),
+        rofl_tagline=data.get("rofl_tagline"),
     )
 
 

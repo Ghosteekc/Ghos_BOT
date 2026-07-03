@@ -47,10 +47,15 @@ def analyze_deck(cards: list[str]) -> DeckStats:
     spells = [c for c in cards if get_card_role(c) == "spell"]
     buildings = [c for c in cards if get_card_role(c) == "building"]
 
-    air_cards = {"Minions", "Minion Horde", "Baby Dragon", "Mega Minion", "Inferno Dragon",
-                 "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix"}
+    anti_air = {
+        "Musketeer", "Wizard", "Executioner", "Inferno Dragon", "Mini P.E.K.K.A",
+        "Mega Minion", "Electro Wizard", "Hunter", "Inferno Tower", "Tesla",
+        "Archers", "Bats", "Minions", "Phoenix", "Firecracker", "Ice Wizard",
+        "Baby Dragon",
+    }
     splash_cards = {"Wizard", "Baby Dragon", "Valkyrie", "Bowler", "Executioner",
-                    "Fireball", "Arrows", "Poison", "Earthquake", "Electro Dragon"}
+                    "Fireball", "Arrows", "Poison", "Earthquake", "Electro Dragon",
+                    "Goblin Demolisher", "Magic Archer"}
 
     return DeckStats(
         cards=cards,
@@ -58,7 +63,7 @@ def analyze_deck(cards: list[str]) -> DeckStats:
         win_conditions=win_conds,
         spells=spells,
         buildings=buildings,
-        air_coverage=bool(set(cards) & air_cards),
+        air_coverage=len(set(cards) & anti_air) >= 1,
         splash_coverage=bool(set(cards) & splash_cards),
     )
 
