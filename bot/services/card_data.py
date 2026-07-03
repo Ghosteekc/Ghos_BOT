@@ -87,7 +87,6 @@ CARD_META: dict[str, dict] = {
     "Freeze": {"elixir": 4, "type": "spell", "role": "spell"},
     "Mirror": {"elixir": 1, "type": "spell", "role": "spell"},
     "Lightning": {"elixir": 6, "type": "spell", "role": "spell"},
-    "Zombie": {"elixir": 0, "type": "troop", "role": "swarm"},
     "Poison": {"elixir": 4, "type": "spell", "role": "spell"},
     "Graveyard": {"elixir": 5, "type": "spell", "role": "win_condition"},
     "The Log": {"elixir": 2, "type": "spell", "role": "spell"},

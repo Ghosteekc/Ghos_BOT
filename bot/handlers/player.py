@@ -114,12 +114,12 @@ async def cmd_profile(message: Message) -> None:
     if stats:
         stats_line = f"\n📊 Сохранено боёв: {stats.total} ({stats.winrate}% WR)"
 
+    arena_name = arena.get("name", "—")
     await message.answer(
         f"👤 <b>{player.get('name')}</b>\n"
         f"🏷 <code>{user.player_tag}</code>\n"
         f"🏆 {player.get('trophies', 0)} кубков\n"
-        f"⭐ Уровень: {player.get('expLevel', '?')}\n"
-        f"🏟 {arena.get('name', '?')}\n"
+        f"🏟 Арена: {arena_name}\n"
         f"💎 Подписка: {sub_status}"
         f"{stats_line}\n\n"
         "📱 Полный анализ — в Mini App (Menu Button в Telegram)."
