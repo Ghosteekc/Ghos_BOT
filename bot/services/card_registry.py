@@ -1,6 +1,7 @@
 """Cache Clash Royale cards: ids, icons, deck share links."""
 
 import logging
+import re
 
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
 
@@ -52,6 +53,80 @@ def get_card_info(name: str) -> dict | None:
     if _cards_by_name is None:
         return None
     return _cards_by_name.get(_normalize_name(name))
+
+
+def _compact_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+# Internal mastery badge suffixes differ from official card names in the CR API.
+_MASTERY_SUFFIX_TO_CARD: dict[str, str] = {
+    "Archer": "Archers",
+    "Assassin": "Bandit",
+    "AxeMan": "Executioner",
+    "BarbLog": "Barbarian Barrel",
+    "BlowdartGoblin": "Dart Goblin",
+    "DartBarrell": "Dart Goblin",
+    "ElixirCollector": "Elixir Collector",
+    "FirespiritHut": "Furnace",
+    "Ghost": "Royal Ghost",
+    "GiantBuffer": "Royal Giant",
+    "IceSpirits": "Ice Spirit",
+    "Log": "The Log",
+    "MergeMaiden": "Mother Witch",
+    "MiniPekka": "Mini P.E.K.K.A",
+    "Pekka": "P.E.K.K.A",
+    "RageBarbarian": "Elite Barbarians",
+    "SkeletonWarriors": "Skeletons",
+    "Xbow": "X-Bow",
+    "ZapMachine": "Zappies",
+}
+
+
+def resolve_card_name(raw: str) -> str | None:
+    """Map mastery badge aliases and typos to a catalog card name."""
+    if _cards_by_name is None:
+        return None
+
+    cleaned = re.sub(r"\s+", " ", raw.strip())
+    suffix = cleaned.replace(" ", "")
+
+    mapped = _MASTERY_SUFFIX_TO_CARD.get(suffix) or _MASTERY_SUFFIX_TO_CARD.get(cleaned)
+    if mapped:
+        info = get_card_info(mapped)
+        if info:
+            return info["name"]
+
+    candidates = [
+        cleaned,
+        cleaned.replace(" ", ""),
+        f"The {cleaned}",
+        f"{cleaned}s",
+    ]
+    seen: set[str] = set()
+    for cand in candidates:
+        key = _normalize_name(cand)
+        if key in seen:
+            continue
+        seen.add(key)
+        info = get_card_info(cand)
+        if info:
+            return info["name"]
+
+    compact = _compact_name(cleaned)
+    if not compact:
+        return None
+
+    for norm, info in _cards_by_name.items():
+        card_compact = _compact_name(info["name"])
+        if compact == card_compact:
+            return info["name"]
+        if compact.endswith("s") and compact[:-1] == card_compact:
+            return info["name"]
+        if card_compact.endswith("s") and card_compact[:-1] == compact:
+            return info["name"]
+
+    return None
 
 
 async def get_cards_catalog() -> list[dict]:

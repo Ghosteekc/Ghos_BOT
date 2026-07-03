@@ -6,7 +6,7 @@ import logging
 import re
 
 from bot.services.card_names_ru import card_name_ru
-from bot.services.card_registry import ensure_cards_loaded, get_card_info
+from bot.services.card_registry import ensure_cards_loaded, get_card_info, resolve_card_name
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +16,11 @@ def _normalize_name(name: str) -> str:
 
 
 def _mastery_card_name(badge_name: str) -> str:
+    resolved = resolve_card_name(badge_name.removeprefix("Mastery"))
+    if resolved:
+        return resolved
     raw = badge_name.removeprefix("Mastery")
-    spaced = re.sub(r"(?<!^)(?=[A-Z])", " ", raw).strip()
-    return spaced
+    return re.sub(r"\s+", " ", re.sub(r"(?<!^)(?=[A-Z])", " ", raw)).strip()
 
 
 def _card_display_mode(evo_level: int, owned: bool) -> str:
@@ -82,11 +84,12 @@ async def build_player_collection(player: dict) -> dict:
             max_evo = int(owned_raw.get("maxEvolutionLevel") or max_evo_catalog)
             base, icon_evo, icon_hero = _resolve_icons(owned_raw, info)
             mode = _card_display_mode(evo, True)
+            level_raw = owned_raw.get("level")
             card_entries.append({
                 "name": name,
                 "name_ru": card_name_ru(name),
                 "owned": True,
-                "level": int(owned_raw.get("level") or 0) or None,
+                "level": int(level_raw) if level_raw is not None else None,
                 "max_level": int(owned_raw.get("maxLevel") or 0) or None,
                 "count": int(owned_raw.get("count") or 0),
                 "rarity": owned_raw.get("rarity") or "",
@@ -123,7 +126,7 @@ async def build_player_collection(player: dict) -> dict:
         if not bname.startswith("Mastery"):
             continue
         card_en = _mastery_card_name(bname)
-        info = get_card_info(card_en) or get_card_info(card_en.replace(" ", ""))
+        info = get_card_info(card_en) or {}
         owned_raw = player_cards.get(_normalize_name(card_en))
         base, icon_evo, icon_hero = _resolve_icons(owned_raw, info or {})
         evo = int((owned_raw or {}).get("evolutionLevel") or 0)
