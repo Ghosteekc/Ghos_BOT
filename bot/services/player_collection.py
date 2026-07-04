@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 
+from bot.services.card_level import to_display_level, to_display_max_level
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_registry import ensure_cards_loaded, get_card_info, resolve_card_name
 
@@ -85,14 +86,21 @@ async def build_player_collection(player: dict) -> dict:
             base, icon_evo, icon_hero = _resolve_icons(owned_raw, info)
             mode = _card_display_mode(evo, True)
             level_raw = owned_raw.get("level")
+            rarity = (owned_raw.get("rarity") or info.get("rarity") or "").lower()
+            api_level = int(level_raw) if level_raw is not None else None
+            api_max = int(owned_raw.get("maxLevel") or 0) or None
+            elixir = info.get("elixir")
+            if elixir is None:
+                elixir = owned_raw.get("elixirCost")
             card_entries.append({
                 "name": name,
                 "name_ru": card_name_ru(name),
                 "owned": True,
-                "level": int(level_raw) if level_raw is not None else None,
-                "max_level": int(owned_raw.get("maxLevel") or 0) or None,
+                "level": to_display_level(api_level, rarity),
+                "max_level": to_display_max_level(api_max, rarity),
                 "count": int(owned_raw.get("count") or 0),
-                "rarity": owned_raw.get("rarity") or "",
+                "rarity": rarity,
+                "elixir": int(elixir) if elixir is not None else None,
                 "evolution_level": evo,
                 "max_evolution_level": max_evo,
                 "display_mode": mode,
@@ -103,14 +111,17 @@ async def build_player_collection(player: dict) -> dict:
             })
         else:
             base = info.get("icon") or ""
+            rarity = (info.get("rarity") or "").lower()
+            elixir = info.get("elixir")
             card_entries.append({
                 "name": name,
                 "name_ru": card_name_ru(name),
                 "owned": False,
                 "level": None,
-                "max_level": None,
+                "max_level": to_display_max_level(info.get("max_level"), rarity),
                 "count": 0,
-                "rarity": "",
+                "rarity": rarity,
+                "elixir": int(elixir) if elixir is not None else None,
                 "evolution_level": 0,
                 "max_evolution_level": max_evo_catalog,
                 "display_mode": "base",

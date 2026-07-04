@@ -33,6 +33,7 @@ class CollectionCardEntry(BaseModel):
     max_level: int | None = None
     count: int = 0
     rarity: str = ""
+    elixir: int | None = None
     evolution_level: int = 0
     max_evolution_level: int = 0
     display_mode: str = "base"

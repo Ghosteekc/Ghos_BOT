@@ -43,6 +43,8 @@ async def ensure_cards_loaded() -> dict[str, dict]:
             "hero_icon": icons.get("heroMedium") or "",
             "max_evolution_level": int(item.get("maxEvolutionLevel") or 0),
             "elixir": item.get("elixirCost"),
+            "rarity": item.get("rarity") or "",
+            "max_level": int(item.get("maxLevel") or 0) or None,
         }
     _cards_by_name = result
     logger.info(f"Card registry loaded: {len(result)} cards")
