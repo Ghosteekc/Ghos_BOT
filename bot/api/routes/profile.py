@@ -8,6 +8,8 @@ from bot.api.schemas import HomeResponse, PlayerCollectionResponse, ProfileRespo
 from bot.models.database import User
 from bot.api.routes.decks import _build_stats_overview, _stats_from_battles
 from bot.api.routes.battles import _build_battle_summary
+from bot.services.battle_cache_reader import get_battles_from_cache
+from bot.services.battle_day_stats import compute_daily_trophy_change
 from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 from bot.services.player_collection import build_player_collection
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, SubscriptionService
@@ -40,6 +42,7 @@ def _profile_from_player(
     sub_info: dict,
     winrate: float | None,
     last_rating_change: int | None = None,
+    daily_trophy_change: int | None = None,
 ) -> ProfileResponse:
     arena = player.get("arena", {})
     arena_id = arena.get("id")
@@ -67,6 +70,7 @@ def _profile_from_player(
         max_trophies=player.get("bestTrophies") or player.get("trophies", 0),
         clan_name=clan.get("name") if isinstance(clan, dict) else None,
         last_rating_change=last_rating_change,
+        daily_trophy_change=daily_trophy_change,
         subscription=SubscriptionInfo(**sub_info),
     )
 
@@ -92,16 +96,21 @@ async def get_profile(
 
     client = ClashRoyaleClient()
     last_rating_change: int | None = None
+    daily_trophy_change: int | None = None
     try:
         player = await client.get_player(user.player_tag)
+        daily_trophy_change = await _daily_trophy_for_user(user)
     except ClashRoyaleAPIError as e:
         logger.warning(f"Failed to fetch live profile for {user.player_tag}: {e}")
         player = None
+        daily_trophy_change = await _daily_trophy_for_user(user)
     finally:
         await client.close()
 
     if player:
-        return _profile_from_player(user, player, sub_info, winrate, last_rating_change)
+        return _profile_from_player(
+            user, player, sub_info, winrate, last_rating_change, daily_trophy_change,
+        )
 
     arena_name = None
     if user.arena_id:
@@ -121,8 +130,21 @@ async def get_profile(
         exp_level=None,
         arena_name=arena_name,
         winrate=winrate,
+        daily_trophy_change=daily_trophy_change,
         subscription=SubscriptionInfo(**sub_info),
     )
+
+
+async def _daily_trophy_for_user(user: User) -> int | None:
+    if not user.player_tag:
+        return None
+    battles = await get_battles_from_cache(user.player_tag)
+    if not battles:
+        loaded = await load_and_persist(user)
+        battles = loaded or []
+    if not battles:
+        return None
+    return compute_daily_trophy_change(battles)
 
 
 @router.get("/profile/collection", response_model=PlayerCollectionResponse)

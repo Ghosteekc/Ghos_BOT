@@ -20,6 +20,7 @@ class ProfileResponse(BaseModel):
     skill_rating: int | None = None
     winrate: float | None = None
     last_rating_change: int | None = None
+    daily_trophy_change: int | None = None
     max_trophies: int | None = None
     clan_name: str | None = None
     subscription: SubscriptionInfo

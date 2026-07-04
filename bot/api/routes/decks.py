@@ -1,6 +1,5 @@
 import logging
-from collections import defaultdict
-from datetime import datetime
+from bot.services.battle_day_stats import build_winrate_by_day, compute_daily_trophy_change
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -185,7 +184,6 @@ def _build_stats_overview(stats, battles: list, max_trophies: int = 0) -> StatsO
     elixirs: list[float] = []
     durations: list[int] = []
     last_results: list[dict] = []
-    by_day: dict[str, dict[str, int]] = defaultdict(lambda: {"wins": 0, "losses": 0})
 
     for battle in battles[:BATTLE_LOG_LIMIT]:
         team = battle.get("team", [{}])[0]
@@ -200,30 +198,7 @@ def _build_stats_overview(stats, battles: list, max_trophies: int = 0) -> StatsO
             "trophy_change": team.get("trophyChange", 0),
         })
 
-    for battle in battles:
-        team = battle.get("team", [{}])[0]
-        opponent = battle.get("opponent", [{}])[0]
-        won = team.get("crowns", 0) > opponent.get("crowns", 0)
-        raw_time = battle.get("battleTime") or battle.get("warTime") or ""
-        day_key = raw_time[:8] if len(raw_time) >= 8 else ""
-        if not day_key:
-            continue
-        try:
-            datetime.strptime(day_key, "%Y%m%d")
-        except ValueError:
-            continue
-        if won:
-            by_day[day_key]["wins"] += 1
-        else:
-            by_day[day_key]["losses"] += 1
-
-    winrate_by_day = [
-        {
-            "date": datetime.strptime(day, "%Y%m%d").strftime("%d.%m"),
-            **counts,
-        }
-        for day, counts in sorted(by_day.items(), key=lambda x: x[0])
-    ][-14:]
+    winrate_by_day = build_winrate_by_day(battles)
 
     most_used = [
         {"name": name, "count": count, "winrate": stats.winrate}
