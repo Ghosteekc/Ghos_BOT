@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 
+from bot.services.card_data import get_card_elixir
 from bot.services.card_level import to_display_level, to_display_max_level
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_registry import ensure_cards_loaded, get_card_info, resolve_card_name
@@ -63,6 +64,16 @@ def _mastery_next_hint(level: int, progress: int, target: int | None, max_level:
     return f"Продолжайте использовать карту для уровня {level + 1}"
 
 
+def _resolve_elixir(info: dict, owned_raw: dict | None, name: str) -> int | None:
+    raw = info.get("elixir") or (owned_raw or {}).get("elixirCost")
+    if raw is None:
+        raw = get_card_elixir(name)
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def build_player_collection(player: dict) -> dict:
     await ensure_cards_loaded()
     player_cards: dict[str, dict] = {}
@@ -89,9 +100,7 @@ async def build_player_collection(player: dict) -> dict:
             rarity = (owned_raw.get("rarity") or info.get("rarity") or "").lower()
             api_level = int(level_raw) if level_raw is not None else None
             api_max = int(owned_raw.get("maxLevel") or 0) or None
-            elixir = info.get("elixir")
-            if elixir is None:
-                elixir = owned_raw.get("elixirCost")
+            elixir = _resolve_elixir(info, owned_raw, name)
             card_entries.append({
                 "name": name,
                 "name_ru": card_name_ru(name),
@@ -100,7 +109,7 @@ async def build_player_collection(player: dict) -> dict:
                 "max_level": to_display_max_level(api_max, rarity),
                 "count": int(owned_raw.get("count") or 0),
                 "rarity": rarity,
-                "elixir": int(elixir) if elixir is not None else None,
+                "elixir": elixir,
                 "evolution_level": evo,
                 "max_evolution_level": max_evo,
                 "display_mode": mode,
@@ -112,7 +121,7 @@ async def build_player_collection(player: dict) -> dict:
         else:
             base = info.get("icon") or ""
             rarity = (info.get("rarity") or "").lower()
-            elixir = info.get("elixir")
+            elixir = _resolve_elixir(info, None, name)
             card_entries.append({
                 "name": name,
                 "name_ru": card_name_ru(name),
@@ -121,7 +130,7 @@ async def build_player_collection(player: dict) -> dict:
                 "max_level": to_display_max_level(info.get("max_level"), rarity),
                 "count": 0,
                 "rarity": rarity,
-                "elixir": int(elixir) if elixir is not None else None,
+                "elixir": elixir,
                 "evolution_level": 0,
                 "max_evolution_level": max_evo_catalog,
                 "display_mode": "base",
