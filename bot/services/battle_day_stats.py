@@ -30,9 +30,16 @@ def compute_daily_trophy_change(battles: list) -> int:
     return total
 
 
+def _daily_winrate(wins: int, losses: int) -> float:
+    total = wins + losses
+    if total <= 0:
+        return 0.0
+    return round(wins / total * 100, 1)
+
+
 def build_winrate_by_day(battles: list, *, limit: int = 14) -> list[dict]:
-    """Daily wins/losses plus winrate from the last battle of each day."""
-    by_day: dict[str, dict] = {}
+    """Daily wins/losses and winrate percentage for each day."""
+    by_day: dict[str, dict[str, int]] = {}
 
     for battle in battles:
         raw = _battle_time(battle)
@@ -41,28 +48,21 @@ def build_winrate_by_day(battles: list, *, limit: int = 14) -> list[dict]:
             continue
 
         won = _battle_won(battle)
-        entry = by_day.setdefault(
-            day_key,
-            {"wins": 0, "losses": 0, "last_time": "", "last_battle_won": None},
-        )
+        entry = by_day.setdefault(day_key, {"wins": 0, "losses": 0})
         if won:
             entry["wins"] += 1
         else:
             entry["losses"] += 1
 
-        if raw >= entry["last_time"]:
-            entry["last_time"] = raw
-            entry["last_battle_won"] = won
-
     rows: list[dict] = []
     for day_key, data in sorted(by_day.items()):
-        last_won = data["last_battle_won"]
-        winrate = 100.0 if last_won else 0.0
+        wins = data["wins"]
+        losses = data["losses"]
         rows.append({
             "date": datetime.strptime(day_key, "%Y%m%d").strftime("%d.%m"),
-            "wins": data["wins"],
-            "losses": data["losses"],
-            "winrate": winrate,
+            "wins": wins,
+            "losses": losses,
+            "winrate": _daily_winrate(wins, losses),
         })
 
     return rows[-limit:]
