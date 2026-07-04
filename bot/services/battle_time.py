@@ -46,11 +46,16 @@ def format_battle_played_at(raw: str | None) -> str:
 
 
 def format_battle_played_date(raw: str | None) -> str:
-    """Return date label like 03.07 from battleTime."""
-    if not raw or len(raw) < 8:
+    """Return date label like 03.07 from battleTime (MSK)."""
+    if not raw:
         return ""
     try:
-        dt = datetime.strptime(raw[:8], "%Y%m%d")
-        return dt.strftime("%d.%m")
+        if len(raw) >= 15 and "T" in raw[:16]:
+            dt = datetime.strptime(raw[:15], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+            return dt.astimezone(_MSK).strftime("%d.%m")
+        if len(raw) >= 8:
+            dt = datetime.strptime(raw[:8], "%Y%m%d")
+            return dt.strftime("%d.%m")
     except ValueError:
-        return ""
+        pass
+    return ""

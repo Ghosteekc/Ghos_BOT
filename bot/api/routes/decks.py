@@ -1,5 +1,5 @@
 import logging
-from bot.services.battle_day_stats import build_winrate_by_day, compute_daily_trophy_change
+from bot.services.battle_day_stats import build_last_results, build_winrate_by_day, compute_daily_trophy_change
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -183,7 +183,6 @@ async def _build_user_deck_entries(battles: list, tag: str) -> list[DeckEntry]:
 def _build_stats_overview(stats, battles: list, max_trophies: int = 0) -> StatsOverviewResponse:
     elixirs: list[float] = []
     durations: list[int] = []
-    last_results: list[dict] = []
 
     for battle in battles[:BATTLE_LOG_LIMIT]:
         team = battle.get("team", [{}])[0]
@@ -192,13 +191,9 @@ def _build_stats_overview(stats, battles: list, max_trophies: int = 0) -> StatsO
         if deck:
             elixirs.append(analyze_deck(deck).avg_elixir)
         durations.append(int(battle.get("gameDuration") or 180))
-        won = team.get("crowns", 0) > opponent.get("crowns", 0)
-        last_results.append({
-            "won": won,
-            "trophy_change": team.get("trophyChange", 0),
-        })
 
     winrate_by_day = build_winrate_by_day(battles)
+    last_results = build_last_results(battles)
 
     most_used = [
         {"name": name, "count": count, "winrate": stats.winrate}

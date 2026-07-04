@@ -41,7 +41,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         opponent_tag=opp_tag.replace("#", ""),
         opponent_trophies=opponent.get("startingTrophies") or opponent.get("trophyChange") or 0,
         won=won,
-        trophy_change=team.get("trophyChange", 0),
+        trophy_change=int(team.get("trophyChange") or 0),
         matchup_score=round(calculate_matchup_score(user_deck, opp_deck), 1),
         duration=int(battle.get("gameDuration") or 0),
         avg_elixir=user_stats.avg_elixir,

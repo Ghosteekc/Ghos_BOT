@@ -17,6 +17,47 @@ def _battle_time(battle: dict) -> str:
     return str(battle.get("battleTime") or battle.get("warTime") or "")
 
 
+def _trophy_delta(team: dict, chronological: list[dict], index: int, won: bool) -> int:
+    raw = team.get("trophyChange")
+    if raw is not None:
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+
+    cur_start = team.get("startingTrophies")
+    if index + 1 < len(chronological):
+        nxt_team = chronological[index + 1].get("team", [{}])[0]
+        nxt_start = nxt_team.get("startingTrophies")
+        if cur_start is not None and nxt_start is not None:
+            return int(nxt_start) - int(cur_start)
+
+    return 30 if won else -30
+
+
+def build_last_results(battles: list, *, limit: int = 14) -> list[dict]:
+    """Recent battles oldest-first with trophy delta and opponent/time labels."""
+    from bot.services.battle_time import format_battle_played_at, format_battle_played_date
+
+    chronological = list(reversed(battles[:limit]))
+    rows: list[dict] = []
+
+    for i, battle in enumerate(chronological):
+        team = battle.get("team", [{}])[0]
+        opponent = battle.get("opponent", [{}])[0]
+        won = _battle_won(battle)
+        raw = _battle_time(battle)
+        rows.append({
+            "won": won,
+            "trophy_change": _trophy_delta(team, chronological, i, won),
+            "opponent_name": opponent.get("name") or "Соперник",
+            "played_date": format_battle_played_date(raw),
+            "played_time": format_battle_played_at(raw),
+        })
+
+    return rows
+
+
 def compute_daily_trophy_change(battles: list) -> int:
     """Net trophies gained or lost today (MSK)."""
     today = today_key_msk()
