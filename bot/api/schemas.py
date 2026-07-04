@@ -94,6 +94,12 @@ class DeckStatsResponse(BaseModel):
     spells: list[str]
 
 
+class KeyCardEntry(BaseModel):
+    name: str
+    name_ru: str
+    note: str = ""
+
+
 class BattleDetailResponse(BaseModel):
     index: int
     won: bool
@@ -102,12 +108,17 @@ class BattleDetailResponse(BaseModel):
     matchup_score: float
     duration: int = 0
     played_at: str = ""
+    crown_score: str = ""
+    outcome_summary: str = ""
     user_deck: list[str]
     opponent_deck: list[str]
     user_stats: DeckStatsResponse
     opponent_stats: DeckStatsResponse
     reasons: list[str]
     opponent_threats: list[str]
+    user_key_cards: list[KeyCardEntry] = []
+    opponent_key_cards: list[KeyCardEntry] = []
+    low_impact_cards: list[KeyCardEntry] = []
 
 
 class WinrateEntry(BaseModel):

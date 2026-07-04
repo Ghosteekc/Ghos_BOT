@@ -2,36 +2,9 @@
 
 from collections import Counter
 
-from bot.services.card_data import WIN_CONDITIONS, get_card_role
-from bot.services.card_names_ru import card_name_ru
+from bot.services.battle_report import analyze_battle_enhanced
 from bot.services.clash_api import normalize_tag
-from bot.services.deck_analyzer import analyze_battle, analyze_deck, extract_deck
-
-AIR_CARDS = {
-    "Minions", "Minion Horde", "Baby Dragon", "Mega Minion", "Inferno Dragon",
-    "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix", "Flying Machine",
-    "Minions", "Electro Dragon",
-}
-
-SWARM_CARDS = {
-    "Goblins", "Spear Goblins", "Skeleton Army", "Goblin Gang", "Barbarians",
-    "Elite Barbarians", "Minion Horde", "Bats", "Skeletons", "Guards",
-}
-
-
-def _air_in_deck(deck: list[str]) -> list[str]:
-    return [c for c in deck if c in AIR_CARDS or get_card_role(c) == "air"]
-
-
-def _swarm_in_deck(deck: list[str]) -> list[str]:
-    return [c for c in deck if c in SWARM_CARDS or get_card_role(c) == "swarm"]
-
-
-def _primary_win_card(deck: list[str]) -> str | None:
-    for card in deck:
-        if card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
-            return card
-    return deck[0] if deck else None
+from bot.services.deck_analyzer import extract_deck
 
 
 def build_battle_insight(battle: dict, player_tag: str) -> dict | None:
@@ -43,68 +16,43 @@ def build_battle_insight(battle: dict, player_tag: str) -> dict | None:
         return None
 
     user_deck = extract_deck(team)
-    opp_deck = extract_deck(opponent)
     if not user_deck:
         return None
 
-    won = team.get("crowns", 0) > opponent.get("crowns", 0)
-    user_stats = analyze_deck(user_deck)
-    opp_stats = analyze_deck(opponent)
-    analysis = analyze_battle(team, opponent)
+    duration = int(battle.get("gameDuration") or 0)
+    analysis = analyze_battle_enhanced(team, opponent, duration=duration)
 
-    summary = ""
     tags: list[str] = []
+    summary = analysis.outcome_summary
 
-    opp_air = _air_in_deck(opp_deck)
-    if not won and opp_air and not user_stats.air_coverage:
-        air_ru = ", ".join(card_name_ru(c) for c in opp_air[:3])
-        summary = f"Вы проиграли, потому что не смогли задефать воздушные карты ({air_ru})."
-        tags.append("air_defense")
-    elif not won and _swarm_in_deck(opp_deck) and not user_stats.splash_coverage:
-        summary = "Вы проиграли — в колоде не хватило сплеша против роя соперника."
-        tags.append("splash")
-    elif not won and user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
-        summary = (
-            f"Вы проиграли — колода слишком тяжёлая ({user_stats.avg_elixir} эл.), "
-            f"соперник быстрее циклил ({opp_stats.avg_elixir} эл.)."
-        )
-        tags.append("cycle")
-    elif not won and not user_stats.spells and opp_stats.spells:
-        summary = "Вы проиграли — у соперника было преимущество в заклинаниях."
-        tags.append("spells")
-    elif won:
-        win_card = _primary_win_card(user_deck)
-        if win_card:
-            summary = (
-                f"Вы выиграли — «{card_name_ru(win_card)}» стала главной угрозой "
-                f"и помогла добить башни."
-            )
-            tags.append("win_condition")
-        elif user_stats.spells and not opp_stats.spells:
-            summary = "Вы выиграли благодаря контролю поля заклинаниями."
+    if not analysis.won:
+        if "воздух" in summary.lower():
+            tags.append("air_defense")
+        if "сплеш" in summary.lower() or "рой" in summary.lower():
+            tags.append("splash")
+        if "тяжёл" in summary.lower() or "циклил" in summary.lower():
+            tags.append("cycle")
+        if "заклинан" in summary.lower():
             tags.append("spells")
-        elif analysis.matchup_score >= 55:
-            summary = f"Вы выиграли — удачный матчап ({analysis.matchup_score:.0f}/100)."
+        if "матчап" in summary.lower():
             tags.append("matchup")
-        else:
-            summary = "Вы выиграли — колода сработала лучше, чем ожидалось."
-    elif analysis.opponent_threats:
-        threat = analysis.opponent_threats[0]
-        summary = (
-            f"Вы проиграли — не удалось нейтрализовать «{card_name_ru(threat)}» соперника."
-        )
-        tags.append("threat")
+        if analysis.opponent_threats:
+            tags.append("threat")
     else:
-        clean = (analysis.reasons[0] if analysis.reasons else "").lstrip("📊✅❌⚠️🎯 ")
-        summary = clean or ("Победа" if won else "Поражение")
+        if "матчап" in summary.lower():
+            tags.append("matchup")
+        if "заклинан" in summary.lower():
+            tags.append("spells")
+        if analysis.user_key_cards:
+            tags.append("win_condition")
 
     return {
-        "won": won,
+        "won": analysis.won,
         "opponent_name": opponent.get("name", "Соперник"),
         "summary": summary,
         "tags": tags,
         "matchup_score": round(analysis.matchup_score, 1),
-        "details": analysis.reasons[:4],
+        "details": analysis.reasons[1:5],
         "timestamp": str(battle.get("battleTime") or battle.get("warTime") or ""),
     }
 

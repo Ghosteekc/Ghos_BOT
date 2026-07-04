@@ -145,6 +145,12 @@ COUNTERS: dict[str, list[str]] = {
     "Sparky": ["Zap", "Rocket", "Lightning", "Goblin Barrel", "Miner"],
     "Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "P.E.K.K.A"],
     "P.E.K.K.A": ["Skeleton Army", "Guards", "Goblin Gang", "Inferno Tower"],
+    "Royal Ghost": ["Valkyrie", "Knight", "Barbarians", "Mega Minion", "Poison"],
+    "Bandit": ["Skeleton Army", "Goblin Gang", "Knight", "Tesla"],
+    "Ram Rider": ["Cannon", "Tesla", "Skeleton Army", "P.E.K.K.A"],
+    "Prince": ["Skeleton Army", "Goblin Gang", "Tombstone", "Barbarians"],
+    "Rune Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "Cannon"],
+    "Boss Bandit": ["Inferno Tower", "P.E.K.K.A", "Skeleton Army", "Knight"],
 }
 
 SYNERGIES: dict[str, list[str]] = {

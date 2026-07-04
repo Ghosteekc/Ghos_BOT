@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from bot.api.deps import require_subscription
-from bot.api.schemas import BattleDetailResponse, BattleListResponse, BattleSummary, DeckStatsResponse
+from bot.api.schemas import BattleDetailResponse, BattleListResponse, BattleSummary, DeckStatsResponse, KeyCardEntry
 from bot.models.database import User
 from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 from bot.services.battle_session_cache import set_session_battles
 from bot.services.battle_time import format_battle_played_at
-from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_matchup_score
+from bot.services.battle_report import analyze_battle_enhanced
+from bot.services.deck_analyzer import analyze_deck, calculate_matchup_score
 
 router = APIRouter(prefix="/api/battles", tags=["battles"])
 
@@ -30,7 +31,8 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
     opp_deck = [c["name"] for c in opponent.get("cards", [])]
     won = team.get("crowns", 0) > opponent.get("crowns", 0)
     user_stats = analyze_deck(user_deck)
-    analysis = analyze_battle(team, opponent)
+    duration = int(battle.get("gameDuration") or 0)
+    analysis = analyze_battle_enhanced(team, opponent, duration=duration)
     opp_tag = opponent.get("tag", "") or ""
     raw_time = str(battle.get("battleTime") or battle.get("warTime") or "")
     return BattleSummary(
@@ -45,7 +47,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         avg_elixir=user_stats.avg_elixir,
         user_deck=user_deck,
         opponent_deck=opp_deck,
-        top_reason=analysis.reasons[0] if analysis.reasons else None,
+        top_reason=analysis.outcome_summary or (analysis.reasons[0] if analysis.reasons else None),
         timestamp=raw_time,
         played_at=format_battle_played_at(raw_time),
     )
@@ -87,7 +89,8 @@ async def battle_detail(index: int, user: User = Depends(require_subscription)) 
     battle = battles[index]
     team = battle.get("team", [{}])[0]
     opponent = battle.get("opponent", [{}])[0]
-    analysis = analyze_battle(team, opponent)
+    duration = int(battle.get("gameDuration") or 0)
+    analysis = analyze_battle_enhanced(team, opponent, duration=duration)
     user_stats = analyze_deck(analysis.user_deck)
     opp_stats = analyze_deck(analysis.opponent_deck)
 
@@ -98,20 +101,28 @@ async def battle_detail(index: int, user: User = Depends(require_subscription)) 
             spells=s.spells,
         )
 
+    def _key_cards(items) -> list[KeyCardEntry]:
+        return [KeyCardEntry(name=k.name, name_ru=k.name_ru, note=k.note) for k in items]
+
     return BattleDetailResponse(
         index=index,
         won=analysis.won,
         opponent_name=analysis.opponent_name,
         trophy_change=analysis.trophy_change,
         matchup_score=analysis.matchup_score,
-        duration=int(battle.get("gameDuration") or 0),
+        duration=duration,
         played_at=format_battle_played_at(
             str(battle.get("battleTime") or battle.get("warTime") or "")
         ),
+        crown_score=analysis.crown_score,
+        outcome_summary=analysis.outcome_summary,
         user_deck=analysis.user_deck,
         opponent_deck=analysis.opponent_deck,
         user_stats=_stats(user_stats),
         opponent_stats=_stats(opp_stats),
         reasons=analysis.reasons,
         opponent_threats=analysis.opponent_threats,
+        user_key_cards=_key_cards(analysis.user_key_cards),
+        opponent_key_cards=_key_cards(analysis.opponent_key_cards),
+        low_impact_cards=_key_cards(analysis.low_impact_cards),
     )
