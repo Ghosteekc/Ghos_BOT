@@ -155,13 +155,6 @@ ROFL_DECKS: list[RoflDeck] = [
         "Током бьёт и по вам, и по врагу. Главное — шумно.",
     ),
     RoflDeck(
-        "champion-parade",
-        "Парад чемпионов",
-        ("Skeleton King", "Archer Queen", "Royal Ghost", "Princess",
-         "Bandit", "Magic Archer", "Mega Knight", "Electro Wizard"),
-        "Два чемпиона — лимит игры. Остальная элита просто притворяется легендарками.",
-    ),
-    RoflDeck(
         "pekka-party",
         "Вечеринка П.E.K.K.A",
         ("P.E.K.K.A", "Mini P.E.K.K.A", "Mega Knight", "Prince",
