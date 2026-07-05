@@ -73,6 +73,24 @@ _RARITY_COUNT_FIELDS = {
 }
 
 
+def _star_collection_bonus(star_level: int | None) -> int:
+    """Legacy golden star tiers still add +1 to collection level (starLevel >= 2)."""
+    if star_level is None:
+        return 0
+    return 1 if int(star_level) >= 2 else 0
+
+
+def _card_collection_points(level: int | None, evolution_level: int, star_level: int | None) -> int:
+    """In-game collection level: card level +5 per evo/hero unlock +1 for golden stars."""
+    total = int(level or 0)
+    if evolution_level >= 1:
+        total += 5
+    if evolution_level >= 2:
+        total += 5
+    total += _star_collection_bonus(star_level)
+    return total
+
+
 def build_collection_stats_from_entries(entries: list[dict]) -> dict:
     """Collection level, rarity counts, and cards grouped by in-game level."""
     owned = [e for e in entries if e.get("owned")]
@@ -85,16 +103,19 @@ def build_collection_stats_from_entries(entries: list[dict]) -> dict:
     for card in owned:
         level = card.get("level")
         if level:
-            collection_level += int(level)
             by_level[int(level)] = by_level.get(int(level), 0) + 1
 
         evo = int(card.get("evolution_level") or 0)
         if evo >= 1:
             evolution_count += 1
-            collection_level += 5
         if evo >= 2:
             hero_count += 1
-            collection_level += 5
+
+        collection_level += _card_collection_points(
+            int(level) if level else 0,
+            evo,
+            card.get("star_level"),
+        )
 
         rarity = (card.get("rarity") or "").lower()
         field = _RARITY_COUNT_FIELDS.get(rarity)
@@ -122,11 +143,14 @@ def build_collection_stats_from_player(player: dict) -> dict:
         rarity = (raw.get("rarity") or "").lower()
         api_level = raw.get("level")
         display = to_display_level(int(api_level) if api_level is not None else None, rarity)
+        star_raw = raw.get("starLevel")
+        star_level = int(star_raw) if star_raw is not None else None
         rows.append({
             "owned": True,
             "level": display,
             "rarity": rarity,
             "evolution_level": int(raw.get("evolutionLevel") or 0),
+            "star_level": star_level,
         })
     return build_collection_stats_from_entries(rows)
 
@@ -168,6 +192,8 @@ async def build_player_collection(player: dict) -> dict:
             api_level = int(level_raw) if level_raw is not None else None
             api_max = int(owned_raw.get("maxLevel") or 0) or None
             elixir = _resolve_elixir(info, owned_raw, name)
+            star_raw = owned_raw.get("starLevel")
+            star_level = int(star_raw) if star_raw is not None else None
             card_entries.append({
                 "name": name,
                 "name_ru": card_name_ru(name),
@@ -179,6 +205,7 @@ async def build_player_collection(player: dict) -> dict:
                 "elixir": elixir,
                 "evolution_level": evo,
                 "max_evolution_level": max_evo,
+                "star_level": star_level,
                 "display_mode": mode,
                 "icon": _primary_icon(base, icon_evo, icon_hero, mode),
                 "icon_base": base,
