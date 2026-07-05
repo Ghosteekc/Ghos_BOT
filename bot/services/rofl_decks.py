@@ -157,9 +157,9 @@ ROFL_DECKS: list[RoflDeck] = [
     RoflDeck(
         "champion-parade",
         "Парад чемпионов",
-        ("Skeleton King", "Archer Queen", "Golden Knight", "Mighty Miner",
-         "Monk", "Little Prince", "Bandit", "Magic Archer"),
-        "Только элита. Обычные карты обиделись и ушли.",
+        ("Skeleton King", "Archer Queen", "Royal Ghost", "Princess",
+         "Bandit", "Magic Archer", "Mega Knight", "Electro Wizard"),
+        "Два чемпиона — лимит игры. Остальная элита просто притворяется легендарками.",
     ),
     RoflDeck(
         "pekka-party",

@@ -61,6 +61,22 @@ async def _playable_pool() -> list[str]:
     return pool
 
 
+MAX_CHAMPIONS_PER_DECK = 2
+
+
+def _champion_count(cards: list[str]) -> int:
+    total = 0
+    for name in cards:
+        info = get_card_info(name)
+        if info and (info.get("rarity") or "").lower() == "champion":
+            total += 1
+    return total
+
+
+def _deck_rules_valid(cards: list[str]) -> bool:
+    return _champion_count(cards) <= MAX_CHAMPIONS_PER_DECK
+
+
 async def _rofl_cards_valid(cards: tuple[str, ...]) -> list[str] | None:
     await ensure_cards_loaded()
     resolved: list[str] = []
@@ -69,6 +85,8 @@ async def _rofl_cards_valid(cards: tuple[str, ...]) -> list[str] | None:
         if info and info.get("id") is not None and card in CARD_META:
             resolved.append(card)
     if len(resolved) != 8:
+        return None
+    if not _deck_rules_valid(resolved):
         return None
     if build_deck_share_link(resolved) is None:
         return None
