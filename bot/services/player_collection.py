@@ -64,6 +64,73 @@ def _mastery_next_hint(level: int, progress: int, target: int | None, max_level:
     return f"Продолжайте использовать карту для уровня {level + 1}"
 
 
+_RARITY_COUNT_FIELDS = {
+    "champion": "champion_count",
+    "legendary": "legendary_count",
+    "epic": "epic_count",
+    "rare": "rare_count",
+    "common": "common_count",
+}
+
+
+def build_collection_stats_from_entries(entries: list[dict]) -> dict:
+    """Collection level, rarity counts, and cards grouped by in-game level."""
+    owned = [e for e in entries if e.get("owned")]
+    by_level: dict[int, int] = {}
+    collection_level = 0
+    evolution_count = 0
+    hero_count = 0
+    rarity_counts = {field: 0 for field in _RARITY_COUNT_FIELDS.values()}
+
+    for card in owned:
+        level = card.get("level")
+        if level:
+            collection_level += int(level)
+            by_level[int(level)] = by_level.get(int(level), 0) + 1
+
+        evo = int(card.get("evolution_level") or 0)
+        if evo >= 1:
+            evolution_count += 1
+            collection_level += 5
+        if evo >= 2:
+            hero_count += 1
+            collection_level += 5
+
+        rarity = (card.get("rarity") or "").lower()
+        field = _RARITY_COUNT_FIELDS.get(rarity)
+        if field:
+            rarity_counts[field] += 1
+
+    cards_by_level = [
+        {"level": level, "count": count}
+        for level, count in sorted(by_level.items(), reverse=True)
+    ]
+
+    return {
+        "collection_level": collection_level,
+        "evolution_count": evolution_count,
+        "hero_count": hero_count,
+        "cards_by_level": cards_by_level,
+        **rarity_counts,
+    }
+
+
+def build_collection_stats_from_player(player: dict) -> dict:
+    """Lightweight collection stats from raw CR API player.cards."""
+    rows: list[dict] = []
+    for raw in player.get("cards") or []:
+        rarity = (raw.get("rarity") or "").lower()
+        api_level = raw.get("level")
+        display = to_display_level(int(api_level) if api_level is not None else None, rarity)
+        rows.append({
+            "owned": True,
+            "level": display,
+            "rarity": rarity,
+            "evolution_level": int(raw.get("evolutionLevel") or 0),
+        })
+    return build_collection_stats_from_entries(rows)
+
+
 def _resolve_elixir(info: dict, owned_raw: dict | None, name: str) -> int | None:
     raw = info.get("elixir") or (owned_raw or {}).get("elixirCost")
     if raw is None:
@@ -175,10 +242,12 @@ async def build_player_collection(player: dict) -> dict:
     mastery_entries.sort(key=lambda x: (-x["level"], x["card_name_ru"]))
 
     owned_cards = sum(1 for c in card_entries if c["owned"])
+    collection_stats = build_collection_stats_from_entries(card_entries)
 
     return {
         "cards": card_entries,
         "cards_owned": owned_cards,
         "cards_total": len(card_entries),
         "masteries": mastery_entries,
+        **collection_stats,
     }

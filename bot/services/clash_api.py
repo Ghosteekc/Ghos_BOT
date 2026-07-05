@@ -247,12 +247,30 @@ class SubscriptionService:
             user = User(telegram_id=telegram_id)
             self.session.add(user)
             await self.session.flush()
-            sub = Subscription(user_id=user.id, is_active=False)
+            sub = Subscription(user_id=user.id, is_active=True, expires_at=None)
             self.session.add(sub)
             await self.session.commit()
             await self.session.refresh(user)
             logger.debug(f"Created new user with id: {user.id}")
+        else:
+            await self._ensure_free_access(user)
         return user
+
+    async def _ensure_free_access(self, user: User) -> None:
+        """Paid subscriptions disabled — grant free access to all users."""
+        result = await self.session.execute(
+            select(Subscription).where(Subscription.user_id == user.id)
+        )
+        sub = result.scalar_one_or_none()
+        if sub is None:
+            sub = Subscription(user_id=user.id, is_active=True, expires_at=None)
+            self.session.add(sub)
+            await self.session.commit()
+            return
+        if not sub.is_active or sub.expires_at is not None:
+            sub.is_active = True
+            sub.expires_at = None
+            await self.session.commit()
 
     async def link_player(self, user: User, tag: str, player_data: dict) -> User:
         normalized = normalize_tag(tag)
@@ -270,29 +288,7 @@ class SubscriptionService:
         )
         return user
 
-    async def link_player(self, user: User, tag: str, player_data: dict) -> User:
-        user.player_tag = normalize_tag(tag)
-        user.player_name = player_data.get("name")
-        arena = player_data.get("arena", {})
-        user.arena_id = arena.get("id")
-        user.trophies = player_data.get("trophies")
-        await self.session.commit()
-        await self.session.refresh(user)
-        return user
-
     async def has_active_subscription(self, user: User) -> bool:
-        result = await self.session.execute(
-            select(Subscription).where(Subscription.user_id == user.id)
-        )
-        sub = result.scalar_one_or_none()
-        if sub is None:
-            return False
-        if not sub.is_active:
-            return False
-        if sub.expires_at and _utc_aware(sub.expires_at) < datetime.now(timezone.utc):
-            sub.is_active = False
-            await self.session.commit()
-            return False
         return True
 
     async def activate_trial(self, user: User) -> tuple[bool, str]:
@@ -345,17 +341,5 @@ class SubscriptionService:
         await self.session.commit()
 
     async def get_subscription_info(self, user: User) -> dict:
-        result = await self.session.execute(
-            select(Subscription).where(Subscription.user_id == user.id)
-        )
-        sub = result.scalar_one_or_none()
-        if sub is None or not sub.is_active:
-            return {"active": False, "expires_at": None, "trial_used": False}
-
-        expires = _utc_aware(sub.expires_at)
-        active = expires is None or expires > datetime.now(timezone.utc)
-        return {
-            "active": active,
-            "expires_at": expires,
-            "trial_used": sub.trial_used,
-        }
+        await self._ensure_free_access(user)
+        return {"active": True, "expires_at": None, "trial_used": True}

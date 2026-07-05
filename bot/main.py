@@ -8,7 +8,7 @@ import uvicorn
 
 from bot.api.app import create_app
 from bot.config import settings
-from bot.handlers import admin, player, start, subscription, support
+from bot.handlers import admin, player, start, support
 from bot.middleware.subscription import SubscriptionMiddleware
 from bot.models.database import init_db
 from bot.services import sync_service
@@ -62,7 +62,6 @@ async def main() -> None:
 
     dp.include_router(start.router)
     dp.include_router(player.router)
-    dp.include_router(subscription.router)
     dp.include_router(support.router)
     dp.include_router(admin.router)
 

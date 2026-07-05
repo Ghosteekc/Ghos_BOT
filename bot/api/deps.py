@@ -47,14 +47,7 @@ async def require_linked_player(user: User = Depends(get_current_user)) -> User:
 
 async def require_subscription(
     user: User = Depends(require_linked_player),
-    session: AsyncSession = Depends(get_db),
 ) -> User:
-    sub_service = SubscriptionService(session)
-    if not await sub_service.has_active_subscription(user):
-        raise HTTPException(
-            status_code=402,
-            detail="Subscription required. Use /subscribe in the bot chat.",
-        )
     return user
 
 

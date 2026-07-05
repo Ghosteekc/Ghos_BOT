@@ -69,7 +69,7 @@ async def cmd_link(message: Message) -> None:
             f"🏷 Тег: <code>{tag}</code>\n"
             f"🏆 Кубки: {trophies}\n"
             f"🏟 Арена: {arena.get('name', '?')}\n\n"
-            "Оформите подписку (/subscribe), затем откройте приложение для анализа."
+            "Откройте приложение через Menu Button для анализа боёв и колод."
         )
     except Exception as e:
         logger.error(f"Database error linking player {tag} for user {message.from_user.id}: {e}", exc_info=True)
@@ -82,17 +82,10 @@ async def cmd_profile(message: Message) -> None:
     async with async_session() as session:
         sub_service = SubscriptionService(session)
         user = await sub_service.get_or_create_user(message.from_user.id)
-        info = await sub_service.get_subscription_info(user)
 
     if not user.player_tag:
         await message.answer("❌ Тег не привязан. Используйте /link #ВАШТЕГ")
         return
-
-    sub_status = "✅ Активна"
-    if not info["active"]:
-        sub_status = "❌ Не активна"
-    elif info["expires_at"]:
-        sub_status = f"✅ До {info['expires_at'].strftime('%d.%m.%Y')}"
 
     client = ClashRoyaleClient()
     try:
@@ -119,8 +112,7 @@ async def cmd_profile(message: Message) -> None:
         f"👤 <b>{player.get('name')}</b>\n"
         f"🏷 <code>{user.player_tag}</code>\n"
         f"🏆 {player.get('trophies', 0)} кубков\n"
-        f"🏟 Арена: {arena_name}\n"
-        f"💎 Подписка: {sub_status}"
+        f"🏟 Арена: {arena_name}"
         f"{stats_line}\n\n"
         "📱 Полный анализ — в Mini App (Menu Button в Telegram)."
     )

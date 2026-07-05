@@ -228,9 +228,6 @@ async def list_decks(
     type: str | None = Query(None, alias="type"),
     category: str | None = Query(None),
 ) -> DeckListResponse:
-    from bot.models.database import async_session
-    from bot.services.clash_api import SubscriptionService
-
     filter_type = (type or category or "meta").lower()
     decks: list[DeckEntry] = []
     meta_updated_at: str | None = None
@@ -241,19 +238,6 @@ async def list_decks(
         decks.extend(meta)
 
     if filter_type in ("all", "mine"):
-        async with async_session() as db_session:
-            sub_service = SubscriptionService(db_session)
-            if not await sub_service.has_active_subscription(user):
-                if filter_type == "all" and decks:
-                    return DeckListResponse(
-                        decks=decks,
-                        meta_updated_at=meta_updated_at,
-                        meta_source=meta_source,
-                    )
-                raise HTTPException(
-                    status_code=402,
-                    detail="Подписка нужна для ваших колод. Мета-колоды доступны в фильтре «Мета».",
-                )
         battles = await _get_battles(user)
         user_decks = await _build_user_deck_entries(battles, user.player_tag or "")
         decks.extend(user_decks)

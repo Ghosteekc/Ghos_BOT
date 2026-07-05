@@ -7,6 +7,11 @@ class SubscriptionInfo(BaseModel):
     trial_used: bool
 
 
+class CardLevelCount(BaseModel):
+    level: int
+    count: int
+
+
 class ProfileResponse(BaseModel):
     player_tag: str | None
     player_name: str | None
@@ -23,6 +28,10 @@ class ProfileResponse(BaseModel):
     daily_trophy_change: int | None = None
     max_trophies: int | None = None
     clan_name: str | None = None
+    total_wins: int | None = None
+    three_crown_wins: int | None = None
+    collection_level: int | None = None
+    cards_by_level: list[CardLevelCount] = []
     subscription: SubscriptionInfo
 
 
@@ -65,6 +74,15 @@ class PlayerCollectionResponse(BaseModel):
     cards_owned: int
     cards_total: int
     masteries: list[CollectionMasteryEntry]
+    collection_level: int = 0
+    evolution_count: int = 0
+    hero_count: int = 0
+    champion_count: int = 0
+    legendary_count: int = 0
+    epic_count: int = 0
+    rare_count: int = 0
+    common_count: int = 0
+    cards_by_level: list[CardLevelCount] = []
 
 
 class BattleSummary(BaseModel):

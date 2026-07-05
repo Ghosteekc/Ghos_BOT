@@ -11,8 +11,8 @@ from bot.api.routes.battles import _build_battle_summary
 from bot.services.battle_cache_reader import get_battles_from_cache
 from bot.services.battle_day_stats import compute_daily_trophy_change
 from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
-from bot.services.player_collection import build_player_collection
-from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, SubscriptionService
+from bot.services.player_collection import build_player_collection, build_collection_stats_from_player
+from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ def _profile_from_player(
     clan = player.get("clan") or {}
     fav_name = fav.get("name") if isinstance(fav, dict) else None
     avatar_url, favorite_card_icon = _player_avatar_url(player)
+    collection_stats = build_collection_stats_from_player(player)
 
     return ProfileResponse(
         player_tag=user.player_tag,
@@ -71,6 +72,10 @@ def _profile_from_player(
         clan_name=clan.get("name") if isinstance(clan, dict) else None,
         last_rating_change=last_rating_change,
         daily_trophy_change=daily_trophy_change,
+        total_wins=player.get("wins"),
+        three_crown_wins=player.get("threeCrownWins"),
+        collection_level=collection_stats["collection_level"],
+        cards_by_level=collection_stats["cards_by_level"],
         subscription=SubscriptionInfo(**sub_info),
     )
 
@@ -180,20 +185,18 @@ async def home_dashboard(
     stats: StatsOverviewResponse | None = None
 
     if user.player_tag:
-        sub_service = SubscriptionService(session)
-        if await sub_service.has_active_subscription(user):
-            loaded = await load_and_persist(user)
-            if loaded:
-                battles = loaded
-                cached = await get_cached_stats(user.player_tag)
-                if cached is None:
-                    cached = _stats_from_battles(loaded, user.player_tag)
-                if cached and cached.total > 0:
-                    stats = _build_stats_overview(
-                        cached,
-                        loaded,
-                        user.trophies or profile.max_trophies or 0,
-                    )
+        loaded = await load_and_persist(user)
+        if loaded:
+            battles = loaded
+            cached = await get_cached_stats(user.player_tag)
+            if cached is None:
+                cached = _stats_from_battles(loaded, user.player_tag)
+            if cached and cached.total > 0:
+                stats = _build_stats_overview(
+                    cached,
+                    loaded,
+                    user.trophies or profile.max_trophies or 0,
+                )
 
     summaries = [_build_battle_summary(i, b) for i, b in enumerate(battles[:BATTLE_LOG_LIMIT])]
     return HomeResponse(profile=profile, battles=summaries, stats=stats)
