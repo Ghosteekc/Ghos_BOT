@@ -289,6 +289,40 @@ class DeckCompareResponse(BaseModel):
     reference_worse: list[str]
 
 
+class DeckCardMatchup(BaseModel):
+    card: str
+    card_ru: str = ""
+    winrate: float = 0.0
+    games: int = 0
+    reason: str = ""
+
+
+class DeckImprovementSuggestion(BaseModel):
+    category: str
+    message: str
+    suggested_cards: list[str] = []
+
+
+class MineDeckStatsRequest(BaseModel):
+    cards: list[str]
+
+
+class MineDeckStatsResponse(BaseModel):
+    name: str = ""
+    cards: list[DeckCardInfo] = []
+    wins: int = 0
+    losses: int = 0
+    total_games: int = 0
+    winrate: float = 0.0
+    avg_elixir: float = 0.0
+    win_conditions: list[str] = []
+    strong_against: list[DeckCardMatchup] = []
+    weak_against: list[DeckCardMatchup] = []
+    improvements: list[DeckImprovementSuggestion] = []
+    balanced: bool = False
+    sample_note: str = ""
+
+
 class SearchResult(BaseModel):
     player_tag: str
     player_name: str

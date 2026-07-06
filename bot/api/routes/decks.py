@@ -12,6 +12,10 @@ from bot.api.schemas import (
     DeckCompareRequest,
     DeckCompareResponse,
     DeckEntry,
+    DeckImprovementSuggestion,
+    DeckCardMatchup,
+    MineDeckStatsRequest,
+    MineDeckStatsResponse,
     DeckListResponse,
     InsightsResponse,
     OpponentEntry,
@@ -39,7 +43,9 @@ from bot.services.counter_engine import (
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates, get_most_played_cards
 from bot.services.arena_decks import build_classic_meta_entries, get_arena_popular_decks
 from bot.services.deck_compare import compare_decks
+from bot.services.deck_detail import build_mine_deck_stats
 from bot.services.top_players import get_top_players
+from bot.services.meta_analyzer import _guess_deck_name
 from bot.services.random_deck import generate_random_deck
 from bot.services.battle_insights import build_insights_report
 
@@ -168,7 +174,7 @@ async def _build_user_deck_entries(battles: list, tag: str) -> list[DeckEntry]:
             ))
         decks.append(DeckEntry(
             id=i,
-            name=f"Моя колода #{i + 1}",
+            name=_guess_deck_name(cards),
             cards=card_infos,
             winrate=data["winrate"],
             total_games=data["total"],
@@ -247,6 +253,44 @@ async def list_decks(
         meta_updated_at=meta_updated_at,
         meta_source=meta_source,
     )
+
+
+@router.get("/decks/mine/stats", response_model=MineDeckStatsResponse)
+async def get_mine_deck_stats(
+    deck: str = Query(..., description="8 card names joined by |"),
+    user: User = Depends(require_linked_player),
+) -> MineDeckStatsResponse:
+    cards = [c.strip() for c in deck.split("|") if c.strip()]
+    battles = await _get_battles(user)
+    data = build_mine_deck_stats(battles, user.player_tag or "", cards)
+    if data.get("error"):
+        raise HTTPException(status_code=400, detail=data["error"])
+
+    card_infos = await _cards_to_deck_infos(data["cards"])
+    return MineDeckStatsResponse(
+        name=data["name"],
+        cards=card_infos,
+        wins=data["wins"],
+        losses=data["losses"],
+        total_games=data["total_games"],
+        winrate=data["winrate"],
+        avg_elixir=data["avg_elixir"],
+        win_conditions=data["win_conditions"],
+        strong_against=[DeckCardMatchup(**item) for item in data["strong_against"]],
+        weak_against=[DeckCardMatchup(**item) for item in data["weak_against"]],
+        improvements=[DeckImprovementSuggestion(**item) for item in data["improvements"]],
+        balanced=data["balanced"],
+        sample_note=data["sample_note"],
+    )
+
+
+@router.post("/decks/mine/stats", response_model=MineDeckStatsResponse)
+async def post_mine_deck_stats(
+    body: MineDeckStatsRequest,
+    user: User = Depends(require_linked_player),
+) -> MineDeckStatsResponse:
+    deck = "|".join(sorted(body.cards))
+    return await get_mine_deck_stats(deck=deck, user=user)
 
 
 @router.get("/decks/arena", response_model=ArenaDecksResponse)

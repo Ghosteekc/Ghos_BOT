@@ -118,6 +118,7 @@ CARD_META: dict[str, dict] = {
     "Boss Bandit": {"elixir": 6, "type": "troop", "role": "win_condition"},
     "Rune Giant": {"elixir": 4, "type": "troop", "role": "win_condition"},
     "Spirit Empress": {"elixir": 6, "type": "troop", "role": "support"},
+    "Ronin": {"elixir": 5, "type": "troop", "role": "tank"},
     "Suspicious Bush": {"elixir": 2, "type": "troop", "role": "support"},
     "Vines": {"elixir": 3, "type": "spell", "role": "spell"},
     "Void": {"elixir": 3, "type": "spell", "role": "spell"},
@@ -135,7 +136,7 @@ COUNTERS: dict[str, list[str]] = {
     "Goblin Barrel": ["The Log", "Arrows", "Barbarian Barrel", "Giant Snowball", "Princess"],
     "Lava Hound": ["Inferno Tower", "Inferno Dragon", "Mega Minion", "Musketeer"],
     "Miner": ["Knight", "Valkyrie", "Skeleton Army", "Guards", "Cannon"],
-    "Mega Knight": ["Inferno Tower", "P.E.K.K.A", "Mini P.E.K.K.A", "Inferno Dragon", "Knight"],
+    "Mega Knight": ["Inferno Tower", "P.E.K.K.A", "Mini P.E.K.K.A", "Inferno Dragon", "Knight", "Ronin"],
     "Electro Giant": ["Inferno Tower", "Inferno Dragon", "P.E.K.K.A", "Mini P.E.K.K.A"],
     "Wall Breakers": ["The Log", "Barbarian Barrel", "Skeleton Army", "Goblin Gang"],
     "Battle Ram": ["Cannon", "Tesla", "Tornado", "Skeleton Army"],
@@ -144,13 +145,14 @@ COUNTERS: dict[str, list[str]] = {
     "Three Musketeers": ["Fireball", "Lightning", "Rocket", "Valkyrie"],
     "Sparky": ["Zap", "Rocket", "Lightning", "Goblin Barrel", "Miner"],
     "Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "P.E.K.K.A"],
-    "P.E.K.K.A": ["Skeleton Army", "Guards", "Goblin Gang", "Inferno Tower"],
+    "P.E.K.K.A": ["Skeleton Army", "Guards", "Goblin Gang", "Inferno Tower", "Ronin"],
     "Royal Ghost": ["Valkyrie", "Knight", "Barbarians", "Mega Minion", "Poison"],
     "Bandit": ["Skeleton Army", "Goblin Gang", "Knight", "Tesla"],
     "Ram Rider": ["Cannon", "Tesla", "Skeleton Army", "P.E.K.K.A"],
-    "Prince": ["Skeleton Army", "Goblin Gang", "Tombstone", "Barbarians"],
+    "Prince": ["Skeleton Army", "Goblin Gang", "Tombstone", "Barbarians", "Ronin"],
     "Rune Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "Cannon"],
-    "Boss Bandit": ["Inferno Tower", "P.E.K.K.A", "Skeleton Army", "Knight"],
+    "Boss Bandit": ["Inferno Tower", "P.E.K.K.A", "Skeleton Army", "Knight", "Ronin"],
+    "Ronin": ["Skeleton Army", "Goblin Gang", "Minions", "Musketeer", "Wizard", "Mega Minion"],
 }
 
 SYNERGIES: dict[str, list[str]] = {
@@ -184,7 +186,7 @@ ARENA_CARD_POOL: dict[str, list[str]] = {
             "Ice Golem", "Mega Minion", "Dart Goblin", "Goblin Gang", "Battle Ram"],
     "high": ["Lava Hound", "Graveyard", "Sparky", "Miner", "Bandit", "Night Witch",
              "Royal Ghost", "Magic Archer", "Electro Wizard", "Mega Knight",
-             "Wall Breakers", "Elixir Golem", "Skeleton King", "Phoenix"],
+             "Wall Breakers", "Elixir Golem", "Skeleton King", "Phoenix", "Ronin"],
 }
 
 WIN_CONDITIONS = {
