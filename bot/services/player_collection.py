@@ -106,10 +106,10 @@ def build_collection_stats_from_entries(entries: list[dict]) -> dict:
             by_level[int(level)] = by_level.get(int(level), 0) + 1
 
         evo = int(card.get("evolution_level") or 0)
-        if evo >= 1:
-            evolution_count += 1
         if evo >= 2:
             hero_count += 1
+        elif evo == 1:
+            evolution_count += 1
 
         collection_level += _card_collection_points(
             int(level) if level else 0,

@@ -1,8 +1,15 @@
 import logging
+
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, BaseFilter
 from aiogram.types import Message
 
+from bot.keyboards.menus import (
+    LEGACY_SUBSCRIPTION_BUTTON,
+    MENU_BUTTONS,
+    PROFILE_BUTTON,
+    REGISTRATION_BUTTON,
+)
 from bot.models.database import async_session
 from bot.services.battle_service import get_cached_stats
 from bot.services.clash_api import (
@@ -17,23 +24,33 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+_pending_link: set[int] = set()
 
-@router.message(Command("link"))
-async def cmd_link(message: Message) -> None:
-    args = message.text.split(maxsplit=1) if message.text else []
-    if len(args) < 2:
-        await message.answer(
-            "Укажите тег игрока:\n"
-            "<code>/link #ABC123XYZ</code>\n\n"
-            "Тег можно найти в профиле Clash Royale под именем игрока."
-        )
-        return
+LINK_PROMPT = (
+    "Отправьте <b>только тег</b> игрока Clash Royale.\n\n"
+    "Пример: <code>#ABC123XYZ</code>\n\n"
+    "Тег указан в профиле игры под вашим именем."
+)
 
-    tag = normalize_tag(args[1])
+
+class PendingLinkFilter(BaseFilter):
+    async def __call__(self, message: Message) -> bool:
+        return message.from_user.id in _pending_link
+
+
+async def _prompt_link_tag(message: Message) -> None:
+    _pending_link.add(message.from_user.id)
+    await message.answer(LINK_PROMPT)
+
+
+async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
+    tag = normalize_tag(raw_tag)
     if not validate_tag(tag):
+        _pending_link.add(message.from_user.id)
         await message.answer(
             "❌ Неверный формат тега. Используйте символы: 0289PYLQGRJCUV\n"
-            "Пример: <code>/link #ABC123</code>"
+            "Пример: <code>#ABC123</code>\n\n"
+            "Отправьте тег ещё раз."
         )
         return
 
@@ -45,10 +62,15 @@ async def cmd_link(message: Message) -> None:
         error_msg = f"❌ {str(e)}"
         if e.details and e.status == 403:
             error_msg += f"\n\nДетали: {e.details[:200]}"
+        _pending_link.add(message.from_user.id)
         await message.answer(error_msg)
         return
     except Exception as e:
-        logger.error(f"Unexpected error linking player {tag} for user {message.from_user.id}: {e}", exc_info=True)
+        logger.error(
+            f"Unexpected error linking player {tag} for user {message.from_user.id}: {e}",
+            exc_info=True,
+        )
+        _pending_link.add(message.from_user.id)
         await message.answer(f"❌ Неожиданная ошибка: {str(e)}")
         return
     finally:
@@ -63,6 +85,7 @@ async def cmd_link(message: Message) -> None:
         arena = player.get("arena", {})
         trophies = player.get("trophies", 0)
         logger.info(f"Successfully linked player {tag} to user {message.from_user.id}")
+        _pending_link.discard(message.from_user.id)
         await message.answer(
             f"✅ Аккаунт привязан!\n\n"
             f"👤 <b>{player.get('name')}</b>\n"
@@ -72,19 +95,53 @@ async def cmd_link(message: Message) -> None:
             "Откройте приложение через Menu Button для анализа боёв и колод."
         )
     except Exception as e:
-        logger.error(f"Database error linking player {tag} for user {message.from_user.id}: {e}", exc_info=True)
+        logger.error(
+            f"Database error linking player {tag} for user {message.from_user.id}: {e}",
+            exc_info=True,
+        )
+        _pending_link.add(message.from_user.id)
         await message.answer(f"❌ Ошибка сохранения данных: {str(e)}")
 
 
+@router.message(Command("link"))
+async def cmd_link(message: Message) -> None:
+    args = message.text.split(maxsplit=1) if message.text else []
+    if len(args) < 2:
+        await _prompt_link_tag(message)
+        return
+
+    _pending_link.discard(message.from_user.id)
+    await _link_player_by_tag(message, args[1])
+
+
+@router.message(F.text.in_({REGISTRATION_BUTTON, LEGACY_SUBSCRIPTION_BUTTON}))
+async def btn_registration(message: Message) -> None:
+    await _prompt_link_tag(message)
+
+
+@router.message(F.text, ~F.text.in_(MENU_BUTTONS), PendingLinkFilter())
+async def handle_pending_tag(message: Message) -> None:
+    text = (message.text or "").strip()
+    if not text or text.startswith("/"):
+        await _prompt_link_tag(message)
+        return
+
+    _pending_link.discard(message.from_user.id)
+    await _link_player_by_tag(message, text)
+
+
 @router.message(Command("profile"))
-@router.message(F.text == "👤 Профиль")
+@router.message(F.text == PROFILE_BUTTON)
 async def cmd_profile(message: Message) -> None:
     async with async_session() as session:
         sub_service = SubscriptionService(session)
         user = await sub_service.get_or_create_user(message.from_user.id)
 
     if not user.player_tag:
-        await message.answer("❌ Тег не привязан. Используйте /link #ВАШТЕГ")
+        await message.answer(
+            "❌ Тег не привязан.\n\n"
+            "Нажмите «📝 Регистрация» или отправьте команду /link"
+        )
         return
 
     client = ClashRoyaleClient()
