@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from bot.services.battle_time import battle_day_key, today_key_msk
 
@@ -142,8 +142,11 @@ def _daily_winrate(wins: int, losses: int) -> float:
     return round(wins / total * 100, 1)
 
 
-def build_winrate_by_day(battles: list, *, limit: int = 14) -> list[dict]:
-    """Daily wins/losses and winrate percentage for each day."""
+def build_winrate_by_day(battles: list, *, min_days: int = 7, limit: int = 14) -> list[dict]:
+    """Daily wins/losses and winrate for the last N calendar days (MSK).
+
+    Always returns at least ``min_days`` rows, including days without battles.
+    """
     by_day: dict[str, dict[str, int]] = {}
 
     for battle in battles:
@@ -159,8 +162,12 @@ def build_winrate_by_day(battles: list, *, limit: int = 14) -> list[dict]:
         else:
             entry["losses"] += 1
 
+    span = max(min_days, limit)
+    today = datetime.strptime(today_key_msk(), "%Y%m%d").date()
     rows: list[dict] = []
-    for day_key, data in sorted(by_day.items()):
+    for offset in range(span - 1, -1, -1):
+        day_key = (today - timedelta(days=offset)).strftime("%Y%m%d")
+        data = by_day.get(day_key, {"wins": 0, "losses": 0})
         wins = data["wins"]
         losses = data["losses"]
         rows.append({
@@ -170,4 +177,33 @@ def build_winrate_by_day(battles: list, *, limit: int = 14) -> list[dict]:
             "winrate": _daily_winrate(wins, losses),
         })
 
-    return rows[-limit:]
+    return rows
+
+
+def build_most_used_cards(battles: list, player_tag: str, *, limit: int = 6) -> list[dict]:
+    """Top cards by usage with per-card winrate from battle log."""
+    from bot.services.clash_api import normalize_tag
+
+    tag_norm = normalize_tag(player_tag)
+    stats: dict[str, dict[str, int]] = {}
+    for battle in battles:
+        team = battle.get("team", [{}])[0]
+        if team.get("tag") and normalize_tag(team.get("tag", "")) != tag_norm:
+            continue
+        opponent = battle.get("opponent", [{}])[0]
+        won = team.get("crowns", 0) > opponent.get("crowns", 0)
+        for card in team.get("cards", []):
+            name = card.get("name")
+            if not name:
+                continue
+            entry = stats.setdefault(name, {"count": 0, "wins": 0})
+            entry["count"] += 1
+            if won:
+                entry["wins"] += 1
+
+    rows: list[dict] = []
+    for name, data in sorted(stats.items(), key=lambda item: item[1]["count"], reverse=True)[:limit]:
+        count = data["count"]
+        winrate = round(data["wins"] / count * 100, 1) if count else 0.0
+        rows.append({"name": name, "count": count, "winrate": winrate})
+    return rows

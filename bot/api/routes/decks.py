@@ -1,5 +1,5 @@
 import logging
-from bot.services.battle_day_stats import build_last_results, build_winrate_by_day, compute_daily_trophy_change
+from bot.services.battle_day_stats import build_last_results, build_most_used_cards, build_winrate_by_day, compute_daily_trophy_change
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -186,7 +186,12 @@ async def _build_user_deck_entries(battles: list, tag: str) -> list[DeckEntry]:
     return decks
 
 
-def _build_stats_overview(stats, battles: list, max_trophies: int = 0) -> StatsOverviewResponse:
+def _build_stats_overview(
+    stats,
+    battles: list,
+    player_tag: str,
+    max_trophies: int = 0,
+) -> StatsOverviewResponse:
     elixirs: list[float] = []
     durations: list[int] = []
 
@@ -201,10 +206,7 @@ def _build_stats_overview(stats, battles: list, max_trophies: int = 0) -> StatsO
     winrate_by_day = build_winrate_by_day(battles)
     last_results = build_last_results(battles)
 
-    most_used = [
-        {"name": name, "count": count, "winrate": stats.winrate}
-        for name, count in stats.top_cards
-    ]
+    most_used = build_most_used_cards(battles, player_tag, limit=6) if player_tag else []
     archetypes = [
         {"name": "Игры", "value": stats.total},
         {"name": "Победы", "value": stats.wins},
@@ -564,7 +566,7 @@ async def extended_stats(user: User = Depends(require_subscription)) -> StatsOve
 
     max_trophies = user.trophies or 0
 
-    return _build_stats_overview(stats, battles, max_trophies)
+    return _build_stats_overview(stats, battles, user.player_tag or "", max_trophies)
 
 
 @router.get("/recommendations", response_model=RecommendationsResponse)
