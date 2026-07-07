@@ -8,9 +8,8 @@ from bot.api.schemas import HomeResponse, PlayerCollectionResponse, ProfileRespo
 from bot.models.database import User
 from bot.api.routes.decks import _build_stats_overview, _stats_from_battles
 from bot.api.routes.battles import _build_battle_summary
-from bot.services.battle_cache_reader import get_battles_from_cache
 from bot.services.battle_day_stats import compute_daily_trophy_change
-from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
+from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist, load_pvp_battles
 from bot.services.player_collection import build_player_collection, build_collection_stats_from_player
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
 
@@ -143,10 +142,7 @@ async def get_profile(
 async def _daily_trophy_for_user(user: User) -> int | None:
     if not user.player_tag:
         return None
-    battles = await get_battles_from_cache(user.player_tag)
-    if not battles:
-        loaded = await load_and_persist(user)
-        battles = loaded or []
+    battles = await load_pvp_battles(user.player_tag)
     if not battles:
         return None
     return compute_daily_trophy_change(battles)

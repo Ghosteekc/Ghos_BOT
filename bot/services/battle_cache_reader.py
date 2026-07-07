@@ -24,14 +24,14 @@ def row_to_battle_dict(row: BattleCache, player_tag: str) -> dict:
     won = row.result == "win"
     tag = normalize_tag(player_tag)
     return {
-        "type": "PvP",
+        "type": "cached",
         "battleTime": row.battle_time,
         "gameDuration": 180,
         "team": [{
             "tag": tag,
             "name": "Вы",
             "crowns": 3 if won else 1,
-            "trophyChange": 30 if won else -30,
+            "trophyChange": 0,
             "cards": user_cards,
         }],
         "opponent": [{

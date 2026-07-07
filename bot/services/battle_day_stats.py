@@ -14,11 +14,46 @@ def _normalize_battle_type(raw: str | None) -> str:
 
 
 def is_ladder_1v1(battle: dict) -> bool:
-    """Ladder 1v1 battles that award trophies (excludes 2v2 and casual modes)."""
+    """Ladder 1v1 battles that award trophies (excludes 2v2, classic, casual)."""
     team = battle.get("team") or []
     if len(team) != 1:
         return False
-    return _normalize_battle_type(battle.get("type")) in _LADDER_1V1_TYPES
+    if _normalize_battle_type(battle.get("type")) not in _LADDER_1V1_TYPES:
+        return False
+    if _is_casual_game_mode(battle):
+        return False
+    trophy_change = team[0].get("trophyChange")
+    if trophy_change is None:
+        return False
+    return int(trophy_change) != 0
+
+
+def _is_casual_game_mode(battle: dict) -> bool:
+    raw = battle.get("gameMode")
+    name = ""
+    if isinstance(raw, dict):
+        name = str(raw.get("name") or raw.get("id") or "")
+    elif raw is not None:
+        name = str(raw)
+    key = _normalize_battle_type(name)
+    if not key:
+        return False
+    casual_markers = (
+        "casual",
+        "classic",
+        "2v2",
+        "touchdown",
+        "draft",
+        "dual",
+        "river",
+        "rampage",
+        "challenge",
+        "clan",
+        "war",
+        "boat",
+        "friendly",
+    )
+    return any(marker in key for marker in casual_markers)
 
 
 def _battle_won(battle: dict) -> bool:
@@ -78,10 +113,11 @@ def build_last_results(battles: list, *, limit: int = 14) -> list[dict]:
     return rows
 
 
-def compute_daily_trophy_change(battles: list) -> int:
+def compute_daily_trophy_change(battles: list) -> int | None:
     """Net trophies gained or lost today (MSK) from ladder 1v1 only."""
     today = today_key_msk()
     total = 0
+    counted = 0
     for battle in battles:
         if not is_ladder_1v1(battle):
             continue
@@ -93,6 +129,9 @@ def compute_daily_trophy_change(battles: list) -> int:
         if delta is None:
             continue
         total += int(delta)
+        counted += 1
+    if counted == 0:
+        return None
     return total
 
 
