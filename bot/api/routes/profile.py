@@ -166,7 +166,7 @@ async def get_player_collection(
 
 @router.get("/health")
 async def health() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "stats_days": 14, "ladder_only_daily_trophies": True}
 
 
 @router.get("/home", response_model=HomeResponse)

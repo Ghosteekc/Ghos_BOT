@@ -7,10 +7,33 @@ from datetime import datetime, timedelta
 from bot.services.battle_time import battle_day_key, today_key_msk
 
 _LADDER_1V1_TYPES = frozenset({"pvp", "pathoflegend"})
+_EXCLUDED_BATTLE_TYPES = frozenset({
+    "trail",
+    "twovstwo",
+    "2v2",
+    "clanmate",
+    "friendly",
+    "tournament",
+    "challenge",
+    "warday",
+    "boatbattle",
+    "cached",
+})
+_LADDER_GAME_MODES = frozenset({"ladder", "pathoflegend", "seasonal", "ranked"})
 
 
 def _normalize_battle_type(raw: str | None) -> str:
     return (raw or "").strip().lower().replace(" ", "")
+
+
+def _game_mode_key(battle: dict) -> str:
+    raw = battle.get("gameMode")
+    name = ""
+    if isinstance(raw, dict):
+        name = str(raw.get("name") or raw.get("id") or "")
+    elif raw is not None:
+        name = str(raw)
+    return _normalize_battle_type(name)
 
 
 def is_ladder_1v1(battle: dict) -> bool:
@@ -18,10 +41,19 @@ def is_ladder_1v1(battle: dict) -> bool:
     team = battle.get("team") or []
     if len(team) != 1:
         return False
-    if _normalize_battle_type(battle.get("type")) not in _LADDER_1V1_TYPES:
+
+    battle_type = _normalize_battle_type(battle.get("type"))
+    if battle_type in _EXCLUDED_BATTLE_TYPES:
+        return False
+    if battle_type not in _LADDER_1V1_TYPES:
         return False
     if _is_casual_game_mode(battle):
         return False
+
+    mode_key = _game_mode_key(battle)
+    if battle_type == "pvp" and mode_key and mode_key not in _LADDER_GAME_MODES:
+        return False
+
     trophy_change = team[0].get("trophyChange")
     if trophy_change is None:
         return False
@@ -142,10 +174,10 @@ def _daily_winrate(wins: int, losses: int) -> float:
     return round(wins / total * 100, 1)
 
 
-def build_winrate_by_day(battles: list, *, min_days: int = 7, limit: int = 14) -> list[dict]:
+def build_winrate_by_day(battles: list, *, days: int = 14) -> list[dict]:
     """Daily wins/losses and winrate for the last N calendar days (MSK).
 
-    Always returns at least ``min_days`` rows, including days without battles.
+    Always returns exactly ``days`` rows, including days without battles.
     """
     by_day: dict[str, dict[str, int]] = {}
 
@@ -162,10 +194,9 @@ def build_winrate_by_day(battles: list, *, min_days: int = 7, limit: int = 14) -
         else:
             entry["losses"] += 1
 
-    span = max(min_days, limit)
     today = datetime.strptime(today_key_msk(), "%Y%m%d").date()
     rows: list[dict] = []
-    for offset in range(span - 1, -1, -1):
+    for offset in range(days - 1, -1, -1):
         day_key = (today - timedelta(days=offset)).strftime("%Y%m%d")
         data = by_day.get(day_key, {"wins": 0, "losses": 0})
         wins = data["wins"]

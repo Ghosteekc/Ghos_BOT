@@ -15,10 +15,17 @@ BATTLE_LOG_LIMIT = 25
 
 def filter_pvp_battles(battles: list, player_tag: str) -> list:
     tag = normalize_tag(player_tag)
-    excluded = {"friendly", "clanMate", "warDay", "boatBattle", "challenge"}
+    excluded = frozenset({
+        "friendly",
+        "clanmate",
+        "warday",
+        "boatbattle",
+        "challenge",
+        "cached",
+    })
     result = []
     for b in battles:
-        battle_type = b.get("type") or ""
+        battle_type = (b.get("type") or "").strip().lower().replace(" ", "")
         if battle_type in excluded:
             continue
         team_tag = b.get("team", [{}])[0].get("tag", "")

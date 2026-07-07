@@ -554,7 +554,9 @@ async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyRes
 
 @router.get("/stats", response_model=StatsOverviewResponse)
 async def extended_stats(user: User = Depends(require_subscription)) -> StatsOverviewResponse:
-    battles = await _get_battles(user)
+    battles = await load_and_persist(user, force_refresh=True)
+    if battles is None:
+        raise HTTPException(status_code=502, detail="Failed to load battles from Clash Royale API")
     stats = await get_cached_stats(user.player_tag)
     if stats is None and battles:
         stats = _stats_from_battles(battles, user.player_tag or "")
