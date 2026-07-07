@@ -153,6 +153,23 @@ COUNTERS: dict[str, list[str]] = {
     "Rune Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "Cannon"],
     "Boss Bandit": ["Inferno Tower", "P.E.K.K.A", "Skeleton Army", "Knight", "Ronin"],
     "Ronin": ["Skeleton Army", "Goblin Gang", "Minions", "Musketeer", "Wizard", "Mega Minion"],
+    "Witch": ["Valkyrie", "Knight", "Prince", "Mini P.E.K.K.A", "Baby Dragon", "Poison", "Fireball"],
+    "Mother Witch": ["Valkyrie", "Fireball", "Poison", "Wizard", "Mega Minion"],
+    "Firecracker": ["The Log", "Arrows", "Fireball", "Zap", "Barbarian Barrel"],
+    "Ice Spirit": ["The Log", "Zap", "Giant Snowball", "Barbarian Barrel"],
+    "Goblins": ["The Log", "Zap", "Arrows", "Barbarian Barrel", "Wizard", "Valkyrie"],
+    "Skeletons": ["The Log", "Zap", "Barbarian Barrel", "Giant Snowball", "Arrows"],
+    "Cannon": ["Hog Rider", "Battle Ram", "Giant", "Goblin Drill"],
+    "Tesla": ["Hog Rider", "Battle Ram", "Balloon", "Lava Hound", "Miner"],
+    "Golden Knight": ["Skeleton Army", "Guards", "Mini P.E.K.K.A", "P.E.K.K.A", "Inferno Tower"],
+    "Archer Queen": ["Fireball", "Lightning", "Rocket", "Mini P.E.K.K.A", "Skeleton Army"],
+    "Skeleton King": ["Mini P.E.K.K.A", "Inferno Tower", "P.E.K.K.A", "Poison"],
+    "Mighty Miner": ["Tesla", "Cannon", "Skeleton Army", "Knight"],
+    "Monk": ["Skeleton Army", "Mini P.E.K.K.A", "Inferno Tower", "Knight"],
+    "Little Prince": ["Fireball", "Arrows", "The Log", "Mega Minion"],
+    "Phoenix": ["Inferno Tower", "Inferno Dragon", "Mega Minion", "Musketeer"],
+    "Electro Wizard": ["Sparky", "Elite Barbarians", "Barbarians"],
+    "Tornado": ["Balloon", "Lava Hound", "Miner", "Goblin Barrel"],
 }
 
 SYNERGIES: dict[str, list[str]] = {
