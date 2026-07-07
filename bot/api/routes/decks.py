@@ -374,6 +374,10 @@ async def compare_user_deck(
         user_worse=result["user_worse"],
         reference_better=result["reference_better"],
         reference_worse=result["reference_worse"],
+        user_card_notes=result["user_card_notes"],
+        reference_card_notes=result["reference_card_notes"],
+        matchup_score=result["matchup_score"],
+        opponent_matchup_score=result["opponent_matchup_score"],
     )
 
 

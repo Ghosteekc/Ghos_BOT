@@ -279,6 +279,13 @@ class DeckCompareRequest(BaseModel):
     reference_cards: list[str]
 
 
+class DeckCompareCardNote(BaseModel):
+    card: str
+    card_ru: str = ""
+    tone: str = "neutral"
+    text: str = ""
+
+
 class DeckCompareResponse(BaseModel):
     reference_name: str = ""
     user_deck: list[DeckCardInfo]
@@ -287,6 +294,10 @@ class DeckCompareResponse(BaseModel):
     user_worse: list[str]
     reference_better: list[str]
     reference_worse: list[str]
+    user_card_notes: list[DeckCompareCardNote] = []
+    reference_card_notes: list[DeckCompareCardNote] = []
+    matchup_score: float = 50.0
+    opponent_matchup_score: float = 50.0
 
 
 class DeckCardMatchup(BaseModel):

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from bot.services.card_data import COUNTERS, WIN_CONDITIONS, get_card_role
 from bot.services.card_names_ru import card_name_ru
-from bot.services.deck_analyzer import analyze_deck, find_opponent_threats
+from bot.services.deck_analyzer import analyze_deck, calculate_matchup_score, find_opponent_threats
 
 _ANTI_AIR = {
     "Musketeer", "Wizard", "Executioner", "Inferno Dragon", "Mini P.E.K.K.A",
     "Mega Minion", "Electro Wizard", "Hunter", "Inferno Tower", "Tesla",
     "Archers", "Bats", "Minions", "Phoenix", "Firecracker", "Ice Wizard",
-    "Mega Minion", "Baby Dragon", "Musketeer",
+    "Baby Dragon", "Musketeer",
 }
 
 _AIR_OFFENSE = {
@@ -28,6 +28,25 @@ _SPLASH = {
 _SWARM = {
     "Skeletons", "Goblins", "Goblin Gang", "Minion Horde", "Bats",
     "Skeleton Army", "Guards", "Barbarians", "Spear Goblins", "Wall Breakers",
+}
+
+_BUILDING_COUNTERS = {"Hog Rider", "Battle Ram", "Giant", "Golem", "Royal Giant", "Goblin Drill", "Miner"}
+
+_ROLE_RU = {
+    "win_condition": "атакующая карта",
+    "tank": "танк",
+    "splash": "сплеш",
+    "building": "здание для обороны",
+    "spell": "заклинание",
+    "cycle": "карта для цикла",
+    "support": "поддержка",
+    "swarm": "рой",
+    "air": "воздушная карта",
+}
+
+_HEAVY_WIN_CONS = {
+    "Balloon", "Golem", "Lava Hound", "Giant", "P.E.K.K.A", "Electro Giant",
+    "Royal Giant", "Sparky", "Three Musketeers",
 }
 
 
@@ -61,6 +80,11 @@ def _effective_counters(deck: list[str], threat: str) -> list[str]:
     return [c for c in counters if c in deck and c != threat]
 
 
+def _recommended_counters(threat: str, deck: list[str], *, limit: int = 3) -> list[str]:
+    deck_set = set(deck)
+    return [c for c in COUNTERS.get(threat, []) if c not in deck_set][:limit]
+
+
 def _dedupe(items: list[str], limit: int = 6) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -69,6 +93,136 @@ def _dedupe(items: list[str], limit: int = 6) -> list[str]:
             seen.add(item)
             out.append(item)
     return out[:limit]
+
+
+def _attack_phrase(card: str) -> str:
+    if card in _HEAVY_WIN_CONS:
+        return "сильная атакующая карта"
+    if card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
+        return "хорошая атакующая карта"
+    return _ROLE_RU.get(get_card_role(card), "карта")
+
+
+def _analyze_own_card(card: str, own_deck: list[str], opp_deck: list[str]) -> dict:
+    """How useful is this card in your deck against the other deck."""
+    label = _label(card)
+    role = get_card_role(card)
+    is_threat = card in WIN_CONDITIONS or role == "win_condition"
+    opp_counters = _effective_counters(opp_deck, card)
+    opp_buildings = [c for c in opp_deck if get_card_role(c) == "building"]
+    opp_threats = find_opponent_threats(opp_deck)
+    counters_threats = [
+        t for t in opp_threats
+        if card in COUNTERS.get(t, []) and card in own_deck
+    ]
+
+    tone = "neutral"
+    text = ""
+
+    if is_threat:
+        text = f"{label} — {_attack_phrase(card)}"
+        if opp_counters:
+            tone = "warn"
+            text += f", но у соперника есть {_labels(opp_counters)} против неё"
+        elif opp_buildings and card in _BUILDING_COUNTERS:
+            tone = "warn"
+            text += f", но соперник может поставить {_labels(opp_buildings)} в центр"
+        else:
+            tone = "good"
+            text += ", сопернику сложнее остановить эту угрозу"
+    elif role == "building":
+        tone = "good" if any(t in _BUILDING_COUNTERS for t in opp_threats) else "neutral"
+        text = f"{label} — здание для обороны"
+        if opp_threats:
+            text += f", помогает держать {_labels(opp_threats)} соперника"
+    elif counters_threats:
+        tone = "good"
+        text = f"{label} — ответ на {_labels(counters_threats)} соперника"
+    elif role == "splash" and _has_swarm(opp_deck):
+        tone = "good"
+        text = f"{label} — сплеш, эффективен против роя соперника"
+    elif (card in _ANTI_AIR or role == "air") and _has_air_offense(opp_deck):
+        tone = "good"
+        text = f"{label} — защита от воздуха соперника"
+    elif role == "spell":
+        text = f"{label} — заклинание для контроля поля и добивания башен"
+    elif role in ("cycle", "swarm"):
+        text = f"{label} — {_ROLE_RU.get(role, 'карта')} для быстрого цикла"
+    else:
+        text = f"{label} — {_ROLE_RU.get(role, 'поддержка')} в вашей колоде"
+
+    return {"card": card, "card_ru": label, "tone": tone, "text": text}
+
+
+def _analyze_enemy_card(card: str, enemy_deck: list[str], your_deck: list[str]) -> dict:
+    """How dangerous is opponent card against your deck + what to do."""
+    label = _label(card)
+    role = get_card_role(card)
+    is_threat = card in WIN_CONDITIONS or role == "win_condition"
+    your_counters = _effective_counters(your_deck, card)
+    your_buildings = [c for c in your_deck if get_card_role(c) == "building"]
+    partial_air = card in _AIR_OFFENSE and bool(set(your_deck) & _ANTI_AIR) and not your_counters
+
+    tone = "neutral"
+    text = ""
+
+    if is_threat:
+        text = f"{label} — {_attack_phrase(card)}"
+        if your_counters:
+            if len(your_counters) >= 2 or (your_buildings and card in _BUILDING_COUNTERS):
+                tone = "warn"
+                parts = _labels(your_counters)
+                if your_buildings and card in _BUILDING_COUNTERS:
+                    parts = f"{parts}, {_labels(your_buildings)}"
+                text += f", у вас есть {parts} для защиты — важен тайминг"
+            else:
+                tone = "bad"
+                text += f", у вас есть {_labels(your_counters)} для дефа, но этого недостаточно"
+                rec = _recommended_counters(card, your_deck)
+                if rec:
+                    text += f", рекомендуется {_labels(rec)}"
+        elif partial_air:
+            tone = "bad"
+            air_cards = [c for c in your_deck if c in _ANTI_AIR][:2]
+            text += f", у вас есть {_labels(air_cards)} для дефа, но этого недостаточно"
+            rec = _recommended_counters(card, your_deck) or ["Inferno Tower", "Musketeer", "Tesla"]
+            text += f", рекомендуется {_labels(rec)}"
+        else:
+            tone = "bad"
+            rec = _recommended_counters(card, your_deck) or list(COUNTERS.get(card, [])[:3])
+            if rec:
+                text += f", у вас нет надёжного ответа — рекомендуется {_labels(rec)}"
+            else:
+                text += ", у вас нет прямого счётчика — усилите оборону"
+    elif role == "building":
+        your_breakers = [
+            c for c in your_deck
+            if c in {"Earthquake", "Miner", "Royal Giant", "Rocket", "Lightning"}
+        ]
+        if your_breakers:
+            tone = "warn"
+            text = f"{label} — здание соперника, ваш {_labels(your_breakers)} может его ломать"
+        else:
+            tone = "neutral"
+            text = f"{label} — здание для обороны соперника"
+    elif role == "splash" and _has_swarm(your_deck):
+        tone = "warn"
+        text = f"{label} — сплеш соперника зачищает ваш рой"
+    elif (card in _ANTI_AIR or role == "air") and _has_air_offense(your_deck):
+        tone = "warn"
+        text = f"{label} — воздушная защита соперника против вашего воздуха"
+    elif role == "spell":
+        text = f"{label} — заклинание соперника для контроля и добивания"
+    else:
+        text = f"{label} — {_ROLE_RU.get(role, 'поддержка')} в колоде соперника"
+
+    return {"card": card, "card_ru": label, "tone": tone, "text": text}
+
+
+def _build_card_notes(user_cards: list[str], ref_cards: list[str]) -> tuple[list[dict], list[dict]]:
+    user_notes = [_analyze_own_card(c, user_cards, ref_cards) for c in user_cards]
+    ref_notes = [_analyze_enemy_card(c, ref_cards, user_cards) for c in ref_cards]
+    return user_notes, ref_notes
 
 
 def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict[str, list[str]]:
@@ -83,10 +237,15 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict[str, list
             "user_worse": ["Нужна полная колода из 8 карт для сравнения"],
             "reference_better": [],
             "reference_worse": [],
+            "user_card_notes": [],
+            "reference_card_notes": [],
+            "matchup_score": 50.0,
+            "opponent_matchup_score": 50.0,
         }
 
     u = analyze_deck(user_cards)
     r = analyze_deck(ref_cards)
+    user_notes, ref_notes = _build_card_notes(user_cards, ref_cards)
 
     # --- Win conditions: can each deck stop the other's plan? ---
     for threat in find_opponent_threats(ref_cards):
@@ -177,4 +336,8 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict[str, list
         "user_worse": _dedupe(user_worse),
         "reference_better": _dedupe(ref_better),
         "reference_worse": _dedupe(ref_worse),
+        "user_card_notes": user_notes,
+        "reference_card_notes": ref_notes,
+        "matchup_score": round(calculate_matchup_score(user_cards, ref_cards), 1),
+        "opponent_matchup_score": round(calculate_matchup_score(ref_cards, user_cards), 1),
     }
