@@ -3,15 +3,33 @@
 import logging
 import re
 
+from bot.config import settings
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
 
 logger = logging.getLogger(__name__)
 
 _cards_by_name: dict[str, dict] | None = None
 
+# CDN URLs from /cards API can 404 until Supercell publishes the asset.
+_CARD_ICON_FALLBACKS: dict[str, str] = {
+    "ronin": "/cards/ronin.png",
+}
+
 
 def _normalize_name(name: str) -> str:
     return name.strip().lower()
+
+
+def _resolve_card_icon(name: str, api_icon: str) -> str:
+    fallback_path = _CARD_ICON_FALLBACKS.get(_normalize_name(name))
+    if fallback_path:
+        return f"{settings.webapp_url.rstrip('/')}{fallback_path}"
+    return api_icon
+
+
+def resolve_card_icon(name: str, api_icon: str) -> str:
+    """Public wrapper for icon URL with CDN fallbacks."""
+    return _resolve_card_icon(name, api_icon)
 
 
 async def ensure_cards_loaded() -> dict[str, dict]:
@@ -35,10 +53,11 @@ async def ensure_cards_loaded() -> dict[str, dict]:
         if not name:
             continue
         icons = item.get("iconUrls") or {}
+        api_icon = icons.get("medium") or icons.get("small") or ""
         result[_normalize_name(name)] = {
             "name": name,
             "id": item.get("id"),
-            "icon": icons.get("medium") or icons.get("small") or "",
+            "icon": _resolve_card_icon(name, api_icon),
             "evolution_icon": icons.get("evolutionMedium") or "",
             "hero_icon": icons.get("heroMedium") or "",
             "max_evolution_level": int(item.get("maxEvolutionLevel") or 0),

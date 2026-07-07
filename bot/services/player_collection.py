@@ -8,7 +8,7 @@ import re
 from bot.services.card_data import get_card_elixir
 from bot.services.card_level import to_display_level, to_display_max_level
 from bot.services.card_names_ru import card_name_ru
-from bot.services.card_registry import ensure_cards_loaded, get_card_info, resolve_card_name
+from bot.services.card_registry import ensure_cards_loaded, get_card_info, resolve_card_icon, resolve_card_name
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,10 @@ def _card_display_mode(evo_level: int, owned: bool) -> str:
 
 
 def _resolve_icons(owned_raw: dict | None, info: dict) -> tuple[str, str, str]:
+    name = info.get("name") or (owned_raw or {}).get("name") or ""
     icons = (owned_raw or {}).get("iconUrls") or {}
-    base = icons.get("medium") or icons.get("small") or info.get("icon") or ""
+    api_base = icons.get("medium") or icons.get("small") or info.get("icon") or ""
+    base = resolve_card_icon(name, api_base) if name else api_base
     evo = icons.get("evolutionMedium") or info.get("evolution_icon") or base
     hero = icons.get("heroMedium") or info.get("hero_icon") or base
     return base, evo, hero
