@@ -75,22 +75,25 @@ _RARITY_COUNT_FIELDS = {
 }
 
 
-def _star_collection_bonus(star_level: int | None) -> int:
-    """Legacy golden star tiers still add +1 to collection level (starLevel >= 2)."""
-    if star_level is None:
-        return 0
-    return 1 if int(star_level) >= 2 else 0
-
-
-def _card_collection_points(level: int | None, evolution_level: int, star_level: int | None) -> int:
-    """In-game collection level: card level +5 per evo/hero unlock +1 for golden stars."""
+def _card_collection_points(level: int | None, evolution_level: int) -> int:
+    """In-game collection level: card level +5 per evo/hero unlock."""
     total = int(level or 0)
     if evolution_level >= 1:
         total += 5
     if evolution_level >= 2:
         total += 5
-    total += _star_collection_bonus(star_level)
     return total
+
+
+def _tower_princess_collection_points(player: dict) -> int:
+    """Tower Princess level from supportCards (matches in-game collection level)."""
+    for raw in player.get("supportCards") or []:
+        if raw.get("name") != "Tower Princess":
+            continue
+        rarity = (raw.get("rarity") or "common").lower()
+        api_level = raw.get("level")
+        return to_display_level(int(api_level) if api_level is not None else None, rarity) or 0
+    return 0
 
 
 def build_collection_stats_from_entries(entries: list[dict]) -> dict:
@@ -116,7 +119,6 @@ def build_collection_stats_from_entries(entries: list[dict]) -> dict:
         collection_level += _card_collection_points(
             int(level) if level else 0,
             evo,
-            card.get("star_level"),
         )
 
         rarity = (card.get("rarity") or "").lower()
@@ -154,7 +156,9 @@ def build_collection_stats_from_player(player: dict) -> dict:
             "evolution_level": int(raw.get("evolutionLevel") or 0),
             "star_level": star_level,
         })
-    return build_collection_stats_from_entries(rows)
+    stats = build_collection_stats_from_entries(rows)
+    stats["collection_level"] += _tower_princess_collection_points(player)
+    return stats
 
 
 def _resolve_elixir(info: dict, owned_raw: dict | None, name: str) -> int | None:
@@ -272,6 +276,7 @@ async def build_player_collection(player: dict) -> dict:
 
     owned_cards = sum(1 for c in card_entries if c["owned"])
     collection_stats = build_collection_stats_from_entries(card_entries)
+    collection_stats["collection_level"] += _tower_princess_collection_points(player)
 
     return {
         "cards": card_entries,
