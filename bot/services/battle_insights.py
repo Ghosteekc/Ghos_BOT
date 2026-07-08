@@ -57,7 +57,13 @@ def build_battle_insight(battle: dict, player_tag: str) -> dict | None:
     }
 
 
-def build_insights_report(battles: list[dict], player_tag: str, limit: int = 10) -> dict:
+def build_insights_report(
+    battles: list[dict],
+    player_tag: str,
+    limit: int = 7,
+    *,
+    losses_only: bool = True,
+) -> dict:
     insights: list[dict] = []
     tag_counter: Counter[str] = Counter()
 
@@ -67,10 +73,11 @@ def build_insights_report(battles: list[dict], player_tag: str, limit: int = 10)
         row = build_battle_insight(battle, player_tag)
         if not row:
             continue
+        if losses_only and row["won"]:
+            continue
         row["battle_index"] = i
         insights.append(row)
-        if not row["won"]:
-            tag_counter.update(row["tags"])
+        tag_counter.update(row["tags"])
 
     patterns: list[str] = []
     if tag_counter.get("air_defense", 0) >= 2:
@@ -86,8 +93,6 @@ def build_insights_report(battles: list[dict], player_tag: str, limit: int = 10)
 
     wins = sum(1 for x in insights if x["won"])
     losses = len(insights) - wins
-    if insights and wins >= 3 and not patterns:
-        patterns.append(f"Хорошая серия: {wins} побед из последних {len(insights)} боёв.")
 
     return {
         "insights": insights,

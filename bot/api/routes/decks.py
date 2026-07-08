@@ -447,7 +447,7 @@ async def battle_insights(user: User = Depends(require_subscription)) -> Insight
     if not battles:
         raise HTTPException(status_code=404, detail="Нет боёв для анализа")
 
-    report = build_insights_report(battles, user.player_tag or "", limit=BATTLE_LOG_LIMIT)
+    report = build_insights_report(battles, user.player_tag or "", limit=7, losses_only=True)
     return InsightsResponse(**report)
 
 
