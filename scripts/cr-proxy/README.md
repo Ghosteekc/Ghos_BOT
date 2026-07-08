@@ -1,11 +1,11 @@
-# Railway + VPS proxy для Clash Royale API
+# VPS proxy для Clash Royale API
 
 Схема:
 
 ```
-Telegram Bot (Railway)  →  VPS nginx (статический IP)  →  api.clashroyale.com
-                              ↑
-                    whitelist этого IP в developer.clashroyale.com
+Бот (ПК / VPS)  →  VPS nginx (статический IP)  →  api.clashroyale.com
+                         ↑
+               whitelist этого IP в developer.clashroyale.com
 ```
 
 ## Шаг 1. VPS со статическим IP (бесплатные варианты)
@@ -18,8 +18,8 @@ Telegram Bot (Railway)  →  VPS nginx (статический IP)  →  api.cla
 ## Шаг 2. Clash Royale API key
 
 1. [developer.clashroyale.com](https://developer.clashroyale.com) → Create / Edit Key.
-2. В **Allowed IP Addresses** добавьте **только IP VPS** (не Railway).
-3. Скопируйте **Token** — он пойдёт в `CLASH_ROYALE_API_KEY` на Railway.
+2. В **Allowed IP Addresses** добавьте **только IP VPS** (не IP вашего ПК).
+3. Скопируйте **Token** — он пойдёт в `CLASH_ROYALE_API_KEY` в `.env` бота.
 
 ## Шаг 3. Nginx на VPS
 
@@ -56,7 +56,7 @@ curl -s -o /dev/null -w "%{http_code}" \
 
 Ожидается `200`. Без секрета — `403`.
 
-## Шаг 4. Переменные на Railway
+## Шаг 4. Переменные в `.env` бота
 
 | Переменная | Значение |
 |------------|----------|
@@ -71,7 +71,7 @@ CLASH_ROYALE_API_BASE=http://203.0.113.50/v1
 CLASH_ROYALE_PROXY_SECRET=a1b2c3d4e5f6...64 символа...
 ```
 
-**Redeploy** сервиса на Railway.
+Перезапустите бота после изменения `.env`.
 
 ## Шаг 5. Проверка /link
 
@@ -79,7 +79,7 @@ CLASH_ROYALE_PROXY_SECRET=a1b2c3d4e5f6...64 символа...
 
 Если ошибка `invalidIp` — IP в whitelist не совпадает с IP VPS (проверьте `curl ifconfig.me` на VPS).
 
-Если `Invalid authorization` — неверный `CLASH_ROYALE_API_KEY` на Railway.
+Если `Invalid authorization` — неверный `CLASH_ROYALE_API_KEY` в `.env`.
 
 ## HTTPS (опционально)
 
@@ -88,10 +88,10 @@ CLASH_ROYALE_PROXY_SECRET=a1b2c3d4e5f6...64 символа...
 1. Бесплатный домен (DuckDNS, etc.) → A-запись на IP VPS.
 2. `sudo apt install certbot python3-certbot-nginx`
 3. `sudo certbot --nginx -d your.domain.com`
-4. На Railway: `CLASH_ROYALE_API_BASE=https://your.domain.com/v1`
+4. В `.env`: `CLASH_ROYALE_API_BASE=https://your.domain.com/v1`
 
 ## Безопасность
 
 - Секрет `X-CR-Proxy-Secret` не даёт посторонним использовать ваш прокси.
-- API key храните только на Railway, не в git.
+- API key храните только в `.env`, не в git.
 - SSH на VPS — только по ключу, отключите password login.

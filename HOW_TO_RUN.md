@@ -68,79 +68,53 @@ FastAPI будет раздавать собранный frontend из `webapp/d
 
 ---
 
-## 2. Развёртывание на Railway
+## 2. Продакшен: GitHub + Vercel + localtunnel
 
-### Способ 1: Через GitHub
+Код хранится на GitHub: [Ghosteekc/Ghos_BOT](https://github.com/Ghosteekc/Ghos_BOT).
 
-1. Запушьте репозиторий на GitHub.
-2. Создайте новый проект на Railway → **Deploy from GitHub** → выберите ваш репозиторий.
-3. Railway автоматически подхватит `railway.json`.
+| Компонент | Где работает |
+|-----------|--------------|
+| **Backend** (бот + API) | Ваш ПК или VPS: `python -m bot.main` |
+| **HTTPS для API** | [localtunnel](scripts/localtunnel/README.md) или [Cloudflare Tunnel](scripts/cloudflare-tunnel/README.md) |
+| **Mini App** | [Vercel](https://vercel.com) (отдельный репозиторий `webapp`) |
+| **Clash Royale API** | Прямой доступ или VPS-прокси ([cr-proxy](scripts/cr-proxy/README.md)) |
 
-### Способ 2: Через Railway CLI
+### Обновление кода на GitHub
 
 ```bash
-npm install -g @railway/cli
-railway login
-railway init
-railway up
+git add .
+git commit -m "описание изменений"
+git push origin main
 ```
 
-### Переменные окружения на Railway
+После пуша перезапустите бота на машине, где он работает:
 
-В разделе **Variables** Railway добавьте:
+```bash
+python -m bot.main
+```
+
+### Переменные окружения (.env)
 
 | Имя | Значение | Обязательно |
 |---|---|---|
 | `BOT_TOKEN` | Токен бота от @BotFather | ✅ |
 | `CLASH_ROYALE_API_KEY` | Ключ Clash Royale API | ✅ |
+| `WEBAPP_URL` | HTTPS URL Mini App на Vercel | ✅ |
 | `ADMIN_TELEGRAM_ID` | Ваш Telegram ID | опционально |
-| `WEBAPP_URL` | `https://<ваш-проект>.up.railway.app` | ✅ |
 | `TRIAL_DAYS` | `3` | опционально |
 | `SUBSCRIPTION_PRICE_STARS` | `250` | опционально |
 
-> **Важно:** `WEBAPP_URL` должен быть HTTPS URL вашего Railway проекта (например, `https://ghosteek-cr-assistant.up.railway.app`). Telegram WebApp требует HTTPS.
-
-### Как узнать URL Railway
-
-После деплоя в разделе **Settings → Domains** вы увидите assigned domain, например:
-```
-https://ghosteek-cr-assistant.up.railway.app
-```
-
-Именно его укажите в `WEBAPP_URL`.
+На Vercel в переменных проекта `webapp` укажите `VITE_API_URL` — HTTPS URL туннеля к API (см. `scripts/localtunnel/README.md`).
 
 ### Проверка деплоя
 
-1. Откройте бота в Telegram → `/start`
-2. Нажмите «📱 Открыть приложение»
-3. Мини-приложение должно открыться внутри Telegram
+1. `curl -H "Bypass-Tunnel-Reminder: true" https://ВАШ-URL.loca.lt/api/health` → `{"status":"ok"}`
+2. Откройте бота в Telegram → `/start` → «📱 Открыть приложение»
+3. Проверьте уровень коллекции в профиле
 
 ### Health check
 
-Railway будет проверять `/api/health` каждые 30 секунд. Если бот не отвечает, Railway перезапустит контейнер.
-
----
-
-## 3. Развёртывание на GitHub Pages (альтернатива Railway)
-
-Если вы хотите разместить frontend на GitHub Pages, а backend на Railway:
-
-### Frontend на GitHub Pages
-
-1. В `webapp/vite.config.ts` установите `base: "/<имя-репо>/"`.
-2. Соберите frontend:
-   ```bash
-   cd webapp
-   npm install
-   npm run build
-   ```
-3. Запушьте содержимое `webapp/dist/` в ветку `gh-pages` или используйте GitHub Actions для деплоя.
-
-### Backend на Railway
-
-- Развёртывайте Python-часть на Railway как обычно.
-- Укажите в `WEBAPP_URL` ссылку на GitHub Pages.
-- Добавьте в CORS (в `bot/api/app.py`) ваш GitHub Pages URL.
+Туннель проксирует `/api/health`. Скрипт `start-tunnel.ps1` перезапускает localtunnel при обрыве.
 
 ---
 
@@ -165,7 +139,6 @@ F:\ss
 │   ├── dist/               # Сборка (игнорируется в git)
 │   └── package.json
 ├── requirements.txt        # Python зависимости
-├── railway.json           # Конфигурация Railway
 ├── build.sh               # Скрипт сборки
 ├── .env.example           # Шаблон переменных окружения
 └── HOW_TO_RUN.md          # Этот файл
@@ -180,7 +153,7 @@ F:\ss
 | `ModuleNotFoundError: No module named 'uvicorn'` | `pip install -r requirements.txt` |
 | `ModuleNotFoundError: No module named 'fastapi'` | `pip install -r requirements.txt` |
 | Бот не запускается, ошибка `ObjectNotExecutableError` | Исправлена в текущей версии, обновите `bot/models/database.py` |
-| Mini App не открывается Railway | Проверьте `WEBAPP_URL` — должен быть `https://...up.railway.app` |
+| Mini App не открывается | Проверьте `WEBAPP_URL` на Vercel и что туннель к API жив |
 | Mini App не открывается локально | Убедитесь, что frontend запущен (`npm run dev`) и `WEBAPP_URL=http://localhost:5173` |
 | API ошибки в Mini App | Проверьте, что пользователь привязал тег (`/link`) и есть активная подписка (`/subscribe`) |
 | Clash Royale API 403 `invalidIp` | Добавьте IP сервера в настройки ключа на developer.clashroyale.com или используйте ключ без IP-ограничения |
