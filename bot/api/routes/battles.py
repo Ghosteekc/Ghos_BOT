@@ -7,6 +7,7 @@ from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load
 from bot.services.battle_session_cache import set_session_battles
 from bot.services.battle_time import format_battle_played_at
 from bot.services.battle_report import analyze_battle_enhanced
+from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_analyzer import analyze_deck, calculate_matchup_score
 
 router = APIRouter(prefix="/api/battles", tags=["battles"])
@@ -59,7 +60,7 @@ async def list_battles(user: User = Depends(require_subscription)) -> BattleList
     if battles is None:
         raise HTTPException(
             status_code=502,
-            detail="Не удалось загрузить бои. Проверьте API-ключ Clash Royale.",
+            detail="Не удалось загрузить бои. Попробуйте позже.",
         )
 
     _set_battle_cache(user, battles)
@@ -80,11 +81,11 @@ async def battle_detail(index: int, user: User = Depends(require_subscription)) 
     if battles is None:
         battles = await load_and_persist(user)
         if battles is None:
-            raise HTTPException(status_code=502, detail="Failed to load battles")
+            raise HTTPException(status_code=502, detail="Не удалось загрузить бои")
         _set_battle_cache(user, battles)
 
     if index < 0 or index >= len(battles):
-        raise HTTPException(status_code=404, detail="Battle not found")
+        raise HTTPException(status_code=404, detail="Бой не найден")
 
     battle = battles[index]
     team = battle.get("team", [{}])[0]
@@ -121,7 +122,9 @@ async def battle_detail(index: int, user: User = Depends(require_subscription)) 
         user_stats=_stats(user_stats),
         opponent_stats=_stats(opp_stats),
         reasons=analysis.reasons,
-        opponent_threats=analysis.opponent_threats,
+        opponent_threats=[
+            card_name_ru(threat, short=True) or threat for threat in analysis.opponent_threats
+        ],
         user_key_cards=_key_cards(analysis.user_key_cards),
         opponent_key_cards=_key_cards(analysis.opponent_key_cards),
         low_impact_cards=_key_cards(analysis.low_impact_cards),

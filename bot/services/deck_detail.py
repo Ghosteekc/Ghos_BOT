@@ -83,10 +83,10 @@ def _analyze_opponent_card_matchups(deck_cards: list[str], deck_battles: list[di
             })
         elif wr <= 45 or (not counters and wr < 52):
             if counters:
-                reason = f"WR {wr:.0f}% — счётчик есть, но матчап слабый"
+                reason = f"Винрейт {wr:.0f}% — счётчик есть, но матчап слабый"
             else:
                 rec = ", ".join(card_name_ru(c, short=True) or c for c in COUNTERS.get(card, [])[:3])
-                reason = f"WR {wr:.0f}% — нет прямого счётчика"
+                reason = f"Винрейт {wr:.0f}% — нет прямого счётчика"
                 if rec:
                     reason += f". Подойдут: {rec}"
             weak.append({

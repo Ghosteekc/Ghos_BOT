@@ -257,7 +257,7 @@ async def _refresh_meta() -> MetaCache:
                 "type": "meta",
                 "category": _guess_category(names),
                 "deck_link": build_deck_share_link(names),
-                "description": f"Встречается у топов: {usage} боёв · WR {wr:.0f}%",
+                "description": f"Встречается у топов: {usage} боёв · винрейт {wr:.0f}%",
             })
         if entries:
             return MetaCache(

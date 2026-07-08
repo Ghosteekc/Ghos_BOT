@@ -154,7 +154,7 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
     if user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
         if not won:
             reasons.append(
-                f"❌ Ваша колода тяжелее ({user_stats.avg_elixir} vs "
+                f"❌ Ваша колода тяжелее ({user_stats.avg_elixir} против "
                 f"{opp_stats.avg_elixir} эликсира) — соперник быстрее циклил"
             )
         else:

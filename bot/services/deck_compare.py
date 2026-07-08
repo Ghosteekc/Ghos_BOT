@@ -320,11 +320,11 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict:
         u_air = len(set(user_cards) & _ANTI_AIR)
         r_air = len(set(ref_cards) & _ANTI_AIR)
         if u_air > r_air:
-            user_better.append(f"Лучше защита от воздуха ({u_air} vs {r_air} карт)")
-            ref_worse.append(f"Слабее против воздуха ({r_air} vs {u_air} карт)")
+            user_better.append(f"Лучше защита от воздуха ({u_air} против {r_air} карт)")
+            ref_worse.append(f"Слабее против воздуха ({r_air} против {u_air} карт)")
         elif r_air > u_air:
-            user_worse.append(f"Слабее против воздуха ({u_air} vs {r_air} карт)")
-            ref_better.append(f"Лучше защита от воздуха ({r_air} vs {u_air} карт)")
+            user_worse.append(f"Слабее против воздуха ({u_air} против {r_air} карт)")
+            ref_better.append(f"Лучше защита от воздуха ({r_air} против {u_air} карт)")
 
     if _has_swarm(ref_cards) or _has_swarm(user_cards):
         u_spl = len(set(user_cards) & _SPLASH)
@@ -337,11 +337,11 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict:
             user_worse.append("Ваш рой легче зачищается")
 
     if u.avg_elixir + 0.3 < r.avg_elixir:
-        user_better.append(f"Быстрее цикл ({u.avg_elixir} vs {r.avg_elixir} эликсира)")
-        ref_worse.append(f"Медленнее цикл ({r.avg_elixir} vs {u.avg_elixir} эликсира)")
+        user_better.append(f"Быстрее цикл ({u.avg_elixir} против {r.avg_elixir} эликсира)")
+        ref_worse.append(f"Медленнее цикл ({r.avg_elixir} против {u.avg_elixir} эликсира)")
     elif r.avg_elixir + 0.3 < u.avg_elixir:
-        user_worse.append(f"Медленнее цикл ({u.avg_elixir} vs {r.avg_elixir} эликсира)")
-        ref_better.append(f"Быстрее цикл ({r.avg_elixir} vs {u.avg_elixir} эликсира)")
+        user_worse.append(f"Медленнее цикл ({u.avg_elixir} против {r.avg_elixir} эликсира)")
+        ref_better.append(f"Быстрее цикл ({r.avg_elixir} против {u.avg_elixir} эликсира)")
 
     u_build, r_build = len(u.buildings), len(r.buildings)
     if u_build > r_build and r_build == 0:

@@ -57,7 +57,7 @@ _opponents_cache: dict[int, list] = {}
 async def _get_battles(user: User) -> list:
     battles = await load_and_persist(user)
     if battles is None:
-        raise HTTPException(status_code=502, detail="Failed to load battles from Clash Royale API")
+        raise HTTPException(status_code=502, detail="Не удалось загрузить бои")
     return battles
 
 
@@ -496,7 +496,7 @@ async def counter_deck(index: int, user: User = Depends(require_subscription)) -
         _opponents_cache[user.telegram_id] = opponents
 
     if index < 0 or index >= len(opponents):
-        raise HTTPException(status_code=404, detail="Opponent not found")
+        raise HTTPException(status_code=404, detail="Соперник не найден")
 
     opp = opponents[index]
     battles = await _get_battles(user)
@@ -526,7 +526,7 @@ async def customize_deck(user: User = Depends(require_subscription)) -> Customiz
             break
 
     if not current_deck:
-        raise HTTPException(status_code=404, detail="No deck found in recent battles")
+        raise HTTPException(status_code=404, detail="Колода не найдена в последних боях")
 
     result = customize_deck_for_arena(current_deck, user.arena_id, preferred)
     return CustomizeResponse(
@@ -545,7 +545,7 @@ async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyRes
     core = [c for c, _ in top_cards]
 
     if not core:
-        raise HTTPException(status_code=404, detail="Not enough card data")
+        raise HTTPException(status_code=404, detail="Недостаточно данных по картам")
 
     result = build_synergy_deck(core, user.arena_id)
     return SynergyResponse(
@@ -560,7 +560,7 @@ async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyRes
 async def extended_stats(user: User = Depends(require_subscription)) -> StatsOverviewResponse:
     battles = await load_and_persist(user, force_refresh=True)
     if battles is None:
-        raise HTTPException(status_code=502, detail="Failed to load battles from Clash Royale API")
+        raise HTTPException(status_code=502, detail="Не удалось загрузить бои")
     stats = await get_cached_stats(user.player_tag)
     if stats is None and battles:
         stats = _stats_from_battles(battles, user.player_tag or "")

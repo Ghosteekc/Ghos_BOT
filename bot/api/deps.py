@@ -40,7 +40,7 @@ async def require_linked_player(user: User = Depends(get_current_user)) -> User:
     if not user.player_tag:
         raise HTTPException(
             status_code=403,
-            detail="Player tag not linked. Use /link #TAG in the bot chat.",
+            detail="Тег игрока не привязан. Используйте /link #ТЕГ в чате бота.",
         )
     return user
 

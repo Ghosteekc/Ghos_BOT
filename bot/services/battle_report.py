@@ -273,7 +273,7 @@ def _build_reasons(
     if user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
         if not analysis.won:
             reasons.append(
-                f"Средний эликсир выше ({user_stats.avg_elixir} vs {opp_stats.avg_elixir}) — "
+                f"Средний эликсир выше ({user_stats.avg_elixir} против {opp_stats.avg_elixir}) — "
                 f"соперник чаще успевал атаковать."
             )
     if not user_stats.spells and opp_stats.spells:
@@ -282,7 +282,7 @@ def _build_reasons(
     if low_impact:
         names = ", ".join(c.name_ru for c in low_impact[:3])
         reasons.append(
-            f"Мало влияли на исход (оценка, API не показывает розыгрыш): {names}."
+            f"Мало влияли на исход (оценка по колоде): {names}."
         )
 
     return reasons
@@ -356,7 +356,7 @@ def analyze_battle_enhanced(
         KeyCardInsight(
             name=c,
             name_ru=card_name_ru(c),
-            note="Не подходит под матчап или situational — возможно, не успели сыграть",
+            note="Не подходит под матчап или редко полезна — возможно, не успели сыграть",
         )
         for c in low_impact_raw
     ]

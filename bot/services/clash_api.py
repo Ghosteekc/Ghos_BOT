@@ -45,7 +45,7 @@ class ClashRoyaleClient:
         self.api_key = api_key or settings.clash_royale_api_key
         if not self.api_key:
             logger.error("Clash Royale API key is not configured")
-            raise ClashRoyaleAPIError("API ключ не настроен. Обратитесь к администратору.", 500)
+            raise ClashRoyaleAPIError("Сервис данных игры не настроен. Обратитесь к администратору.", 500)
         self._session: aiohttp.ClientSession | None = None
         logger.debug(f"ClashRoyaleClient initialized with API key: {self.api_key[:8]}...")
 
@@ -129,23 +129,22 @@ class ClashRoyaleClient:
                         ip_error = True
 
                     if ip_error:
-                        msg = "API-ключ ограничен по IP."
+                        msg = "Доступ к данным игры ограничен по IP."
                         if ip_found:
                             msg += f" Обнаружен IP: {ip_found}"
-                        msg += " Добавьте IP сервера в настройки ключа на developer.clashroyale.com или используйте ключ без ограничения."
+                        msg += " Обратитесь к администратору приложения."
                         logger.error(f"IP restriction error: {msg}")
                         raise ClashRoyaleAPIError(msg, 403, details=response_text)
 
                     logger.error(f"API 403 error for {url}: {response_text[:500]}")
                     if reason == "accessDenied" or "Invalid authorization" in response_text:
                         raise ClashRoyaleAPIError(
-                            "Неверный CLASH_ROYALE_API_KEY на Railway. "
-                            "Скопируйте ключ заново с developer.clashroyale.com.",
+                            "Сервис данных игры настроен неверно. Обратитесь к администратору.",
                             403,
                             details=response_text,
                         )
                     raise ClashRoyaleAPIError(
-                        f"Доступ запрещён (403). Проверьте API ключ.",
+                        "Доступ к данным игры запрещён. Попробуйте позже.",
                         403,
                         details=response_text
                     )
@@ -160,7 +159,7 @@ class ClashRoyaleClient:
                 if resp.status != 200:
                     logger.error(f"API error {resp.status} for {url}. Response: {response_text[:500]}")
                     raise ClashRoyaleAPIError(
-                        f"Ошибка API ({resp.status}).",
+                        f"Ошибка загрузки данных игры ({resp.status}).",
                         resp.status,
                         details=response_text
                     )
@@ -172,7 +171,7 @@ class ClashRoyaleClient:
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse JSON response for {url}: {e}. Response: {response_text[:200]}")
                     raise ClashRoyaleAPIError(
-                        "Получен некорректный ответ от API.",
+                        "Получен некорректный ответ от сервера игры.",
                         500,
                         details=response_text
                     )
@@ -187,7 +186,7 @@ class ClashRoyaleClient:
         except Exception as e:
             logger.error(f"Unexpected error during API request to {url}: {e}", exc_info=True)
             raise ClashRoyaleAPIError(
-                "Неожиданная ошибка при обращении к API.",
+                "Неожиданная ошибка при загрузке данных игры.",
                 0,
                 details=str(e)
             )
