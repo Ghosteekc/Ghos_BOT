@@ -304,9 +304,10 @@ async def list_arena_decks(
     user: User = Depends(require_linked_player),
 ) -> ArenaDecksResponse:
     battles = await _get_battles(user)
-    arena_name: str | None = None
     trophies = user.trophies or 0
-    if user.player_tag:
+    arena_name: str | None = None
+
+    if user.player_tag and trophies <= 0:
         client = ClashRoyaleClient()
         try:
             player = await client.get_player(user.player_tag)
@@ -562,7 +563,7 @@ async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyRes
 
 @router.get("/stats", response_model=StatsOverviewResponse)
 async def extended_stats(user: User = Depends(require_subscription)) -> StatsOverviewResponse:
-    battles = await load_and_persist(user, force_refresh=True)
+    battles = await _get_battles(user)
     if battles is None:
         raise HTTPException(status_code=502, detail="Не удалось загрузить бои")
     stats = await get_cached_stats(user.player_tag)

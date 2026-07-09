@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _refresh_lock = asyncio.Lock()
 CACHE_VERSION = 5
 DEFAULT_LIMIT = 10
+_FETCH_CONCURRENCY = 5
 
 _SKIP_BATTLE_TYPES = frozenset({
     "friendly", "clanmate", "warday", "boatbattle", "challenge", "tournament",
@@ -41,7 +42,7 @@ class TopPlayersCache:
             return True
         if self.updated_at is None:
             return True
-        ttl = max(30, settings.meta_refresh_hours * 60)
+        ttl = max(300, settings.meta_refresh_hours * 3600)
         return (datetime.now(timezone.utc) - self.updated_at).total_seconds() > ttl
 
 
@@ -126,6 +127,60 @@ async def _fetch_path_of_legend_rankings(client: ClashRoyaleClient, limit: int) 
     return []
 
 
+async def _build_player_entry(client: ClashRoyaleClient, item: dict) -> dict | None:
+    tag = item.get("tag") or ""
+    if not tag:
+        return None
+
+    name = item.get("name") or "Игрок"
+    rank = int(item.get("rank") or 0)
+    clan = item.get("clan") or {}
+    clan_name = clan.get("name") or ""
+
+    deck_cards: list[dict] = []
+    trophies = 0
+    wins = losses = 0
+
+    try:
+        player, battles = await asyncio.gather(
+            client.get_player(tag),
+            client.get_battlelog(tag),
+        )
+        trophies = int(player.get("trophies") or item.get("eloRating") or 0)
+        deck_cards = _cards_from_current_deck(player)
+        if not deck_cards:
+            deck_cards = _latest_deck_from_battlelog(tag, battles)
+        if deck_cards:
+            wins, losses = _deck_winrate(tag, battles, _deck_key(deck_cards))
+    except ClashRoyaleAPIError as e:
+        logger.debug("Player data for %s: %s", tag, e)
+        trophies = int(item.get("eloRating") or 0)
+
+    if not deck_cards:
+        return None
+
+    deck_cards = normalize_deck_upgrades(deck_cards)
+    names = [c["name"] for c in deck_cards]
+    card_infos = [deck_card_info_from_parsed(c, slot=i) for i, c in enumerate(deck_cards)]
+    elixirs = [c["cost"] for c in card_infos if c["cost"]]
+    avg = round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0
+    total = wins + losses
+    wr = round(wins / total * 100, 1) if total else 0.0
+
+    return {
+        "rank": rank,
+        "player_tag": tag.replace("#", ""),
+        "player_name": name,
+        "trophies": trophies,
+        "clan_name": clan_name,
+        "winrate": wr,
+        "total_games": total,
+        "avg_elixir": avg,
+        "cards": card_infos,
+        "deck_link": build_deck_share_link(names),
+    }
+
+
 async def _refresh_top_players(limit: int = DEFAULT_LIMIT) -> TopPlayersCache:
     await ensure_cards_loaded()
     client = ClashRoyaleClient()
@@ -136,57 +191,21 @@ async def _refresh_top_players(limit: int = DEFAULT_LIMIT) -> TopPlayersCache:
         if not ranked:
             logger.warning("Path of Legend rankings empty")
 
-        for item in ranked[:limit]:
-            tag = item.get("tag") or ""
-            if not tag:
-                continue
+        sem = asyncio.Semaphore(_FETCH_CONCURRENCY)
 
-            name = item.get("name") or "Игрок"
-            rank = int(item.get("rank") or len(entries) + 1)
-            clan = item.get("clan") or {}
-            clan_name = clan.get("name") or ""
+        async def guarded(item: dict) -> dict | None:
+            async with sem:
+                return await _build_player_entry(client, item)
 
-            deck_cards: list[dict] = []
-            trophies = 0
-            wins = losses = 0
-
-            try:
-                player = await client.get_player(tag)
-                trophies = int(player.get("trophies") or item.get("eloRating") or 0)
-                deck_cards = _cards_from_current_deck(player)
-                battles = await client.get_battlelog(tag)
-                if not deck_cards:
-                    deck_cards = _latest_deck_from_battlelog(tag, battles)
-                if deck_cards:
-                    wins, losses = _deck_winrate(tag, battles, _deck_key(deck_cards))
-                await asyncio.sleep(0.12)
-            except ClashRoyaleAPIError as e:
-                logger.debug("Player data for %s: %s", tag, e)
-                trophies = int(item.get("eloRating") or 0)
-
-            if not deck_cards:
-                continue
-
-            deck_cards = normalize_deck_upgrades(deck_cards)
-            names = [c["name"] for c in deck_cards]
-            card_infos = [deck_card_info_from_parsed(c, slot=i) for i, c in enumerate(deck_cards)]
-            elixirs = [c["cost"] for c in card_infos if c["cost"]]
-            avg = round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0
-            total = wins + losses
-            wr = round(wins / total * 100, 1) if total else 0.0
-
-            entries.append({
-                "rank": rank,
-                "player_tag": tag.replace("#", ""),
-                "player_name": name,
-                "trophies": trophies,
-                "clan_name": clan_name,
-                "winrate": wr,
-                "total_games": total,
-                "avg_elixir": avg,
-                "cards": card_infos,
-                "deck_link": build_deck_share_link(names),
-            })
+        results = await asyncio.gather(
+            *[guarded(item) for item in ranked[:limit]],
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, dict):
+                entries.append(result)
+            elif isinstance(result, Exception):
+                logger.debug("Top player fetch error: %s", result)
     finally:
         await client.close()
 

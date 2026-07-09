@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from bot.config import settings
 from bot.services.card_data import get_card_elixir
 from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed, normalize_deck_upgrades
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
@@ -16,6 +19,28 @@ from bot.services.meta_analyzer import _guess_deck_name, _guess_category, _is_co
 from bot.services.meta_decks import META_DECKS
 
 logger = logging.getLogger(__name__)
+
+_SCAN_CONCURRENCY = 5
+_arena_refresh_lock = asyncio.Lock()
+
+
+@dataclass
+class _ArenaCacheEntry:
+    data: dict
+    updated_at: float
+    version: int = 1
+
+    def expired(self) -> bool:
+        ttl = max(300, settings.meta_refresh_hours * 3600)
+        return (time.time() - self.updated_at) > ttl
+
+
+_arena_cache: dict[str, _ArenaCacheEntry] = {}
+
+
+def _arena_cache_key(player_tag: str, trophies: int) -> str:
+    bucket = max(0, trophies // 250) * 250
+    return f"{normalize_tag(player_tag)}:{bucket}"
 
 
 def _trophy_window(trophies: int) -> int:
@@ -236,6 +261,32 @@ async def get_arena_popular_decks(
     arena_name: str | None = None,
 ) -> dict:
     del arena_id
+    cache_key = _arena_cache_key(player_tag, trophies)
+    cached = _arena_cache.get(cache_key)
+    if cached and not cached.expired():
+        return cached.data
+
+    async with _arena_refresh_lock:
+        cached = _arena_cache.get(cache_key)
+        if cached and not cached.expired():
+            return cached.data
+        data = await _build_arena_popular_decks(
+            battles,
+            player_tag,
+            trophies,
+            arena_name=arena_name,
+        )
+        _arena_cache[cache_key] = _ArenaCacheEntry(data=data, updated_at=time.time())
+        return data
+
+
+async def _build_arena_popular_decks(
+    battles: list,
+    player_tag: str,
+    trophies: int,
+    *,
+    arena_name: str | None = None,
+) -> dict:
     await ensure_cards_loaded()
 
     combined_stats: dict[str, dict] = defaultdict(
@@ -247,11 +298,17 @@ async def get_arena_popular_decks(
     scanned = 0
     try:
         tags = await _fetch_bracket_player_tags(client, trophies, battles, player_tag)
-        for tag in tags:
-            player_stats = await _scan_player_deck_stats(client, tag)
-            _merge_deck_stats(combined_stats, player_stats)
-            scanned += 1
-            await asyncio.sleep(0.12)
+        sem = asyncio.Semaphore(_SCAN_CONCURRENCY)
+
+        async def guarded(tag: str) -> dict[str, dict]:
+            async with sem:
+                return await _scan_player_deck_stats(client, tag)
+
+        results = await asyncio.gather(*[guarded(tag) for tag in tags], return_exceptions=True)
+        for result in results:
+            if isinstance(result, dict):
+                _merge_deck_stats(combined_stats, result)
+                scanned += 1
     finally:
         await client.close()
 
