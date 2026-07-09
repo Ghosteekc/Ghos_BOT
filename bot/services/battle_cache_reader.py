@@ -1,5 +1,7 @@
 """Build API responses from persisted BattleCache when live API is unavailable."""
 
+from datetime import datetime, timedelta
+
 from sqlalchemy import select
 
 from bot.models.database import BattleCache, async_session
@@ -45,4 +47,23 @@ def row_to_battle_dict(row: BattleCache, player_tag: str) -> dict:
 
 async def get_battles_from_cache(player_tag: str) -> list[dict]:
     rows = await get_cached_battle_rows(player_tag)
+    return [row_to_battle_dict(r, player_tag) for r in rows]
+
+
+async def get_battles_for_winrate_chart(player_tag: str, *, days: int = 14) -> list[dict]:
+    """All persisted battles for the last N calendar days (MSK) — API only keeps ~25–30 recent."""
+    from bot.services.battle_time import today_key_msk
+
+    today = datetime.strptime(today_key_msk(), "%Y%m%d").date()
+    since_key = (today - timedelta(days=max(1, days) - 1)).strftime("%Y%m%d")
+
+    async with async_session() as session:
+        res = await session.execute(
+            select(BattleCache)
+            .where(BattleCache.player_tag == normalize_tag(player_tag))
+            .where(BattleCache.battle_time >= since_key)
+            .order_by(BattleCache.battle_time.desc())
+        )
+        rows = list(res.scalars().all())
+
     return [row_to_battle_dict(r, player_tag) for r in rows]
