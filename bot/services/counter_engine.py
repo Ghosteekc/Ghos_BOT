@@ -1,5 +1,6 @@
 from bot.services.card_data import (
     ARENA_CARD_POOL,
+    CARD_META,
     COUNTERS,
     SYNERGIES,
     WIN_CONDITIONS,
@@ -126,13 +127,16 @@ def customize_deck_for_arena(
 ) -> dict:
     """Кастомизация колоды под арену и предпочтения."""
     pool = _get_arena_pool(arena_id)
+    # Карты из колоды и частых пиков игрока — он уже ими играет
+    pool.update(current_deck)
+    pool.update(preferred_cards or [])
     preferred_cards = preferred_cards or []
     issues = []
     new_deck = list(current_deck)
 
     for i, card in enumerate(new_deck):
         if card not in pool:
-            issues.append(f"❌ {_card_ru(card)} недоступна на вашей арене")
+            issues.append(f"❌ {_card_ru(card)} — редкая для низкой арены, предложена замена")
             replacement = _find_replacement(card, pool, new_deck)
             if replacement:
                 new_deck[i] = replacement
@@ -181,6 +185,10 @@ def customize_deck_for_arena(
 
 
 def _get_arena_pool(arena_id: int | None) -> set[str]:
+    # Легендарная арена / Path of Legend (id ~54xxxxxx) — полный каталог
+    if arena_id is not None and arena_id >= 54000000:
+        return set(CARD_META.keys())
+
     pool = set(ARENA_CARD_POOL["low"])
     if arena_id is None or arena_id >= 5:
         pool.update(ARENA_CARD_POOL["mid"])
