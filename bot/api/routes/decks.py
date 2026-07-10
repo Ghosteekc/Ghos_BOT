@@ -534,11 +534,13 @@ async def customize_deck(user: User = Depends(require_subscription)) -> Customiz
         raise HTTPException(status_code=404, detail="Колода не найдена в последних боях")
 
     result = customize_deck_for_arena(current_deck, user.arena_id, preferred, user.trophies)
+    await ensure_cards_loaded()
     return CustomizeResponse(
         original=result["original"],
         customized=result["customized"],
         issues=result["issues"],
         avg_elixir=result["avg_elixir"],
+        deck_link=build_deck_share_link(result["customized"]),
     )
 
 
@@ -553,11 +555,13 @@ async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyRes
         raise HTTPException(status_code=404, detail="Недостаточно данных по картам")
 
     result = build_synergy_deck(core, user.arena_id)
+    await ensure_cards_loaded()
     return SynergyResponse(
         core=core,
         deck=result["deck"],
         synergies=result["synergies"],
         avg_elixir=result["avg_elixir"],
+        deck_link=build_deck_share_link(result["deck"]),
     )
 
 

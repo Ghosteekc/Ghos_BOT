@@ -171,6 +171,7 @@ class CustomizeResponse(BaseModel):
     customized: list[str]
     issues: list[str]
     avg_elixir: float
+    deck_link: str | None = None
 
 
 class SynergyResponse(BaseModel):
@@ -178,6 +179,7 @@ class SynergyResponse(BaseModel):
     deck: list[str]
     synergies: dict[str, list[str]]
     avg_elixir: float
+    deck_link: str | None = None
 
 
 class StatsDeckEntry(BaseModel):

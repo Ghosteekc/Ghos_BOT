@@ -157,14 +157,20 @@ def customize_deck_for_arena(
                 new_deck[idx] = light_opts[0]
                 issues.append(f"⚖️ {_card_ru(heavy)} → {_card_ru(light_opts[0])} (снижение среднего эликсира)")
 
-    if had_fixes:
-        for pref in preferred_cards[:3]:
-            if pref in pool and pref not in new_deck:
-                weakest = min(new_deck, key=lambda c: preferred_cards.count(c) if c in preferred_cards else 0)
-                if weakest not in preferred_cards:
-                    idx = new_deck.index(weakest)
-                    new_deck[idx] = pref
-                    issues.append(f"⭐ Добавлена любимая карта {_card_ru(pref)} вместо {_card_ru(weakest)}")
+    for pref in preferred_cards[:3]:
+        if pref in pool and pref not in new_deck:
+            replaceable = [
+                c for c in new_deck
+                if c not in preferred_cards
+                and c not in WIN_CONDITIONS
+                and get_card_role(c) != "win_condition"
+            ]
+            if not replaceable:
+                continue
+            weakest = min(replaceable, key=lambda c: preferred_cards.count(c) if c in preferred_cards else 0)
+            idx = new_deck.index(weakest)
+            new_deck[idx] = pref
+            issues.append(f"⭐ Рекомендуем {_card_ru(pref)} вместо {_card_ru(weakest)} — часто играете")
 
     stats = analyze_deck(new_deck)
     if not stats.spells:
