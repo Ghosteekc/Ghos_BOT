@@ -124,18 +124,21 @@ def customize_deck_for_arena(
     current_deck: list[str],
     arena_id: int | None,
     preferred_cards: list[str] | None = None,
+    trophies: int | None = None,
 ) -> dict:
     """Кастомизация колоды под арену и предпочтения."""
-    pool = _get_arena_pool(arena_id)
+    pool = _get_arena_pool(arena_id, trophies)
     # Карты из колоды и частых пиков игрока — он уже ими играет
     pool.update(current_deck)
     pool.update(preferred_cards or [])
     preferred_cards = preferred_cards or []
     issues = []
     new_deck = list(current_deck)
+    had_fixes = False
 
     for i, card in enumerate(new_deck):
         if card not in pool:
+            had_fixes = True
             issues.append(f"❌ {_card_ru(card)} — редкая для низкой арены, предложена замена")
             replacement = _find_replacement(card, pool, new_deck)
             if replacement:
@@ -149,18 +152,21 @@ def customize_deck_for_arena(
             light_opts = [c for c in ["Skeletons", "Ice Spirit", "Bats", "Fire Spirit"]
                           if c in pool and c not in new_deck]
             if light_opts and heavy in new_deck:
+                had_fixes = True
                 idx = new_deck.index(heavy)
                 new_deck[idx] = light_opts[0]
                 issues.append(f"⚖️ {_card_ru(heavy)} → {_card_ru(light_opts[0])} (снижение среднего эликсира)")
 
-    for pref in preferred_cards[:3]:
-        if pref in pool and pref not in new_deck:
-            weakest = min(new_deck, key=lambda c: preferred_cards.count(c) if c in preferred_cards else 0)
-            if weakest not in preferred_cards:
-                idx = new_deck.index(weakest)
-                new_deck[idx] = pref
-                issues.append(f"⭐ Добавлена любимая карта {_card_ru(pref)} вместо {_card_ru(weakest)}")
+    if had_fixes:
+        for pref in preferred_cards[:3]:
+            if pref in pool and pref not in new_deck:
+                weakest = min(new_deck, key=lambda c: preferred_cards.count(c) if c in preferred_cards else 0)
+                if weakest not in preferred_cards:
+                    idx = new_deck.index(weakest)
+                    new_deck[idx] = pref
+                    issues.append(f"⭐ Добавлена любимая карта {_card_ru(pref)} вместо {_card_ru(weakest)}")
 
+    stats = analyze_deck(new_deck)
     if not stats.spells:
         for spell in ["Zap", "Fireball", "Arrows"]:
             if spell in pool:
@@ -169,6 +175,7 @@ def customize_deck_for_arena(
                     None,
                 )
                 if replace_idx is not None:
+                    had_fixes = True
                     old = new_deck[replace_idx]
                     new_deck[replace_idx] = spell
                     issues.append(f"🪄 Добавлено заклинание {_card_ru(spell)} вместо {_card_ru(old)}")
@@ -184,9 +191,11 @@ def customize_deck_for_arena(
     }
 
 
-def _get_arena_pool(arena_id: int | None) -> set[str]:
-    # Легендарная арена / Path of Legend (id ~54xxxxxx) — полный каталог
+def _get_arena_pool(arena_id: int | None, trophies: int | None = None) -> set[str]:
+    # Легендарная арена / Path of Legend (id ~54xxxxxx) или высокий рейтинг — полный каталог
     if arena_id is not None and arena_id >= 54000000:
+        return set(CARD_META.keys())
+    if trophies is not None and trophies >= 7500:
         return set(CARD_META.keys())
 
     pool = set(ARENA_CARD_POOL["low"])

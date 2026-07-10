@@ -161,7 +161,7 @@ async def customize_deck(message: Message, user: User) -> None:
             await message.answer("Не найдена колода в последних боях.")
             return
 
-        result = customize_deck_for_arena(current_deck, user.arena_id, pref_names)
+        result = customize_deck_for_arena(current_deck, user.arena_id, pref_names, user.trophies)
 
         issues_text = "\n".join(result["issues"]) if result["issues"] else "✅ Колода уже оптимальна"
         text = (

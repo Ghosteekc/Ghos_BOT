@@ -107,7 +107,7 @@ CARD_META: dict[str, dict] = {
     "Elixir Collector": {"elixir": 6, "type": "building", "role": "building"},
     "X-Bow": {"elixir": 6, "type": "building", "role": "win_condition"},
     "Tombstone": {"elixir": 3, "type": "building", "role": "building"},
-    "Furnace": {"elixir": 4, "type": "building", "role": "building"},
+    "Furnace": {"elixir": 4, "type": "troop", "role": "support"},
     "Goblin Cage": {"elixir": 4, "type": "building", "role": "building"},
     "Goblin Drill": {"elixir": 4, "type": "building", "role": "win_condition"},
     "Goblin Demolisher": {"elixir": 4, "type": "troop", "role": "splash"},

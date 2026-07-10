@@ -533,7 +533,7 @@ async def customize_deck(user: User = Depends(require_subscription)) -> Customiz
     if not current_deck:
         raise HTTPException(status_code=404, detail="Колода не найдена в последних боях")
 
-    result = customize_deck_for_arena(current_deck, user.arena_id, preferred)
+    result = customize_deck_for_arena(current_deck, user.arena_id, preferred, user.trophies)
     return CustomizeResponse(
         original=result["original"],
         customized=result["customized"],
@@ -606,7 +606,7 @@ async def recommendations(user: User = Depends(require_subscription)) -> Recomme
     deck_result = None
     if current_deck:
         try:
-            deck_result = customize_deck_for_arena(current_deck, user.arena_id, preferred)
+            deck_result = customize_deck_for_arena(current_deck, user.arena_id, preferred, user.trophies)
         except Exception:
             deck_result = None
 

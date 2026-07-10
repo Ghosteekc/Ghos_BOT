@@ -163,6 +163,9 @@ def _analyze_own_card(card: str, own_deck: list[str], opp_deck: list[str]) -> di
     if role in ("cycle", "swarm"):
         return _note(card, "neutral", f"{label} — цикл и давление по эликсиру")
 
+    if card == "Furnace":
+        return _note(card, "good", f"{label} — юнит-спавнер, давление огненными духами в пуше")
+
     if card in {"Tornado", "Ice Golem"}:
         return _note(card, "good", f"{label} — контроль и связка с атакой")
 
@@ -228,7 +231,9 @@ def _analyze_enemy_card(card: str, enemy_deck: list[str], your_deck: list[str]) 
     if role == "splash" and _has_swarm(your_deck):
         return _note(card, "warn", f"{label} — сплеш зачищает ваш рой")
 
-    if card in {"Witch", "Mother Witch"}:
+    if card in {"Witch", "Mother Witch", "Furnace"}:
+        if card == "Furnace":
+            return _note(card, "warn", f"{label} — спавнер огненных духов, сбивайте до детонации")
         return _note(card, "warn", f"{label} — поддержка с роями, нужен сплеш или Valkyrie")
 
     if card in _BIG_SPELLS:
