@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import select
 
 from bot.models.database import async_session, User, BattleCache
+from bot.services.battle_service import filter_pvp_battles
 from bot.services.clash_api import ClashRoyaleClient, normalize_tag
 from bot.services.deck_analyzer import analyze_battle
 from bot.config import settings
@@ -26,12 +27,7 @@ async def sync_user_battles(user: User) -> int:
     finally:
         await client.close()
 
-    tag = normalize_tag(user.player_tag)
-    pvp = [
-        b for b in battles
-        if b.get("type") in ("PvP", "pathOfLegend")
-        and b.get("team", [{}])[0].get("tag", "").upper() == tag.upper()
-    ]
+    pvp = filter_pvp_battles(battles, user.player_tag)
 
     new_count = 0
     async with async_session() as session:

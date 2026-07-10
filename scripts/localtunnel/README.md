@@ -9,7 +9,7 @@
 | **Закрыли окно PowerShell** | Процесс завершился → 503 на старом URL |
 | **Сон / перезагрузка ПК** | Туннель обрывается |
 | **Несколько копий** | Два `npx localtunnel --port 8080` → конфликты и путаница с URL |
-| **Смена URL** | Без `--subdomain` каждый перезапуск = **новый** `*.loca.lt` → обновить `VITE_API_URL` на Vercel |
+| **Subdomain «busy» после перезагрузки ПК** | Имена на loca.lt **глобальные**; сервер держит «зомби»-резерв часами. Перезагрузка ПК не помогает. Используйте другое имя: `-Subdomain ghosteekcr2` |
 
 **Вывод:** голый `npx localtunnel` в Cursor — не «постоянный» режим. Нужно отдельное окно + автоперезапуск (скрипт ниже) или Cloudflare Tunnel.
 
@@ -40,8 +40,12 @@ cd G:\проги\ss\scripts\localtunnel
 С **фиксированным subdomain** (URL не меняется при перезапуске, если имя свободно):
 
 ```powershell
-.\start-tunnel.ps1 -Subdomain ghosteekcr
+.\start-tunnel.ps1 -Subdomain ghosteekcr2
 ```
+
+Если имя «busy» — loca.lt держит его на своих серверах (не на вашем ПК). Скрипт остановится после 3 попыток. Обновите **один раз** на Vercel: `VITE_API_URL=https://ghosteekcr2.loca.lt`
+
+Случайный URL при каждом перезапуске: `.\start-tunnel.ps1 -AllowRandomFallback`
 
 Скрипт:
 - проверяет, что бот на `:8080` жив;

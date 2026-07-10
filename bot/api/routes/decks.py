@@ -526,7 +526,7 @@ async def customize_deck(user: User = Depends(require_subscription)) -> Customiz
     current_deck: list[str] = []
     for battle in battles:
         team = battle.get("team", [{}])[0]
-        if team.get("tag", "").upper() == tag.upper():
+        if normalize_tag(team.get("tag") or "") == tag:
             current_deck = [c["name"] for c in team.get("cards", [])]
             break
 

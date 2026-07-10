@@ -13,8 +13,62 @@ logger = logging.getLogger(__name__)
 BATTLE_LOG_LIMIT = 25
 
 
-def filter_pvp_battles(battles: list, player_tag: str) -> list:
+def battle_has_player(battle: dict, player_tag: str) -> bool:
     tag = normalize_tag(player_tag)
+    for side in ("team", "opponent"):
+        for player in battle.get(side) or []:
+            if normalize_tag(player.get("tag") or "") == tag:
+                return True
+    return False
+
+
+def _side_crowns(players: list) -> int:
+    if not players:
+        return 0
+    return max(int(p.get("crowns") or 0) for p in players)
+
+
+def normalize_battle_for_player(battle: dict, player_tag: str) -> dict | None:
+    """Put the linked player in team[0] (supports 2v2 and opponent-side entries)."""
+    tag = normalize_tag(player_tag)
+    teams = list(battle.get("team") or [])
+    opps = list(battle.get("opponent") or [])
+
+    team_idx = next(
+        (i for i, p in enumerate(teams) if normalize_tag(p.get("tag") or "") == tag),
+        None,
+    )
+    opp_idx = next(
+        (i for i, p in enumerate(opps) if normalize_tag(p.get("tag") or "") == tag),
+        None,
+    )
+    if team_idx is None and opp_idx is None:
+        return None
+
+    if team_idx is not None:
+        player = dict(teams[team_idx])
+        user_crowns = _side_crowns(teams)
+        opp_crowns = _side_crowns(opps)
+        opponent = dict(opps[0]) if opps else {}
+    else:
+        player = dict(opps[opp_idx])
+        user_crowns = _side_crowns(opps)
+        opp_crowns = _side_crowns(teams)
+        opponent = dict(teams[0]) if teams else {}
+        trophy_change = player.get("trophyChange")
+        if trophy_change is not None:
+            player["trophyChange"] = -int(trophy_change)
+
+    player["crowns"] = user_crowns
+    opponent["crowns"] = opp_crowns
+
+    normalized = dict(battle)
+    normalized["team"] = [player]
+    normalized["opponent"] = [opponent]
+    return normalized
+
+
+def filter_pvp_battles(battles: list, player_tag: str) -> list:
     excluded = frozenset({
         "friendly",
         "clanmate",
@@ -28,10 +82,11 @@ def filter_pvp_battles(battles: list, player_tag: str) -> list:
         battle_type = (b.get("type") or "").strip().lower().replace(" ", "")
         if battle_type in excluded:
             continue
-        team_tag = b.get("team", [{}])[0].get("tag", "")
-        if normalize_tag(team_tag) != tag:
+        if not battle_has_player(b, player_tag):
             continue
-        result.append(b)
+        normalized = normalize_battle_for_player(b, player_tag)
+        if normalized:
+            result.append(normalized)
     return result
 
 

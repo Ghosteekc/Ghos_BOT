@@ -7,7 +7,9 @@
 
 param(
     [int]$Port = 8080,
-    [string]$Subdomain = ""
+    [string]$Subdomain = "",
+    [int]$MaxReclaimAttempts = 3,
+    [switch]$AllowRandomFallback
 )
 
 $Root = (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent)
@@ -54,14 +56,21 @@ function Test-SubdomainUrl {
 }
 
 function Save-TunnelUrl {
-    param([string]$Url)
+    param(
+        [string]$Url,
+        [switch]$Force
+    )
     if (-not $Url) { return $false }
-    if (-not (Test-SubdomainUrl -Url $Url)) {
+    if (-not $Force -and -not (Test-SubdomainUrl -Url $Url)) {
         return $false
     }
     Set-Content -Path $UrlFile -Value $Url -Encoding UTF8
     Write-LogLine "Tunnel URL: $Url" "Green"
     Write-LogLine "Saved to: $UrlFile" "DarkGray"
+    if ($Force -and $Subdomain) {
+        Write-LogLine "Using random URL because '$Subdomain' is stuck on loca.lt servers." "Yellow"
+        Write-LogLine "Update Vercel VITE_API_URL to: $Url" "Yellow"
+    }
     return $true
 }
 
@@ -69,7 +78,9 @@ function Read-ProcessLines {
     param(
         [System.Diagnostics.Process]$Process,
         [ref]$SavedUrl,
-        [ref]$WrongSubdomain
+        [ref]$WrongSubdomain,
+        [ref]$RandomUrl,
+        [switch]$AcceptRandom
     )
 
     foreach ($stream in @($Process.StandardOutput, $Process.StandardError)) {
@@ -84,10 +95,17 @@ function Read-ProcessLines {
                     if (Save-TunnelUrl -Url $url) {
                         $SavedUrl.Value = $true
                     }
+                } elseif ($AcceptRandom) {
+                    if (Save-TunnelUrl -Url $url -Force) {
+                        $SavedUrl.Value = $true
+                        $RandomUrl.Value = $url
+                    }
                 } else {
-                    Write-LogLine "Subdomain '$Subdomain' busy - got random URL: $url" "Red"
-                    Write-LogLine "Killing wrong tunnel, will retry for ghosteekcr..." "Yellow"
+                    Write-LogLine "Subdomain '$Subdomain' busy on loca.lt - got random URL: $url" "Red"
+                    Write-LogLine "This is NOT your PC: the name is reserved globally on loca.lt (often hours after disconnect)." "DarkGray"
+                    Write-LogLine "Killing wrong tunnel, will retry for '$Subdomain'..." "Yellow"
                     $WrongSubdomain.Value = $true
+                    $RandomUrl.Value = $url
                     return
                 }
             }
@@ -96,7 +114,10 @@ function Read-ProcessLines {
 }
 
 function Start-LocalTunnelSession {
-    param([string[]]$Arguments)
+    param(
+        [string[]]$Arguments,
+        [switch]$AcceptRandom
+    )
 
     $argText = ($Arguments | ForEach-Object {
         if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
@@ -117,9 +138,10 @@ function Start-LocalTunnelSession {
 
     $savedUrl = [ref]$false
     $wrongSubdomain = [ref]$false
+    $randomUrl = [ref]""
 
     while (-not $proc.HasExited) {
-        Read-ProcessLines -Process $proc -SavedUrl $savedUrl -WrongSubdomain $wrongSubdomain
+        Read-ProcessLines -Process $proc -SavedUrl $savedUrl -WrongSubdomain $wrongSubdomain -RandomUrl $randomUrl -AcceptRandom:$AcceptRandom
         if ($wrongSubdomain.Value) {
             try {
                 Write-LogLine "Stopping wrong tunnel (PID $($proc.Id))..." "Yellow"
@@ -131,12 +153,13 @@ function Start-LocalTunnelSession {
                 ExitCode = -1
                 WrongSubdomain = $true
                 SavedUrl = $savedUrl.Value
+                RandomUrl = $randomUrl.Value
             }
         }
         Start-Sleep -Milliseconds 150
     }
 
-    Read-ProcessLines -Process $proc -SavedUrl $savedUrl -WrongSubdomain $wrongSubdomain
+    Read-ProcessLines -Process $proc -SavedUrl $savedUrl -WrongSubdomain $wrongSubdomain -RandomUrl $randomUrl -AcceptRandom:$AcceptRandom
 
     if ($wrongSubdomain.Value) {
         Stop-ExistingTunnels
@@ -144,6 +167,7 @@ function Start-LocalTunnelSession {
             ExitCode = -1
             WrongSubdomain = $true
             SavedUrl = $savedUrl.Value
+            RandomUrl = $randomUrl.Value
         }
     }
 
@@ -151,6 +175,7 @@ function Start-LocalTunnelSession {
         ExitCode = $proc.ExitCode
         WrongSubdomain = $false
         SavedUrl = $savedUrl.Value
+        RandomUrl = $randomUrl.Value
     }
 }
 
@@ -188,12 +213,26 @@ while ($true) {
     Write-LogLine "Starting localtunnel (session $attempt)..." "Cyan"
 
     Set-Location $Root
-    $session = Start-LocalTunnelSession -Arguments $ltArgs
+    $session = Start-LocalTunnelSession -Arguments $ltArgs -AcceptRandom:$AllowRandomFallback
 
     if ($session.WrongSubdomain) {
         $reclaimAttempt++
+        if ($reclaimAttempt -ge $MaxReclaimAttempts) {
+            Write-LogLine "Subdomain '$Subdomain' still busy after $reclaimAttempt attempt(s)." "Red"
+            Write-LogLine "loca.lt keeps names globally; rebooting PC does not release them." "Yellow"
+            Write-LogLine "Try another name, e.g.: .\start-tunnel.ps1 -Subdomain ghosteekcr2" "Cyan"
+            Write-LogLine "Or accept random URL: .\start-tunnel.ps1 -AllowRandomFallback" "Cyan"
+            if ($AllowRandomFallback) {
+                Write-LogLine "Starting without fixed subdomain..." "Yellow"
+                $Subdomain = ""
+                $ltArgs = @("--yes", "localtunnel", "--port", "$Port")
+                $reclaimAttempt = 0
+                continue
+            }
+            exit 2
+        }
         $waitSec = [Math]::Min(30 + ($reclaimAttempt * 15), 90)
-        Write-LogLine "Reclaim attempt $reclaimAttempt failed. Waiting $waitSec sec for loca.lt to release '$Subdomain'..." "Yellow"
+        Write-LogLine "Reclaim attempt $reclaimAttempt/$MaxReclaimAttempts failed. Waiting $waitSec sec..." "Yellow"
         Stop-ExistingTunnels
         Start-Sleep -Seconds $waitSec
         continue

@@ -45,14 +45,49 @@ async def search_player(
         await client.close()
 
     arena = player.get("arena", {})
+    clan = player.get("clan") or {}
     return [
         SearchResult(
             player_tag=tag.replace("#", ""),
             player_name=player.get("name", "Игрок"),
             trophies=player.get("trophies", 0),
             arena=arena.get("name", "—"),
+            max_trophies=player.get("bestTrophies"),
+            clan_name=clan.get("name") if isinstance(clan, dict) else None,
+            exp_level=player.get("expLevel"),
         )
     ]
+
+
+@router.get("/players/{tag}", response_model=SearchResult)
+async def get_player_preview(
+    tag: str,
+    user: User = Depends(get_current_user),
+) -> SearchResult:
+    del user
+    normalized = normalize_tag(tag.strip())
+    if not validate_tag(normalized):
+        raise HTTPException(status_code=400, detail="Некорректный тег игрока")
+
+    client = ClashRoyaleClient()
+    try:
+        player = await client.get_player(normalized)
+    except ClashRoyaleAPIError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    finally:
+        await client.close()
+
+    arena = player.get("arena", {})
+    clan = player.get("clan") or {}
+    return SearchResult(
+        player_tag=normalized.replace("#", ""),
+        player_name=player.get("name", "Игрок"),
+        trophies=player.get("trophies", 0),
+        arena=arena.get("name", "—"),
+        max_trophies=player.get("bestTrophies"),
+        clan_name=clan.get("name") if isinstance(clan, dict) else None,
+        exp_level=player.get("expLevel"),
+    )
 
 
 @router.get("/favorites", response_model=FavoritesResponse)

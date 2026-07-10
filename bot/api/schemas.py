@@ -339,6 +339,9 @@ class SearchResult(BaseModel):
     player_name: str
     trophies: int
     arena: str
+    max_trophies: int | None = None
+    clan_name: str | None = None
+    exp_level: int | None = None
 
 
 class CardCatalogEntry(BaseModel):

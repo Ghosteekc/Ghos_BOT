@@ -4,6 +4,7 @@ from aiogram.types import CallbackQuery, Message
 
 from bot.keyboards.menus import battle_select_keyboard
 from bot.models.database import User, async_session, BattleCache
+from bot.services.battle_service import filter_pvp_battles
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates
 from bot.services.deck_analyzer import get_most_played_cards
@@ -37,12 +38,7 @@ async def _load_battles(user: User, telegram_id: int) -> list | None:
     finally:
         await client.close()
 
-    tag = normalize_tag(user.player_tag)
-    pvp = [
-        b for b in battles
-        if b.get("type") in ("PvP", "pathOfLegend")
-        and b.get("team", [{}])[0].get("tag", "").upper() == tag.upper()
-    ]
+    pvp = filter_pvp_battles(battles, user.player_tag)
     _battle_cache[telegram_id] = pvp
     logger.info(f"Loaded {len(pvp)} PvP battles for {user.player_tag}")
 

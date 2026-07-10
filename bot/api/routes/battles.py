@@ -1,3 +1,5 @@
+from urllib.parse import unquote
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from bot.api.deps import require_subscription
@@ -75,19 +77,21 @@ async def list_battles(user: User = Depends(require_subscription)) -> BattleList
     )
 
 
-@router.get("/{index}", response_model=BattleDetailResponse)
-async def battle_detail(index: int, user: User = Depends(require_subscription)) -> BattleDetailResponse:
+def _battle_timestamp(battle: dict) -> str:
+    return str(battle.get("battleTime") or battle.get("warTime") or "")
+
+
+async def _load_user_battles(user: User) -> list:
     battles = _get_battle_cache(user)
     if battles is None:
         battles = await load_and_persist(user)
         if battles is None:
             raise HTTPException(status_code=502, detail="Не удалось загрузить бои")
         _set_battle_cache(user, battles)
+    return battles
 
-    if index < 0 or index >= len(battles):
-        raise HTTPException(status_code=404, detail="Бой не найден")
 
-    battle = battles[index]
+def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
     team = battle.get("team", [{}])[0]
     opponent = battle.get("opponent", [{}])[0]
     duration = int(battle.get("gameDuration") or 0)
@@ -112,9 +116,7 @@ async def battle_detail(index: int, user: User = Depends(require_subscription)) 
         trophy_change=analysis.trophy_change,
         matchup_score=analysis.matchup_score,
         duration=duration,
-        played_at=format_battle_played_at(
-            str(battle.get("battleTime") or battle.get("warTime") or "")
-        ),
+        played_at=format_battle_played_at(_battle_timestamp(battle)),
         crown_score=analysis.crown_score,
         outcome_summary=analysis.outcome_summary,
         user_deck=analysis.user_deck,
@@ -129,3 +131,24 @@ async def battle_detail(index: int, user: User = Depends(require_subscription)) 
         opponent_key_cards=_key_cards(analysis.opponent_key_cards),
         low_impact_cards=_key_cards(analysis.low_impact_cards),
     )
+
+
+@router.get("/by-time/{battle_time:path}", response_model=BattleDetailResponse)
+async def battle_detail_by_time(
+    battle_time: str,
+    user: User = Depends(require_subscription),
+) -> BattleDetailResponse:
+    raw = unquote(battle_time)
+    battles = await _load_user_battles(user)
+    for i, battle in enumerate(battles):
+        if _battle_timestamp(battle) == raw:
+            return _build_battle_detail(i, battle)
+    raise HTTPException(status_code=404, detail="Бой не найден")
+
+
+@router.get("/{index}", response_model=BattleDetailResponse)
+async def battle_detail(index: int, user: User = Depends(require_subscription)) -> BattleDetailResponse:
+    battles = await _load_user_battles(user)
+    if index < 0 or index >= len(battles):
+        raise HTTPException(status_code=404, detail="Бой не найден")
+    return _build_battle_detail(index, battles[index])
