@@ -6,7 +6,12 @@ from bot.services.card_data import (
     get_card_elixir,
     get_card_role,
 )
+from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_analyzer import analyze_deck, extract_deck, find_opponent_threats
+
+
+def _card_ru(name: str) -> str:
+    return card_name_ru(name, short=True) or name
 
 
 def suggest_counter_deck(
@@ -127,11 +132,11 @@ def customize_deck_for_arena(
 
     for i, card in enumerate(new_deck):
         if card not in pool:
-            issues.append(f"❌ {card} недоступна на вашей арене")
+            issues.append(f"❌ {_card_ru(card)} недоступна на вашей арене")
             replacement = _find_replacement(card, pool, new_deck)
             if replacement:
                 new_deck[i] = replacement
-                issues.append(f"   → замена на {replacement}")
+                issues.append(f"   → замена на {_card_ru(replacement)}")
 
     stats = analyze_deck(new_deck)
     if stats.avg_elixir > 4.2:
@@ -142,7 +147,7 @@ def customize_deck_for_arena(
             if light_opts and heavy in new_deck:
                 idx = new_deck.index(heavy)
                 new_deck[idx] = light_opts[0]
-                issues.append(f"⚖️ {heavy} → {light_opts[0]} (снижение среднего эликсира)")
+                issues.append(f"⚖️ {_card_ru(heavy)} → {_card_ru(light_opts[0])} (снижение среднего эликсира)")
 
     for pref in preferred_cards[:3]:
         if pref in pool and pref not in new_deck:
@@ -150,7 +155,7 @@ def customize_deck_for_arena(
             if weakest not in preferred_cards:
                 idx = new_deck.index(weakest)
                 new_deck[idx] = pref
-                issues.append(f"⭐ Добавлена любимая карта {pref} вместо {weakest}")
+                issues.append(f"⭐ Добавлена любимая карта {_card_ru(pref)} вместо {_card_ru(weakest)}")
 
     if not stats.spells:
         for spell in ["Zap", "Fireball", "Arrows"]:
@@ -162,7 +167,7 @@ def customize_deck_for_arena(
                 if replace_idx is not None:
                     old = new_deck[replace_idx]
                     new_deck[replace_idx] = spell
-                    issues.append(f"🪄 Добавлено заклинание {spell} вместо {old}")
+                    issues.append(f"🪄 Добавлено заклинание {_card_ru(spell)} вместо {_card_ru(old)}")
                     break
 
     new_stats = analyze_deck(new_deck)
