@@ -506,7 +506,13 @@ async def counter_deck(index: int, user: User = Depends(require_subscription)) -
     opp = opponents[index]
     battles = await _get_battles(user)
     preferred = [c for c, _ in get_most_played_cards(battles, normalize_tag(user.player_tag))]
-    counter = suggest_counter_deck(opp["deck"], user.arena_id, preferred)
+    counter = suggest_counter_deck(
+        opp["deck"],
+        user.arena_id,
+        preferred,
+        user_deck=opp.get("user_deck"),
+        trophies=user.trophies,
+    )
 
     return CounterDeckResponse(
         opponent_name=opp["name"],

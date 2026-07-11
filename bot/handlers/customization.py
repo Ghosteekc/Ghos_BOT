@@ -116,7 +116,13 @@ async def counter_deck_detail(callback: CallbackQuery, user: User) -> None:
         preferred = [c for c, _ in get_most_played_cards(battles, normalize_tag(user.player_tag))]
 
     try:
-        counter = suggest_counter_deck(opp["deck"], user.arena_id, preferred)
+        counter = suggest_counter_deck(
+            opp["deck"],
+            user.arena_id,
+            preferred,
+            user_deck=opp.get("user_deck"),
+            trophies=user.trophies,
+        )
 
         text = (
             f"⚔️ <b>Контр-колода vs {opp['name']}</b>\n\n"
