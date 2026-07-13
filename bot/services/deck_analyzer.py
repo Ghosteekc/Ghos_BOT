@@ -6,6 +6,9 @@ from bot.services.card_data import (
     WIN_CONDITIONS,
     get_card_elixir,
     get_card_role,
+    has_point_target_answer,
+    is_point_target_threat,
+    is_spam_card,
 )
 from bot.services.card_matchups import calculate_matchup_score as _deckshop_matchup_score
 from bot.services.card_matchups import counters_in_deck, ru, ru_list
@@ -21,6 +24,7 @@ class DeckStats:
     buildings: list[str]
     air_coverage: bool
     splash_coverage: bool
+    point_target_coverage: bool
 
 
 @dataclass
@@ -66,6 +70,7 @@ def analyze_deck(cards: list[str]) -> DeckStats:
         buildings=buildings,
         air_coverage=len(set(cards) & anti_air) >= 1,
         splash_coverage=bool(set(cards) & splash_cards),
+        point_target_coverage=has_point_target_answer(cards),
     )
 
 
@@ -140,6 +145,17 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
         reasons.append("❌ У вас нет заклинаний — сложнее контролировать поле")
     elif user_stats.spells and not opp_stats.spells:
         reasons.append("✅ Преимущество в заклинаниях")
+
+    opp_spam = [c for c in opponent_deck if is_spam_card(c)]
+    if not won and opp_spam and not user_stats.splash_coverage:
+        reasons.append("❌ Слабый сплеш — спам соперника сложно зачищать")
+
+    opp_point = [c for c in opponent_deck if is_point_target_threat(c)]
+    if not won and opp_point and not user_stats.point_target_coverage:
+        reasons.append(
+            f"❌ Слабый ответ на точечный урон ({ru_list(opp_point[:2])}) — "
+            f"Стражи держат P.E.K.K.A, Хог и подобных",
+        )
 
     if matchup_score >= 60 and won:
         reasons.insert(0, f"📊 Благоприятный матчап ({matchup_score:.0f}/100)")

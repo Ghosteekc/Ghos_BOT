@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from bot.services.card_data import COUNTERS, WIN_CONDITIONS, get_card_elixir, get_card_role
+from bot.services.card_data import (
+    COUNTERS,
+    POINT_TARGET_COUNTERS,
+    WIN_CONDITIONS,
+    get_card_elixir,
+    get_card_role,
+    has_point_target_answer,
+    is_point_target_threat,
+    is_spam_card,
+)
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_analyzer import (
     BattleAnalysis,
@@ -21,11 +30,6 @@ AIR_CARDS = {
     "Minions", "Minion Horde", "Baby Dragon", "Mega Minion", "Inferno Dragon",
     "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix", "Flying Machine",
     "Electro Dragon",
-}
-
-SWARM_CARDS = {
-    "Goblins", "Spear Goblins", "Skeleton Army", "Goblin Gang", "Barbarians",
-    "Elite Barbarians", "Minion Horde", "Bats", "Skeletons", "Guards",
 }
 
 
@@ -49,8 +53,10 @@ def _generic_counters(threat: str) -> list[str]:
     role = get_card_role(threat)
     if threat in AIR_CARDS or role == "air":
         return ["Inferno Tower", "Musketeer", "Inferno Dragon", "Wizard"]
-    if threat in SWARM_CARDS or role == "swarm":
+    if is_spam_card(threat):
         return ["Wizard", "Baby Dragon", "Valkyrie", "Arrows", "The Log"]
+    if is_point_target_threat(threat):
+        return list(POINT_TARGET_COUNTERS) + ["Inferno Tower", "Tesla"]
     if role == "building" or threat in CHIP_CARDS:
         return ["Earthquake", "Rocket", "Miner", "Royal Giant"]
     if role == "spell":
@@ -129,6 +135,9 @@ def _relevant_user_cards(user_deck: list[str], opp_deck: list[str], threats: lis
     if _swarm_in_deck(opp_deck) and user_stats.splash_coverage:
         relevant.update(c for c in user_deck if get_card_role(c) in ("splash", "spell"))
 
+    if _point_target_in_deck(opp_deck) and user_stats.point_target_coverage:
+        relevant.update(c for c in user_deck if c in POINT_TARGET_COUNTERS)
+
     if user_stats.avg_elixir <= opp_stats.avg_elixir + 0.3:
         relevant.update(c for c in user_deck if get_card_elixir(c) <= 2)
 
@@ -140,7 +149,11 @@ def _air_in_deck(deck: list[str]) -> list[str]:
 
 
 def _swarm_in_deck(deck: list[str]) -> list[str]:
-    return [c for c in deck if c in SWARM_CARDS or get_card_role(c) == "swarm"]
+    return [c for c in deck if is_spam_card(c)]
+
+
+def _point_target_in_deck(deck: list[str]) -> list[str]:
+    return [c for c in deck if is_point_target_threat(c)]
 
 
 def _build_outcome_summary(
@@ -176,7 +189,15 @@ def _build_outcome_summary(
         return f"Поражение: не хватило защиты от воздуха ({air_ru})."
 
     if not won and _swarm_in_deck(opp_deck) and not user_stats.splash_coverage:
-        return "Поражение: слабый сплеш — рой соперника добил по башням."
+        return "Поражение: слабый сплеш — спам соперника добил по башням."
+
+    opp_point = _point_target_in_deck(opp_deck)
+    if not won and opp_point and not has_point_target_answer(user_deck):
+        pt_ru = ", ".join(card_name_ru(c) for c in opp_point[:2])
+        return (
+            f"Поражение: слабый ответ на точечный урон ({pt_ru}) — "
+            f"Стражи и подобные карты держат таких юнитов лучше сплеша."
+        )
 
     if not won and user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
         return (

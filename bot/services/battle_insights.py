@@ -28,8 +28,10 @@ def build_battle_insight(battle: dict, player_tag: str) -> dict | None:
     if not analysis.won:
         if "воздух" in summary.lower():
             tags.append("air_defense")
-        if "сплеш" in summary.lower() or "рой" in summary.lower():
+        if "сплеш" in summary.lower() or "спам" in summary.lower():
             tags.append("splash")
+        if "точечн" in summary.lower() or "страж" in summary.lower():
+            tags.append("point_target")
         if "тяжёл" in summary.lower() or "циклил" in summary.lower():
             tags.append("cycle")
         if "заклинан" in summary.lower():
@@ -85,7 +87,12 @@ def build_insights_report(
             f"Частая проблема: защита от воздуха ({tag_counter['air_defense']} поражений)."
         )
     if tag_counter.get("splash", 0) >= 2:
-        patterns.append(f"Слабый сплеш — {tag_counter['splash']} поражений против роя.")
+        patterns.append(f"Слабый сплеш — {tag_counter['splash']} поражений против спама.")
+    if tag_counter.get("point_target", 0) >= 2:
+        patterns.append(
+            f"Слабый ответ на точечный урон — {tag_counter['point_target']} поражений. "
+            f"Стражи помогают против P.E.K.K.A и подобных."
+        )
     if tag_counter.get("cycle", 0) >= 2:
         patterns.append("Тяжёлая колода мешает — попробуйте снизить средний эликсир.")
     if tag_counter.get("spells", 0) >= 2:

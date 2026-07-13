@@ -222,6 +222,21 @@ WIN_CONDITIONS = {
     "Skeleton Barrel", "Sparky", "Three Musketeers", "Elite Barbarians", "Goblin Drill",
 }
 
+# Спам-толпы (не путать со Стражами — те танкуют точечный урон)
+SWARM_CARDS = {
+    "Goblins", "Spear Goblins", "Skeleton Army", "Goblin Gang", "Barbarians",
+    "Minion Horde", "Bats", "Skeletons", "Royal Recruits",
+}
+
+# Сильные юниты с точечным уроном (не сплеш) — Стражи и подобные карты их держат
+POINT_TARGET_THREATS = {
+    "P.E.K.K.A", "Mini P.E.K.K.A", "Prince", "Hog Rider", "Bandit", "Sparky",
+    "Inferno Dragon", "Lumberjack", "Golden Knight", "Mighty Miner", "Monk",
+    "Mega Knight", "Dark Prince", "Elite Barbarians", "Boss Bandit", "Rune Giant",
+}
+
+POINT_TARGET_COUNTERS = {"Guards", "Knight", "Ice Golem", "Skeleton Army", "Ronin"}
+
 
 def get_card_elixir(name: str) -> int:
     return CARD_META.get(name, {}).get("elixir", 4)
@@ -229,3 +244,15 @@ def get_card_elixir(name: str) -> int:
 
 def get_card_role(name: str) -> str:
     return CARD_META.get(name, {}).get("role", "support")
+
+
+def is_spam_card(name: str) -> bool:
+    return name in SWARM_CARDS or get_card_role(name) == "swarm"
+
+
+def is_point_target_threat(name: str) -> bool:
+    return name in POINT_TARGET_THREATS
+
+
+def has_point_target_answer(cards: list[str]) -> bool:
+    return bool(set(cards) & POINT_TARGET_COUNTERS)

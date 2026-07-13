@@ -14,6 +14,7 @@ _ANTI_AIR_SUGGESTIONS = ["Musketeer", "Mega Minion", "Inferno Dragon", "Tesla", 
 _SPLASH_SUGGESTIONS = ["Valkyrie", "Wizard", "Baby Dragon", "Fireball", "Arrows"]
 _DEFENSE_SUGGESTIONS = ["Cannon", "Tesla", "Tombstone", "Inferno Tower"]
 _CYCLE_SUGGESTIONS = ["Skeletons", "Ice Spirit", "Electro Spirit", "Ice Golem"]
+_POINT_TARGET_SUGGESTIONS = ["Guards", "Knight", "Ice Golem", "Skeleton Army"]
 
 
 def deck_key(cards: list[str]) -> str:
@@ -143,7 +144,7 @@ def _suggest_improvements(cards: list[str]) -> list[dict]:
     if not stats.splash_coverage:
         add(
             "splash",
-            "Нет сплеша — рой и связки Goblin Gang / Skeleton Army сложно зачищать",
+            "Нет сплеша — спам и связки Goblin Gang / Skeleton Army сложно зачищать",
             _SPLASH_SUGGESTIONS,
         )
 
@@ -154,10 +155,17 @@ def _suggest_improvements(cards: list[str]) -> list[dict]:
             _DEFENSE_SUGGESTIONS,
         )
 
+    if not stats.point_target_coverage:
+        add(
+            "point_target",
+            "Нет ответа на точечный урон — Стражи держат P.E.K.K.A, Мини P.E.K.K.A, Хог и подобных",
+            _POINT_TARGET_SUGGESTIONS,
+        )
+
     if not any(c in _SMALL_SPELLS for c in cards):
         add(
             "swarm",
-            "Нет дешёвого ответа на рой — Zap или Ice Spirit сильно помогут в цикле",
+            "Нет дешёвого ответа на спам — Zap или Ice Spirit сильно помогут в цикле",
             list(_SMALL_SPELLS),
         )
 

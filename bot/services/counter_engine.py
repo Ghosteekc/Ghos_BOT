@@ -2,10 +2,13 @@ from bot.services.card_data import (
     ARENA_CARD_POOL,
     CARD_META,
     COUNTERS,
+    POINT_TARGET_COUNTERS,
     SYNERGIES,
     WIN_CONDITIONS,
     get_card_elixir,
     get_card_role,
+    is_point_target_threat,
+    is_spam_card,
 )
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_matchups import synergy_partners
@@ -22,12 +25,6 @@ _ANTI_AIR = {
     "Mega Minion", "Electro Wizard", "Hunter", "Inferno Tower", "Tesla",
     "Archers", "Bats", "Minions", "Phoenix", "Firecracker", "Ice Wizard",
     "Baby Dragon",
-}
-
-_SWARM_CARDS = {
-    "Goblins", "Spear Goblins", "Skeleton Army", "Goblin Gang", "Barbarians",
-    "Elite Barbarians", "Minion Horde", "Bats", "Skeletons", "Guards",
-    "Wall Breakers", "Goblin Barrel",
 }
 
 _FLYING_TROOPS = {
@@ -116,9 +113,14 @@ def _prioritized_counters(opponent_deck: list[str], opp_has_air: bool) -> list[s
 
     if not opp_has_air:
         for card in opponent_deck:
-            if get_card_role(card) == "swarm" or card in _SWARM_CARDS:
+            if is_spam_card(card):
                 for counter in ("The Log", "Arrows", "Zap", "Wizard", "Valkyrie"):
                     scores[counter] = scores.get(counter, 0) + 1
+
+        for card in opponent_deck:
+            if is_point_target_threat(card):
+                for counter in POINT_TARGET_COUNTERS:
+                    scores[counter] = scores.get(counter, 0) + 2
 
     if opp_has_air:
         for counter in _ANTI_AIR:
@@ -377,7 +379,7 @@ def _find_replacement(card: str, pool: set[str], current: list[str]) -> str | No
         "win_condition": ["Hog Rider", "Balloon", "Royal Giant", "Giant", "Miner"],
         "spell": ["Zap", "Fireball", "Arrows", "The Log"],
         "building": ["Cannon", "Tesla", "Inferno Tower"],
-        "tank": ["Knight", "Valkyrie", "Ice Golem", "Mini P.E.K.K.A"],
+        "tank": ["Knight", "Valkyrie", "Ice Golem", "Guards", "Mini P.E.K.K.A"],
         "support": ["Musketeer", "Archers", "Wizard", "Electro Wizard"],
         "swarm": ["Skeletons", "Goblins", "Bats", "Goblin Gang"],
     }
