@@ -346,7 +346,14 @@ async def _build_arena_popular_decks(
     if scanned > 0 and has_live and any(e["total_games"] == 0 for e in entries):
         source = "mixed"
 
-    display_arena = arena_name or (f"{trophies} 🏆" if trophies else "Ваша лига")
+    if arena_name:
+        display_arena = arena_name
+    elif trophies >= 9000:
+        display_arena = "Легендарная лига"
+    elif trophies > 0:
+        display_arena = "Ваша лига"
+    else:
+        display_arena = "Ваша арена"
 
     return {
         "arena_name": display_arena,

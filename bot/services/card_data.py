@@ -126,7 +126,11 @@ CARD_META: dict[str, dict] = {
 }
 
 COUNTERS: dict[str, list[str]] = {
-    "Hog Rider": ["Cannon", "Tesla", "Tornado", "Ice Golem", "Skeleton Army"],
+    "Hog Rider": [
+        "Cannon", "Tesla", "Tornado", "Tombstone", "Bowler", "Barbarians",
+        "P.E.K.K.A", "Mini P.E.K.K.A", "Electro Wizard", "Hunter", "Fisherman",
+        "Guards", "Skeleton Army", "Ice Golem",
+    ],
     "Balloon": ["Inferno Tower", "Musketeer", "Wizard", "Mega Minion", "Inferno Dragon"],
     "Golem": ["Inferno Tower", "Inferno Dragon", "P.E.K.K.A", "Mini P.E.K.K.A"],
     "Graveyard": ["Poison", "Valkyrie", "Wizard", "Baby Dragon", "Bowler"],
@@ -147,7 +151,11 @@ COUNTERS: dict[str, list[str]] = {
     "Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "P.E.K.K.A"],
     "P.E.K.K.A": ["Skeleton Army", "Guards", "Goblin Gang", "Inferno Tower", "Ronin"],
     "Royal Ghost": ["Valkyrie", "Knight", "Barbarians", "Mega Minion", "Poison"],
-    "Bandit": ["Skeleton Army", "Goblin Gang", "Knight", "Tesla"],
+    "Bandit": [
+        "Valkyrie", "Ronin", "Guards", "Knight", "Barbarians",
+        "Skeleton Army", "Goblin Gang", "Tesla", "P.E.K.K.A", "Mini P.E.K.K.A",
+        "Mega Minion", "Hunter",
+    ],
     "Ram Rider": ["Cannon", "Tesla", "Skeleton Army", "P.E.K.K.A"],
     "Prince": ["Skeleton Army", "Goblin Gang", "Tombstone", "Barbarians", "Ronin"],
     "Rune Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "Cannon"],
