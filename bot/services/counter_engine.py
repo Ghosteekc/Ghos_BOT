@@ -8,6 +8,7 @@ from bot.services.card_data import (
     get_card_role,
 )
 from bot.services.card_names_ru import card_name_ru
+from bot.services.card_matchups import synergy_partners
 from bot.services.deck_analyzer import analyze_deck, extract_deck, find_opponent_threats
 
 _AIR_OFFENSE = {
@@ -234,8 +235,8 @@ def build_synergy_deck(
     suggestions: dict[str, list[str]] = {}
 
     for core in deck:
-        synergies = SYNERGIES.get(core, [])
-        available = [s for s in synergies if s in pool and s not in deck]
+        strong, partial = synergy_partners(core, pool, limit=4)
+        available = strong + [p for p in partial if p not in strong]
         suggestions[core] = available[:4]
         for s in available[:2]:
             if len(deck) < 8 and s not in deck:

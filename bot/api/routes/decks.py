@@ -383,6 +383,10 @@ async def compare_user_deck(
         reference_card_notes=result["reference_card_notes"],
         matchup_score=result["matchup_score"],
         opponent_matchup_score=result["opponent_matchup_score"],
+        user_synergy_score=result.get("user_synergy_score", 50.0),
+        reference_synergy_score=result.get("reference_synergy_score", 50.0),
+        user_synergy_notes=result.get("user_synergy_notes", []),
+        reference_synergy_notes=result.get("reference_synergy_notes", []),
     )
 
 

@@ -2,12 +2,13 @@ from collections import Counter
 from dataclasses import dataclass
 
 from bot.services.card_data import (
-    COUNTERS,
     SYNERGIES,
     WIN_CONDITIONS,
     get_card_elixir,
     get_card_role,
 )
+from bot.services.card_matchups import calculate_matchup_score as _deckshop_matchup_score
+from bot.services.card_matchups import counters_in_deck, ru, ru_list
 from bot.services.clash_api import normalize_tag
 
 
@@ -77,38 +78,8 @@ def find_opponent_threats(opponent_deck: list[str]) -> list[str]:
 
 
 def calculate_matchup_score(user_deck: list[str], opponent_deck: list[str]) -> float:
-    """Оценка матчапа от 0 (плохо) до 100 (отлично) на основе счётчиков."""
-    threats = find_opponent_threats(opponent_deck)
-    if not threats:
-        return 50.0
-
-    countered = 0
-    for threat in threats:
-        counters = COUNTERS.get(threat, [])
-        if any(c in user_deck for c in counters):
-            countered += 1
-
-    base_score = (countered / len(threats)) * 70
-
-    user_stats = analyze_deck(user_deck)
-    opp_stats = analyze_deck(opponent_deck)
-
-    if user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
-        base_score -= 10
-    elif user_stats.avg_elixir < opp_stats.avg_elixir - 0.5:
-        base_score += 5
-
-    if not user_stats.air_coverage and any(
-        c in {"Balloon", "Lava Hound", "Minions", "Minion Horde"} for c in opponent_deck
-    ):
-        base_score -= 15
-
-    if not user_stats.splash_coverage and any(
-        get_card_role(c) == "swarm" for c in opponent_deck
-    ):
-        base_score -= 10
-
-    return max(0.0, min(100.0, base_score))
+    """Оценка матчапа 0–100 по локальным контрам DeckShop."""
+    return _deckshop_matchup_score(user_deck, opponent_deck)
 
 
 def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
@@ -125,27 +96,32 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
     missing_counters = []
 
     for threat in threats:
-        counters = COUNTERS.get(threat, [])
-        user_has = [c for c in counters if c in user_deck]
-        if user_has:
+        strong, partial = counters_in_deck(threat, user_deck)
+        t_ru = ru(threat)
+        if strong:
             if won:
-                reasons.append(f"✅ {threat} — у вас есть счётчик: {', '.join(user_has)}")
+                reasons.append(f"✅ {t_ru} — контра: {ru_list(strong)}")
             else:
                 reasons.append(
-                    f"⚠️ {threat} — счётчик есть ({', '.join(user_has)}), "
-                    f"но, возможно, использован не вовремя"
+                    f"⚠️ {t_ru} — контра есть ({ru_list(strong)}), но не сработала вовремя",
                 )
+        elif partial:
+            missing_counters.extend(partial[:2])
+            if won:
+                reasons.append(f"🎯 Победа без полной контры на {t_ru} (есть только {ru_list(partial)})")
+            else:
+                reasons.append(f"⚠️ Слабая контра на {t_ru}: {ru_list(partial)}")
         else:
-            missing_counters.extend(counters[:2])
+            from bot.services.card_matchups import get_matchups
+
+            row = get_matchups(threat)
+            rec = list((row.counters_strong if row else [])[:3])
+            missing_counters.extend(rec[:2])
             if won:
-                reasons.append(
-                    f"🎯 Вы победили без прямого счётчика на {threat} — "
-                    f"хорошая игра или уровень карт"
-                )
+                reasons.append(f"🎯 Победа без контры на {t_ru} — сильная игра")
             else:
                 reasons.append(
-                    f"❌ Нет счётчика на {threat}. Рекомендуется: "
-                    f"{', '.join(counters[:3])}"
+                    f"❌ Нет контры на {t_ru}. Подойдут: {ru_list(rec) if rec else '—'}",
                 )
 
     user_stats = analyze_deck(user_deck)

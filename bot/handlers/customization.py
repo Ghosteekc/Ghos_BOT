@@ -11,6 +11,7 @@ from bot.services.counter_engine import (
     customize_deck_for_arena,
     suggest_counter_deck,
 )
+from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_analyzer import get_most_played_cards
 
 logger = logging.getLogger(__name__)
@@ -208,7 +209,9 @@ async def synergy_deck(message: Message, user: User) -> None:
         synergy_lines = []
         for card, syns in result["synergies"].items():
             if syns:
-                synergy_lines.append(f"• {card} → {', '.join(syns)}")
+                card_ru = card_name_ru(card, short=True) or card
+                syn_ru = ", ".join(card_name_ru(s, short=True) or s for s in syns)
+                synergy_lines.append(f"• {card_ru} → {syn_ru}")
 
         text = (
             f"✨ <b>Колода на основе ваших карт</b>\n\n"

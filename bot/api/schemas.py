@@ -300,6 +300,10 @@ class DeckCompareResponse(BaseModel):
     reference_card_notes: list[DeckCompareCardNote] = []
     matchup_score: float = 50.0
     opponent_matchup_score: float = 50.0
+    user_synergy_score: float = 50.0
+    reference_synergy_score: float = 50.0
+    user_synergy_notes: list[str] = []
+    reference_synergy_notes: list[str] = []
 
 
 class DeckCardMatchup(BaseModel):
