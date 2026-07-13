@@ -237,6 +237,12 @@ POINT_TARGET_THREATS = {
 
 POINT_TARGET_COUNTERS = {"Guards", "Knight", "Ice Golem", "Skeleton Army", "Ronin"}
 
+# На заклинания нет карты-контры, кроме Монаха — отражает Фаербол и Ракету
+SPELL_CARD_COUNTERS: dict[str, list[str]] = {
+    "Fireball": ["Monk"],
+    "Rocket": ["Monk"],
+}
+
 
 def get_card_elixir(name: str) -> int:
     return CARD_META.get(name, {}).get("elixir", 4)
@@ -256,3 +262,16 @@ def is_point_target_threat(name: str) -> bool:
 
 def has_point_target_answer(cards: list[str]) -> bool:
     return bool(set(cards) & POINT_TARGET_COUNTERS)
+
+
+def is_pure_spell(name: str) -> bool:
+    """Заклинание без win-condition — карта-контра на него не ставится."""
+    meta = CARD_META.get(name, {})
+    if meta.get("type") != "spell":
+        return False
+    return get_card_role(name) != "win_condition"
+
+
+def card_counters_for_spell(spell: str) -> list[str]:
+    """Карты, которые контрят заклинание (единственное исключение — Монах)."""
+    return list(SPELL_CARD_COUNTERS.get(spell, []))

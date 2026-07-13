@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bot.services.card_data import COUNTERS, WIN_CONDITIONS, get_card_elixir, get_card_role
+from bot.services.card_data import COUNTERS, WIN_CONDITIONS, get_card_elixir, get_card_role, is_pure_spell
 from bot.services.card_names_ru import card_name_ru
 from bot.services.clash_api import normalize_tag
 from bot.services.deck_analyzer import analyze_deck, extract_deck
@@ -22,6 +22,8 @@ def deck_key(cards: list[str]) -> str:
 
 
 def _effective_counters(deck: list[str], threat: str) -> list[str]:
+    if is_pure_spell(threat):
+        return []
     return [c for c in COUNTERS.get(threat, []) if c in deck and c != threat]
 
 

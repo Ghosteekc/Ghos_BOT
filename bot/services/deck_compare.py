@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bot.services.card_data import card_counters_for_spell, is_pure_spell
 from bot.services.card_matchups import (
     calculate_deck_synergy,
     calculate_matchup_score,
@@ -32,8 +33,24 @@ def _analyze_own_card(card: str, own_deck: list[str], opp_deck: list[str]) -> di
     strong_opp, partial_opp = targets_countered_by(card, opp_deck)
     opp_strong, opp_partial = counters_in_deck(card, opp_deck)
 
+    if is_pure_spell(card) and not strong_opp and not partial_opp:
+        return _note(
+            card,
+            "neutral",
+            f"{label} — заклинание, картой не контрится; бьёт по юнитам на поле",
+        )
+
     if strong_opp:
         extra = f", слабее против {ru_list(partial_opp)}" if partial_opp else ""
+        if card == "Monk" and any(is_pure_spell(t) for t in strong_opp):
+            spells = ru_list([t for t in strong_opp if is_pure_spell(t)])
+            troops = ru_list([t for t in strong_opp if not is_pure_spell(t)])
+            parts = []
+            if spells:
+                parts.append(f"отражает {spells}")
+            if troops:
+                parts.append(f"контрит {troops}")
+            return _note(card, "good", f"{label} — {'; '.join(parts)}{extra}")
         return _note(
             card,
             "good",
@@ -65,6 +82,12 @@ def _analyze_enemy_card(card: str, enemy_deck: list[str], your_deck: list[str]) 
     your_strong, your_partial = counters_in_deck(card, your_deck)
 
     if your_strong:
+        if is_pure_spell(card):
+            return _note(
+                card,
+                "good",
+                f"{label} — {ru_list(your_strong)} отражает заклинание",
+            )
         extra = f", частично: {ru_list(your_partial)}" if your_partial else ""
         return _note(
             card,
@@ -76,6 +99,12 @@ def _analyze_enemy_card(card: str, enemy_deck: list[str], your_deck: list[str]) 
             card,
             "warn",
             f"{label} — только слабый ответ ({ru_list(your_partial)}), можно пробить",
+        )
+    if is_pure_spell(card):
+        return _note(
+            card,
+            "neutral",
+            f"{label} — заклинание, картой-контрой не остановить",
         )
     return _note(
         card,
@@ -113,6 +142,8 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict:
     ref_worse: list[str] = []
 
     for threat in ref_cards:
+        if is_pure_spell(threat) and not card_counters_for_spell(threat):
+            continue
         t = ru(threat)
         strong, partial = counters_in_deck(threat, user_cards)
         if strong:
@@ -126,6 +157,8 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict:
             ref_better.append(f"{t} в колоде арены сложнее остановить")
 
     for threat in user_cards:
+        if is_pure_spell(threat) and not card_counters_for_spell(threat):
+            continue
         t = ru(threat)
         strong, partial = counters_in_deck(threat, ref_cards)
         if strong:

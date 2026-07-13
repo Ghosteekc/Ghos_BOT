@@ -12,6 +12,7 @@ from bot.services.card_data import (
     get_card_role,
     has_point_target_answer,
     is_point_target_threat,
+    is_pure_spell,
     is_spam_card,
 )
 from bot.services.card_names_ru import card_name_ru
@@ -59,8 +60,8 @@ def _generic_counters(threat: str) -> list[str]:
         return list(POINT_TARGET_COUNTERS) + ["Inferno Tower", "Tesla"]
     if role == "building" or threat in CHIP_CARDS:
         return ["Earthquake", "Rocket", "Miner", "Royal Giant"]
-    if role == "spell":
-        return ["The Log", "Arrows", "Zap", "Barbarian Barrel"]
+    if is_pure_spell(threat):
+        return []
     return ["Knight", "Valkyrie", "Mini P.E.K.K.A", "Inferno Tower", "Tornado"]
 
 

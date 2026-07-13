@@ -8,7 +8,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from bot.data.deckshop_counters import DECKSHOP_COUNTERS
-from bot.services.card_data import COUNTERS, SYNERGIES, get_card_elixir
+from bot.services.card_data import (
+    COUNTERS,
+    SYNERGIES,
+    card_counters_for_spell,
+    get_card_elixir,
+    is_pure_spell,
+)
 from bot.services.card_names_ru import card_name_ru
 
 
@@ -32,6 +38,13 @@ def _dedupe(names: list[str]) -> list[str]:
     return out
 
 
+def _apply_spell_counter_rules(name: str, strong: list[str], partial: list[str]) -> tuple[list[str], list[str]]:
+    """На заклинания нет карты-контры, кроме Монаха на Фаербол/Ракету."""
+    if is_pure_spell(name):
+        return _dedupe(card_counters_for_spell(name)), []
+    return strong, partial
+
+
 def _tier(raw: dict | None) -> tuple[list[str], list[str]]:
     if not raw:
         return [], []
@@ -44,6 +57,7 @@ def _build_index() -> dict[str, CardMatchups]:
         strong, partial = _tier(raw.get("counters_vs_attack"))
         if not strong and not partial and name in COUNTERS:
             strong = _dedupe(COUNTERS[name])
+        strong, partial = _apply_spell_counter_rules(name, strong, partial)
         syn_strong, syn_partial = _tier(raw.get("synergy_offense"))
         if not syn_strong and not syn_partial and name in SYNERGIES:
             syn_strong = _dedupe(SYNERGIES[name])
@@ -78,6 +92,11 @@ def ru_list(cards: list[str], *, limit: int = 4) -> str:
 
 def counters_in_deck(threat: str, deck: list[str]) -> tuple[list[str], list[str]]:
     """Какие карты из колоды контрят угрозу (сильно / частично)."""
+    if is_pure_spell(threat):
+        allowed = set(card_counters_for_spell(threat))
+        strong = [c for c in deck if c in allowed and c != threat]
+        return _dedupe(strong), []
+
     row = _MATCHUPS.get(threat)
     if not row:
         legacy = [c for c in COUNTERS.get(threat, []) if c in deck and c != threat]
@@ -90,6 +109,10 @@ def counters_in_deck(threat: str, deck: list[str]) -> tuple[list[str], list[str]
 
 def card_counters_target(counter_card: str, target: str) -> str | None:
     """'strong' | 'partial' | None — контрит ли counter_card карту target."""
+    if is_pure_spell(target):
+        if counter_card in card_counters_for_spell(target):
+            return "strong"
+        return None
     row = _MATCHUPS.get(target)
     if not row:
         if counter_card in COUNTERS.get(target, []):
