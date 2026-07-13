@@ -243,6 +243,35 @@ SPELL_CARD_COUNTERS: dict[str, list[str]] = {
     "Rocket": ["Monk"],
 }
 
+# Заклинания против зданий: Фаербол — частично, Землетряс — сильно
+SPELL_COUNTERS_BUILDINGS_STRONG = {"Earthquake"}
+SPELL_COUNTERS_BUILDINGS_PARTIAL = {"Fireball"}
+
+# «Мыши» и скелеты (мелкий спам) — для исключений у атакующих карт
+MICE_AND_SKELETONS = frozenset({
+    "Minions", "Skeletons", "Bats", "Spear Goblins", "Skeleton Army",
+    "Goblins", "Fire Spirit", "Ice Spirit", "Electro Spirit", "Skeletons",
+})
+
+# Win-condition атакующие карты не контрят никого, кроме явных исключений
+OFFENSE_COUNTER_ALLOWED: dict[str, frozenset[str]] = {
+    "Goblin Giant": MICE_AND_SKELETONS,
+    "Bandit": MICE_AND_SKELETONS,
+    "Electro Giant": frozenset(
+        set(MICE_AND_SKELETONS) | SWARM_CARDS | {
+            "Goblin Gang", "Goblins", "Spear Goblins", "Barbarians",
+            "Elite Barbarians", "Minion Horde", "Wall Breakers", "Royal Recruits",
+        }
+    ),
+}
+
+# Ручные правки поверх DeckShop (кого карта реально контрит)
+MANUAL_COUNTERS_STRONG: dict[str, frozenset[str]] = {
+    "Guards": frozenset({"P.E.K.K.A", "Mini P.E.K.K.A"}),
+}
+
+MANUAL_COUNTERS_PARTIAL: dict[str, frozenset[str]] = {}
+
 
 def get_card_elixir(name: str) -> int:
     return CARD_META.get(name, {}).get("elixir", 4)
@@ -275,3 +304,20 @@ def is_pure_spell(name: str) -> bool:
 def card_counters_for_spell(spell: str) -> list[str]:
     """Карты, которые контрят заклинание (единственное исключение — Монах)."""
     return list(SPELL_CARD_COUNTERS.get(spell, []))
+
+
+def is_building(name: str) -> bool:
+    return CARD_META.get(name, {}).get("type") == "building"
+
+
+def spell_counter_tier_vs_building(spell: str) -> str | None:
+    """'strong' | 'partial' | None — насколько заклинание контрит здания."""
+    if spell in SPELL_COUNTERS_BUILDINGS_STRONG:
+        return "strong"
+    if spell in SPELL_COUNTERS_BUILDINGS_PARTIAL:
+        return "partial"
+    return None
+
+
+def is_offense_win_condition(name: str) -> bool:
+    return name in WIN_CONDITIONS

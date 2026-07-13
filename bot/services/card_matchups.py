@@ -10,10 +10,16 @@ from dataclasses import dataclass
 from bot.data.deckshop_counters import DECKSHOP_COUNTERS
 from bot.services.card_data import (
     COUNTERS,
+    MANUAL_COUNTERS_PARTIAL,
+    MANUAL_COUNTERS_STRONG,
+    OFFENSE_COUNTER_ALLOWED,
     SYNERGIES,
     card_counters_for_spell,
     get_card_elixir,
+    is_building,
+    is_offense_win_condition,
     is_pure_spell,
+    spell_counter_tier_vs_building,
 )
 from bot.services.card_names_ru import card_name_ru
 
@@ -45,6 +51,18 @@ def _apply_spell_counter_rules(name: str, strong: list[str], partial: list[str])
     return strong, partial
 
 
+def _deckshop_counter_tier(counter_card: str, target: str) -> str | None:
+    """DeckShop counters_vs_attack: counter_card бьёт target."""
+    row = _MATCHUPS.get(counter_card)
+    if not row:
+        return None
+    if target in row.counters_strong:
+        return "strong"
+    if target in row.counters_partial:
+        return "partial"
+    return None
+
+
 def _tier(raw: dict | None) -> tuple[list[str], list[str]]:
     if not raw:
         return [], []
@@ -55,8 +73,6 @@ def _build_index() -> dict[str, CardMatchups]:
     index: dict[str, CardMatchups] = {}
     for name, raw in DECKSHOP_COUNTERS.items():
         strong, partial = _tier(raw.get("counters_vs_attack"))
-        if not strong and not partial and name in COUNTERS:
-            strong = _dedupe(COUNTERS[name])
         strong, partial = _apply_spell_counter_rules(name, strong, partial)
         syn_strong, syn_partial = _tier(raw.get("synergy_offense"))
         if not syn_strong and not syn_partial and name in SYNERGIES:
@@ -92,36 +108,51 @@ def ru_list(cards: list[str], *, limit: int = 4) -> str:
 
 def counters_in_deck(threat: str, deck: list[str]) -> tuple[list[str], list[str]]:
     """Какие карты из колоды контрят угрозу (сильно / частично)."""
-    if is_pure_spell(threat):
-        allowed = set(card_counters_for_spell(threat))
-        strong = [c for c in deck if c in allowed and c != threat]
-        return _dedupe(strong), []
-
-    row = _MATCHUPS.get(threat)
-    if not row:
-        legacy = [c for c in COUNTERS.get(threat, []) if c in deck and c != threat]
-        return _dedupe(legacy), []
-
-    strong = [c for c in deck if c in row.counters_strong and c != threat]
-    partial = [c for c in deck if c in row.counters_partial and c not in strong and c != threat]
+    strong: list[str] = []
+    partial: list[str] = []
+    for card in deck:
+        if card == threat:
+            continue
+        tier = card_counters_target(card, threat)
+        if tier == "strong":
+            strong.append(card)
+        elif tier == "partial":
+            partial.append(card)
     return _dedupe(strong), _dedupe(partial)
 
 
 def card_counters_target(counter_card: str, target: str) -> str | None:
     """'strong' | 'partial' | None — контрит ли counter_card карту target."""
+    if counter_card == target:
+        return None
+
     if is_pure_spell(target):
         if counter_card in card_counters_for_spell(target):
             return "strong"
         return None
-    row = _MATCHUPS.get(target)
-    if not row:
-        if counter_card in COUNTERS.get(target, []):
-            return "strong"
-        return None
-    if counter_card in row.counters_strong:
+
+    if target in MANUAL_COUNTERS_STRONG.get(counter_card, ()):
         return "strong"
-    if counter_card in row.counters_partial:
+    if target in MANUAL_COUNTERS_PARTIAL.get(counter_card, ()):
         return "partial"
+
+    allowed_offense = OFFENSE_COUNTER_ALLOWED.get(counter_card)
+    if allowed_offense is not None:
+        return "strong" if target in allowed_offense else None
+
+    if is_offense_win_condition(counter_card):
+        return None
+
+    tier = _deckshop_counter_tier(counter_card, target)
+    if tier:
+        return tier
+
+    if counter_card in COUNTERS.get(target, []):
+        return "strong"
+
+    if is_building(target):
+        return spell_counter_tier_vs_building(counter_card)
+
     return None
 
 
