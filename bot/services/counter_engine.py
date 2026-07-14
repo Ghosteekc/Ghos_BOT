@@ -1,9 +1,7 @@
 from bot.services.card_data import (
     ARENA_CARD_POOL,
     CARD_META,
-    COUNTERS,
     POINT_TARGET_COUNTERS,
-    SYNERGIES,
     WIN_CONDITIONS,
     get_card_elixir,
     get_card_role,
@@ -11,7 +9,7 @@ from bot.services.card_data import (
     is_spam_card,
 )
 from bot.services.card_names_ru import card_name_ru
-from bot.services.card_matchups import synergy_partners
+from bot.services.card_matchups import card_counters_target, synergy_partners
 from bot.services.deck_analyzer import analyze_deck, extract_deck, find_opponent_threats
 
 _AIR_OFFENSE = {
@@ -33,7 +31,26 @@ _FLYING_TROOPS = {
     "Flying Machine", "Electro Dragon",
 }
 
-_MAX_COUNTER_SWAPS = 2
+_MAX_WIN_CONDITIONS = 1
+_MAX_SPELLS = 2
+_MAX_BUILDINGS = 1
+
+_SPELL_KILLERS = {
+    "Zap", "The Log", "Arrows", "Barbarian Barrel", "Giant Snowball",
+    "Rage", "Fireball", "Poison", "Earthquake", "Lightning",
+}
+
+_REFLECT_CHAMPIONS = {"Monk", "Ronin"}
+
+_PUSH_THREATS = {
+    "Hog Rider", "Giant", "Golem", "Battle Ram", "Royal Hogs", "Goblin Giant",
+    "Electro Giant", "P.E.K.K.A", "Lava Hound", "Miner",
+}
+
+_EXTRA_THREATS = {
+    "Giant", "Skeleton Barrel", "Balloon", "Mega Knight", "Electro Giant",
+    "P.E.K.K.A", "Dark Prince", "Valkyrie", "Witch", "Royal Giant", "Goblin Barrel",
+}
 
 
 def _card_ru(name: str) -> str:
@@ -47,184 +64,279 @@ def suggest_counter_deck(
     user_deck: list[str] | None = None,
     trophies: int | None = None,
 ) -> list[str]:
-    """Подбор контр-колоды: ваша колода из боя + точечные замены под карты соперника."""
+    """Собрать контр-колоду под угрозы соперника с учётом его заклинаний и структуры."""
     preferred_cards = preferred_cards or []
     pool = _get_arena_pool(arena_id, trophies)
     pool.update(opponent_deck)
-    pool.update(user_deck or [])
     pool.update(preferred_cards)
+    pool.update(user_deck or [])
 
-    if user_deck and len(user_deck) == 8:
-        deck = list(user_deck)
-    else:
-        deck = []
-        for card in preferred_cards:
-            if card in pool and card not in deck and len(deck) < 8:
-                deck.append(card)
-
+    threats = _key_threats(opponent_deck)
     opp_has_air = _deck_has_air(opponent_deck)
-    needed = _prioritized_counters(opponent_deck, opp_has_air)
-    missing = [c for c in needed if c not in deck and c in pool]
 
-    swaps = 0
-    for counter in missing:
-        if swaps >= _MAX_COUNTER_SWAPS:
+    ranked: list[tuple[float, str]] = []
+    for card in pool:
+        if card in opponent_deck:
+            continue
+        if not opp_has_air and _skip_without_opponent_air(card):
+            continue
+        score = _score_counter_card(card, opponent_deck, threats, preferred_cards)
+        if score > 0:
+            ranked.append((score, card))
+    ranked.sort(key=lambda x: (-x[0], x[1]))
+
+    deck: list[str] = []
+    for _, card in ranked:
+        if len(deck) >= 8:
             break
-        slot = _find_swap_slot(deck, counter, opponent_deck, user_deck or deck, opp_has_air)
-        if slot is not None:
-            deck[slot] = counter
-            swaps += 1
-        elif len(deck) < 8:
-            deck.append(counter)
+        if _can_add(card, deck):
+            deck.append(card)
 
-    deck = _fill_deck(deck, pool, opponent_deck, opp_has_air)
-    return deck[:8]
+    deck = _ensure_spell(deck, pool, opponent_deck, threats)
+    deck = _ensure_win_condition(deck, pool, preferred_cards)
+    deck = _ensure_building(deck, pool, opponent_deck)
+    deck = _trim_excess(deck, opponent_deck, threats, preferred_cards)
+
+    for filler in ("Skeletons", "Ice Spirit", "Electro Spirit", "Knight", "Archers"):
+        if len(deck) >= 8:
+            break
+        if filler in pool and _can_add(filler, deck):
+            deck.append(filler)
+
+    while len(deck) < 8:
+        added = False
+        for _, card in ranked:
+            if card not in deck and _can_add(card, deck):
+                deck.append(card)
+                added = True
+                break
+        if not added:
+            for card in pool:
+                if card not in deck and card not in opponent_deck and _can_add(card, deck):
+                    deck.append(card)
+                    added = True
+                    break
+        if not added:
+            break
+
+    return _trim_excess(deck, opponent_deck, threats, preferred_cards)[:8]
+
+
+_GROUND_COUNTERS = {"Inferno Tower", "Tesla", "Cannon", "Tombstone"}
+
+
+def _skip_without_opponent_air(card: str) -> bool:
+    """Не брать чистый анти-воздух, если у соперника нет воздуха."""
+    if card in _GROUND_COUNTERS:
+        return False
+    return _is_anti_air_specialist(card) or card in _FLYING_TROOPS
+
+
+def _key_threats(opponent_deck: list[str]) -> list[str]:
+    base = find_opponent_threats(opponent_deck)
+    extra = [c for c in opponent_deck if c in _EXTRA_THREATS and c not in base]
+    return list(dict.fromkeys(base + extra))
+
+
+def _monk_worth_it(opponent_deck: list[str]) -> bool:
+    if not set(opponent_deck) & {"Fireball", "Rocket"}:
+        return False
+    if set(opponent_deck) & {"Giant", "Golem", "Lava Hound", "Electro Giant", "Goblin Giant"}:
+        return False
+    return True
+
+
+def _swarm_hard_countered(card: str, opponent_deck: list[str]) -> bool:
+    if not (is_spam_card(card) or card in {"Skeleton Army", "Goblin Gang", "Minion Horde"}):
+        return False
+    return bool(set(opponent_deck) & _SPELL_KILLERS)
+
+
+def _deck_role_counts(deck: list[str]) -> dict[str, int]:
+    return {
+        "win": sum(1 for c in deck if c in WIN_CONDITIONS or get_card_role(c) == "win_condition"),
+        "spell": sum(1 for c in deck if get_card_role(c) == "spell"),
+        "building": sum(1 for c in deck if get_card_role(c) == "building"),
+    }
+
+
+def _can_add(card: str, deck: list[str]) -> bool:
+    if card in deck:
+        return False
+    counts = _deck_role_counts(deck)
+    role = get_card_role(card)
+    if card in WIN_CONDITIONS or role == "win_condition":
+        return counts["win"] < _MAX_WIN_CONDITIONS
+    if role == "spell":
+        return counts["spell"] < _MAX_SPELLS
+    if role == "building":
+        return counts["building"] < _MAX_BUILDINGS
+    return True
+
+
+def _score_counter_card(
+    card: str,
+    opponent_deck: list[str],
+    threats: list[str],
+    preferred: list[str],
+) -> float:
+    if card in _REFLECT_CHAMPIONS and not _monk_worth_it(opponent_deck):
+        return -1.0
+    if _swarm_hard_countered(card, opponent_deck):
+        return -1.0
+
+    score = 0.0
+    for threat in threats:
+        tier = card_counters_target(card, threat)
+        if tier == "strong":
+            score += 7.0
+        elif tier == "partial":
+            score += 2.5
+        if is_point_target_threat(threat) and card in POINT_TARGET_COUNTERS and card not in _REFLECT_CHAMPIONS:
+            score += 3.0
+
+    for opp in opponent_deck:
+        if opp in threats:
+            continue
+        tier = card_counters_target(card, opp)
+        if tier == "strong":
+            score += 1.5
+        elif tier == "partial":
+            score += 0.5
+
+    for opp in opponent_deck:
+        if opp in _SPELL_KILLERS and _swarm_hard_countered(card, [opp]):
+            score -= 5.0
+        tier = card_counters_target(opp, card)
+        if tier == "strong":
+            score -= 4.0
+        elif tier == "partial":
+            score -= 1.5
+
+    if card in preferred[:10]:
+        score += 1.5
+    if card in preferred[:3]:
+        score += 1.0
+
+    if card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
+        score -= 2.0
+
+    return score
+
+
+def _card_score_in_context(card: str, opponent_deck: list[str], threats: list[str]) -> float:
+    return _score_counter_card(card, opponent_deck, threats, [])
+
+
+def _replace_weakest(
+    deck: list[str],
+    new_card: str,
+    opponent_deck: list[str],
+    threats: list[str],
+    *,
+    skip_win: bool = True,
+) -> list[str]:
+    if new_card in deck:
+        return deck
+    candidates = []
+    for i, card in enumerate(deck):
+        if skip_win and (card in WIN_CONDITIONS or get_card_role(card) == "win_condition"):
+            continue
+        candidates.append((i, _card_score_in_context(card, opponent_deck, threats)))
+    if not candidates:
+        return deck
+    worst_idx = min(candidates, key=lambda x: x[1])[0]
+    out = list(deck)
+    out[worst_idx] = new_card
+    return out
+
+
+def _ensure_spell(
+    deck: list[str],
+    pool: set[str],
+    opponent_deck: list[str] | None = None,
+    threats: list[str] | None = None,
+) -> list[str]:
+    if any(get_card_role(c) == "spell" for c in deck):
+        return deck
+    opponent_deck = opponent_deck or []
+    threats = threats or []
+    for spell in ("Zap", "The Log", "Fireball"):
+        if spell not in pool:
+            continue
+        if len(deck) < 8 and _can_add(spell, deck):
+            deck.append(spell)
+            return deck
+        if len(deck) >= 8:
+            deck = _replace_weakest(deck, spell, opponent_deck, threats)
+            return deck
+    return deck
+
+
+def _ensure_win_condition(deck: list[str], pool: set[str], preferred: list[str]) -> list[str]:
+    if any(c in WIN_CONDITIONS or get_card_role(c) == "win_condition" for c in deck):
+        return deck
+    for wc in list(preferred) + ["Hog Rider", "Royal Giant", "Miner", "Balloon"]:
+        if wc not in pool or wc not in WIN_CONDITIONS:
+            continue
+        if len(deck) < 8 and _can_add(wc, deck):
+            deck.append(wc)
+            return deck
+    return deck
+
+
+def _ensure_building(deck: list[str], pool: set[str], opponent_deck: list[str]) -> list[str]:
+    if any(get_card_role(c) == "building" for c in deck):
+        return deck
+    if not set(opponent_deck) & _PUSH_THREATS:
+        return deck
+    for building in ("Cannon", "Tesla", "Tombstone", "Inferno Tower"):
+        if building not in pool:
+            continue
+        if len(deck) < 8 and _can_add(building, deck):
+            deck.append(building)
+            return deck
+    return deck
+
+
+def _trim_excess(
+    deck: list[str],
+    opponent_deck: list[str],
+    threats: list[str],
+    preferred: list[str],
+) -> list[str]:
+    out = list(deck)
+
+    while _deck_role_counts(out)["spell"] > _MAX_SPELLS:
+        spells = [c for c in out if get_card_role(c) == "spell"]
+        drop = min(spells, key=lambda c: _card_score_in_context(c, opponent_deck, threats))
+        out.remove(drop)
+
+    while _deck_role_counts(out)["win"] > _MAX_WIN_CONDITIONS:
+        wins = [c for c in out if c in WIN_CONDITIONS or get_card_role(c) == "win_condition"]
+        drop = min(
+            wins,
+            key=lambda c: (
+                0 if c in preferred[:3] else 1,
+                _card_score_in_context(c, opponent_deck, threats),
+            ),
+        )
+        out.remove(drop)
+
+    while _deck_role_counts(out)["building"] > _MAX_BUILDINGS:
+        buildings = [c for c in out if get_card_role(c) == "building"]
+        drop = min(buildings, key=lambda c: _card_score_in_context(c, opponent_deck, threats))
+        out.remove(drop)
+
+    return out
 
 
 def _deck_has_air(deck: list[str]) -> bool:
     return any(c in _AIR_OFFENSE or get_card_role(c) == "air" for c in deck)
 
 
-def _is_air_unit(card: str) -> bool:
-    return card in _AIR_OFFENSE or get_card_role(card) == "air"
-
-
 def _is_anti_air_specialist(card: str) -> bool:
     return card in _ANTI_AIR and card not in {"Baby Dragon", "Wizard", "Electro Wizard", "Mini P.E.K.K.A"}
-
-
-def _counters_opponent_card(counter: str, opponent_card: str) -> bool:
-    return counter in COUNTERS.get(opponent_card, [])
-
-
-def _counters_any_opponent(card: str, opponent_deck: list[str]) -> bool:
-    return any(_counters_opponent_card(card, opp) for opp in opponent_deck)
-
-
-def _prioritized_counters(opponent_deck: list[str], opp_has_air: bool) -> list[str]:
-    """Счётчики по каждой карте соперника, отсортированные по полезности."""
-    scores: dict[str, int] = {}
-
-    for opp_card in opponent_deck:
-        for counter in COUNTERS.get(opp_card, []):
-            if not opp_has_air and (_is_anti_air_specialist(counter) or counter in _FLYING_TROOPS):
-                continue
-            scores[counter] = scores.get(counter, 0) + 1
-
-    if not opp_has_air:
-        for card in opponent_deck:
-            if is_spam_card(card):
-                for counter in ("The Log", "Arrows", "Zap", "Wizard", "Valkyrie"):
-                    scores[counter] = scores.get(counter, 0) + 1
-
-        for card in opponent_deck:
-            if is_point_target_threat(card):
-                for counter in POINT_TARGET_COUNTERS:
-                    scores[counter] = scores.get(counter, 0) + 2
-
-    if opp_has_air:
-        for counter in _ANTI_AIR:
-            if _counters_any_opponent(counter, opponent_deck):
-                scores[counter] = scores.get(counter, 0) + 2
-
-    ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
-    return [name for name, _ in ranked]
-
-
-def _swap_score(
-    card: str,
-    opponent_deck: list[str],
-    opp_has_air: bool,
-    user_core: list[str],
-) -> int:
-    """Чем выше — тем охотнее заменяем."""
-    if card in user_core and _counters_any_opponent(card, opponent_deck):
-        return -100
-
-    score = 0
-    if card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
-        score -= 8
-    if get_card_role(card) == "spell":
-        score -= 4
-    if not _counters_any_opponent(card, opponent_deck):
-        score += 4
-    if not opp_has_air and (_is_anti_air_specialist(card) or _is_air_unit(card)):
-        score += 12
-    if opp_has_air and _is_air_unit(card) and not _is_anti_air_specialist(card):
-        score += 6
-    return score
-
-
-def _is_protected_user_card(card: str, user_core: list[str]) -> bool:
-    if card not in user_core:
-        return False
-    if card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
-        return True
-    if get_card_role(card) == "spell":
-        return True
-    return False
-
-
-def _find_swap_slot(
-    deck: list[str],
-    counter: str,
-    opponent_deck: list[str],
-    user_core: list[str],
-    opp_has_air: bool,
-) -> int | None:
-    best_idx: int | None = None
-    best_score = 0
-    for i, card in enumerate(deck):
-        if card == counter or _is_protected_user_card(card, user_core):
-            continue
-        score = _swap_score(card, opponent_deck, opp_has_air, user_core)
-        if score > best_score:
-            best_score = score
-            best_idx = i
-    return best_idx if best_score > 0 else None
-
-
-def _fill_deck(
-    deck: list[str],
-    pool: set[str],
-    opponent_deck: list[str],
-    opp_has_air: bool,
-) -> list[str]:
-    if not any(get_card_role(c) == "spell" for c in deck):
-        for spell in ("Zap", "The Log", "Fireball", "Arrows"):
-            if spell in pool and spell not in deck:
-                if len(deck) < 8:
-                    deck.append(spell)
-                break
-
-    if opp_has_air and not any(c in _ANTI_AIR for c in deck):
-        for card in ("Musketeer", "Tesla", "Inferno Tower", "Wizard", "Mega Minion"):
-            if card in pool and card not in deck:
-                if len(deck) < 8:
-                    deck.append(card)
-                break
-
-    fill = ["Knight", "Skeletons", "Ice Spirit", "Valkyrie", "Cannon", "Ice Golem"]
-    if not opp_has_air:
-        fill = [c for c in fill if c not in _FLYING_TROOPS]
-
-    for card in fill:
-        if len(deck) >= 8:
-            break
-        if card in pool and card not in deck:
-            deck.append(card)
-
-    while len(deck) < 8:
-        added = False
-        for card in pool:
-            if card not in deck and (opp_has_air or card not in _FLYING_TROOPS):
-                deck.append(card)
-                added = True
-                break
-        if not added:
-            break
-
-    return deck
 
 
 def build_synergy_deck(
