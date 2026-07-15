@@ -454,9 +454,12 @@ async def random_deck(
 async def battle_insights(user: User = Depends(require_subscription)) -> InsightsResponse:
     battles = await _get_battles(user)
     if not battles:
-        raise HTTPException(status_code=404, detail="Нет боёв для анализа")
+        return InsightsResponse(insights=[], patterns=[], sample_size=0, wins=0, losses=0)
 
-    report = build_insights_report(battles, user.player_tag or "", limit=7, losses_only=True)
+    try:
+        report = build_insights_report(battles, user.player_tag or "", limit=7, losses_only=True)
+    except Exception:
+        report = {"insights": [], "patterns": [], "sample_size": 0, "wins": 0, "losses": 0}
     return InsightsResponse(**report)
 
 

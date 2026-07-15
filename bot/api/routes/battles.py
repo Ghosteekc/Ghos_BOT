@@ -35,7 +35,12 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
     won = team.get("crowns", 0) > opponent.get("crowns", 0)
     user_stats = analyze_deck(user_deck)
     duration = int(battle.get("gameDuration") or 0)
-    analysis = analyze_battle_enhanced(team, opponent, duration=duration)
+    top_reason: str | None = None
+    try:
+        analysis = analyze_battle_enhanced(team, opponent, duration=duration)
+        top_reason = analysis.outcome_summary or (analysis.reasons[0] if analysis.reasons else None)
+    except Exception:
+        top_reason = None
     opp_tag = opponent.get("tag", "") or ""
     raw_time = str(battle.get("battleTime") or battle.get("warTime") or "")
     return BattleSummary(
@@ -50,7 +55,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         avg_elixir=user_stats.avg_elixir,
         user_deck=user_deck,
         opponent_deck=opp_deck,
-        top_reason=analysis.outcome_summary or (analysis.reasons[0] if analysis.reasons else None),
+        top_reason=top_reason,
         timestamp=raw_time,
         played_at=format_battle_played_at(raw_time),
     )

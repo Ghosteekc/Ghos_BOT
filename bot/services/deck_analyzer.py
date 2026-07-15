@@ -120,7 +120,7 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
             from bot.services.card_matchups import get_matchups
 
             row = get_matchups(threat)
-            rec = list((row.counters_strong if row else [])[:3])
+            rec = list(row.counters_strong)[:3] if row else []
             missing_counters.extend(rec[:2])
             if won:
                 reasons.append(f"🎯 Победа без контры на {t_ru} — сильная игра")

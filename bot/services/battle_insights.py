@@ -20,7 +20,10 @@ def build_battle_insight(battle: dict, player_tag: str) -> dict | None:
         return None
 
     duration = int(battle.get("gameDuration") or 0)
-    analysis = analyze_battle_enhanced(team, opponent, duration=duration)
+    try:
+        analysis = analyze_battle_enhanced(team, opponent, duration=duration)
+    except Exception:
+        return None
 
     tags: list[str] = []
     summary = analysis.outcome_summary
@@ -69,7 +72,7 @@ def build_insights_report(
     insights: list[dict] = []
     tag_counter: Counter[str] = Counter()
 
-    for i, battle in enumerate(battles):
+    for i, battle in enumerate(battles[:40]):
         if len(insights) >= limit:
             break
         row = build_battle_insight(battle, player_tag)
