@@ -202,6 +202,8 @@ class ConstructorDeckEntry(BaseModel):
     description: str = ""
     type: str = "constructor"
     category: str = "custom"
+    archetype: str = ""
+    confidence: float = 0.0
 
 
 class ConstructorResponse(BaseModel):

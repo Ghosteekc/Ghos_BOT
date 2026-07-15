@@ -405,6 +405,8 @@ async def deck_constructor(
                 description=d.get("description", ""),
                 type="constructor",
                 category=d.get("category", "custom"),
+                archetype=d.get("archetype", ""),
+                confidence=d.get("confidence", 0),
             )
             for d in result["decks"]
         ],

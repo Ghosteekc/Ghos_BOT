@@ -1,0 +1,971 @@
+{
+  "cards": {
+    "Archer Queen": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "win_condition"
+      ]
+    },
+    "Archers": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "support"
+      ]
+    },
+    "Arrows": {
+      "elixir": 3,
+      "type": "spell",
+      "roles": [
+        "anti_swarm",
+        "small_spell",
+        "spell"
+      ]
+    },
+    "Baby Dragon": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "anti_swarm",
+        "splash"
+      ]
+    },
+    "Balloon": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "win_condition"
+      ]
+    },
+    "Bandit": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "counterpush",
+        "dps",
+        "mini_tank",
+        "support",
+        "win_condition"
+      ]
+    },
+    "Barbarian Barrel": {
+      "elixir": 2,
+      "type": "spell",
+      "roles": [
+        "anti_swarm",
+        "small_spell",
+        "spell"
+      ]
+    },
+    "Barbarian Hut": {
+      "elixir": 7,
+      "type": "building",
+      "roles": [
+        "building"
+      ]
+    },
+    "Barbarians": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "swarm"
+      ]
+    },
+    "Bats": {
+      "elixir": 2,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "cycle",
+        "swarm"
+      ]
+    },
+    "Battle Healer": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "mini_tank",
+        "support"
+      ]
+    },
+    "Battle Ram": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "counterpush",
+        "win_condition"
+      ]
+    },
+    "Berserker": {
+      "elixir": 2,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Bomb Tower": {
+      "elixir": 4,
+      "type": "building",
+      "roles": [
+        "building",
+        "defensive"
+      ]
+    },
+    "Bomber": {
+      "elixir": 2,
+      "type": "troop",
+      "roles": [
+        "anti_swarm",
+        "splash"
+      ]
+    },
+    "Boss Bandit": {
+      "elixir": 6,
+      "type": "troop",
+      "roles": [
+        "tank",
+        "win_condition"
+      ]
+    },
+    "Bowler": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "anti_swarm",
+        "splash"
+      ]
+    },
+    "Cannon": {
+      "elixir": 3,
+      "type": "building",
+      "roles": [
+        "anti_tank",
+        "building",
+        "defensive"
+      ]
+    },
+    "Cannon Cart": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Clone": {
+      "elixir": 3,
+      "type": "spell",
+      "roles": [
+        "spell"
+      ]
+    },
+    "Dark Prince": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "counterpush",
+        "dps",
+        "mini_tank",
+        "support"
+      ]
+    },
+    "Dart Goblin": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Earthquake": {
+      "elixir": 3,
+      "type": "spell",
+      "roles": [
+        "anti_swarm",
+        "big_spell",
+        "spell"
+      ]
+    },
+    "Electro Dragon": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "splash"
+      ]
+    },
+    "Electro Giant": {
+      "elixir": 7,
+      "type": "troop",
+      "roles": [
+        "tank",
+        "win_condition"
+      ]
+    },
+    "Electro Spirit": {
+      "elixir": 1,
+      "type": "troop",
+      "roles": [
+        "cycle"
+      ]
+    },
+    "Electro Wizard": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "dps",
+        "support"
+      ]
+    },
+    "Elite Barbarians": {
+      "elixir": 6,
+      "type": "troop",
+      "roles": [
+        "counterpush",
+        "win_condition"
+      ]
+    },
+    "Elixir Collector": {
+      "elixir": 6,
+      "type": "building",
+      "roles": [
+        "building"
+      ]
+    },
+    "Elixir Golem": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "tank",
+        "win_condition"
+      ]
+    },
+    "Executioner": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "anti_swarm",
+        "splash"
+      ]
+    },
+    "Fire Spirit": {
+      "elixir": 1,
+      "type": "troop",
+      "roles": [
+        "cycle"
+      ]
+    },
+    "Fireball": {
+      "elixir": 4,
+      "type": "spell",
+      "roles": [
+        "anti_swarm",
+        "big_spell",
+        "spell"
+      ]
+    },
+    "Firecracker": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "support"
+      ]
+    },
+    "Fisherman": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Flying Machine": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "air_defense"
+      ]
+    },
+    "Freeze": {
+      "elixir": 4,
+      "type": "spell",
+      "roles": [
+        "big_spell",
+        "spell"
+      ]
+    },
+    "Furnace": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Giant": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "tank",
+        "win_condition"
+      ]
+    },
+    "Giant Skeleton": {
+      "elixir": 6,
+      "type": "troop",
+      "roles": [
+        "tank"
+      ]
+    },
+    "Giant Snowball": {
+      "elixir": 2,
+      "type": "spell",
+      "roles": [
+        "anti_swarm",
+        "small_spell",
+        "spell"
+      ]
+    },
+    "Goblin Barrel": {
+      "elixir": 3,
+      "type": "spell",
+      "roles": [
+        "spell",
+        "win_condition"
+      ]
+    },
+    "Goblin Cage": {
+      "elixir": 4,
+      "type": "building",
+      "roles": [
+        "building"
+      ]
+    },
+    "Goblin Curse": {
+      "elixir": 2,
+      "type": "spell",
+      "roles": [
+        "small_spell",
+        "spell"
+      ]
+    },
+    "Goblin Demolisher": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "splash"
+      ]
+    },
+    "Goblin Drill": {
+      "elixir": 4,
+      "type": "building",
+      "roles": [
+        "building",
+        "win_condition"
+      ]
+    },
+    "Goblin Gang": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "swarm"
+      ]
+    },
+    "Goblin Giant": {
+      "elixir": 6,
+      "type": "troop",
+      "roles": [
+        "tank",
+        "win_condition"
+      ]
+    },
+    "Goblin Hut": {
+      "elixir": 5,
+      "type": "building",
+      "roles": [
+        "building"
+      ]
+    },
+    "Goblin Machine": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "win_condition"
+      ]
+    },
+    "Goblins": {
+      "elixir": 2,
+      "type": "troop",
+      "roles": [
+        "swarm"
+      ]
+    },
+    "Goblinstein": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "tank"
+      ]
+    },
+    "Golden Knight": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "win_condition"
+      ]
+    },
+    "Golem": {
+      "elixir": 8,
+      "type": "troop",
+      "roles": [
+        "tank",
+        "win_condition"
+      ]
+    },
+    "Graveyard": {
+      "elixir": 5,
+      "type": "spell",
+      "roles": [
+        "big_spell",
+        "spell",
+        "win_condition"
+      ]
+    },
+    "Guards": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "anti_tank",
+        "defensive",
+        "mini_tank"
+      ]
+    },
+    "Heal Spirit": {
+      "elixir": 1,
+      "type": "spell",
+      "roles": [
+        "cycle",
+        "small_spell",
+        "spell"
+      ]
+    },
+    "Hog Rider": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "counterpush",
+        "win_condition"
+      ]
+    },
+    "Hunter": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "anti_tank",
+        "dps",
+        "support"
+      ]
+    },
+    "Ice Golem": {
+      "elixir": 2,
+      "type": "troop",
+      "roles": [
+        "defensive",
+        "mini_tank"
+      ]
+    },
+    "Ice Spirit": {
+      "elixir": 1,
+      "type": "troop",
+      "roles": [
+        "cycle"
+      ]
+    },
+    "Ice Wizard": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "support"
+      ]
+    },
+    "Inferno Dragon": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "anti_tank",
+        "defensive",
+        "dps",
+        "support"
+      ]
+    },
+    "Inferno Tower": {
+      "elixir": 5,
+      "type": "building",
+      "roles": [
+        "anti_tank",
+        "building",
+        "defensive"
+      ]
+    },
+    "Knight": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "anti_tank",
+        "defensive",
+        "mini_tank"
+      ]
+    },
+    "Lava Hound": {
+      "elixir": 7,
+      "type": "troop",
+      "roles": [
+        "tank",
+        "win_condition"
+      ]
+    },
+    "Lightning": {
+      "elixir": 6,
+      "type": "spell",
+      "roles": [
+        "big_spell",
+        "spell"
+      ]
+    },
+    "Little Prince": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Lumberjack": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "dps",
+        "mini_tank",
+        "support"
+      ]
+    },
+    "Magic Archer": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "dps",
+        "support"
+      ]
+    },
+    "Mega Knight": {
+      "elixir": 7,
+      "type": "troop",
+      "roles": [
+        "defensive",
+        "tank"
+      ]
+    },
+    "Mega Minion": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "air_defense"
+      ]
+    },
+    "Mighty Miner": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "win_condition"
+      ]
+    },
+    "Miner": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "counterpush",
+        "win_condition"
+      ]
+    },
+    "Mini P.E.K.K.A": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "anti_tank",
+        "dps",
+        "mini_tank",
+        "support"
+      ]
+    },
+    "Minion Horde": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "swarm"
+      ]
+    },
+    "Minions": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "air_defense"
+      ]
+    },
+    "Mirror": {
+      "elixir": 1,
+      "type": "spell",
+      "roles": [
+        "small_spell",
+        "spell"
+      ]
+    },
+    "Monk": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Mortar": {
+      "elixir": 4,
+      "type": "building",
+      "roles": [
+        "building",
+        "win_condition"
+      ]
+    },
+    "Mother Witch": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "support"
+      ]
+    },
+    "Musketeer": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "dps",
+        "support"
+      ]
+    },
+    "Night Witch": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "P.E.K.K.A": {
+      "elixir": 7,
+      "type": "troop",
+      "roles": [
+        "anti_tank",
+        "tank",
+        "win_condition"
+      ]
+    },
+    "Phoenix": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "support"
+      ]
+    },
+    "Poison": {
+      "elixir": 4,
+      "type": "spell",
+      "roles": [
+        "anti_swarm",
+        "big_spell",
+        "spell"
+      ]
+    },
+    "Prince": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "counterpush",
+        "dps",
+        "support",
+        "win_condition"
+      ]
+    },
+    "Princess": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "support"
+      ]
+    },
+    "Rage": {
+      "elixir": 2,
+      "type": "spell",
+      "roles": [
+        "small_spell",
+        "spell"
+      ]
+    },
+    "Ram Rider": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "counterpush",
+        "win_condition"
+      ]
+    },
+    "Rascals": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Rocket": {
+      "elixir": 6,
+      "type": "spell",
+      "roles": [
+        "big_spell",
+        "spell"
+      ]
+    },
+    "Ronin": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "tank"
+      ]
+    },
+    "Royal Delivery": {
+      "elixir": 3,
+      "type": "spell",
+      "roles": [
+        "spell"
+      ]
+    },
+    "Royal Ghost": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "counterpush",
+        "win_condition"
+      ]
+    },
+    "Royal Giant": {
+      "elixir": 6,
+      "type": "troop",
+      "roles": [
+        "tank",
+        "win_condition"
+      ]
+    },
+    "Royal Hogs": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "win_condition"
+      ]
+    },
+    "Royal Recruits": {
+      "elixir": 7,
+      "type": "troop",
+      "roles": [
+        "swarm"
+      ]
+    },
+    "Rune Giant": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "win_condition"
+      ]
+    },
+    "Skeleton Army": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "swarm"
+      ]
+    },
+    "Skeleton Barrel": {
+      "elixir": 3,
+      "type": "troop",
+      "roles": [
+        "win_condition"
+      ]
+    },
+    "Skeleton Dragons": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "air_defense"
+      ]
+    },
+    "Skeleton King": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "win_condition"
+      ]
+    },
+    "Skeletons": {
+      "elixir": 1,
+      "type": "troop",
+      "roles": [
+        "cycle"
+      ]
+    },
+    "Sparky": {
+      "elixir": 6,
+      "type": "troop",
+      "roles": [
+        "tank",
+        "win_condition"
+      ]
+    },
+    "Spear Goblins": {
+      "elixir": 2,
+      "type": "troop",
+      "roles": [
+        "swarm"
+      ]
+    },
+    "Spirit Empress": {
+      "elixir": 6,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Suspicious Bush": {
+      "elixir": 2,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Tesla": {
+      "elixir": 4,
+      "type": "building",
+      "roles": [
+        "anti_tank",
+        "building",
+        "defensive"
+      ]
+    },
+    "The Log": {
+      "elixir": 2,
+      "type": "spell",
+      "roles": [
+        "anti_swarm",
+        "small_spell",
+        "spell"
+      ]
+    },
+    "Three Musketeers": {
+      "elixir": 9,
+      "type": "troop",
+      "roles": [
+        "win_condition"
+      ]
+    },
+    "Tombstone": {
+      "elixir": 3,
+      "type": "building",
+      "roles": [
+        "anti_tank",
+        "building",
+        "defensive"
+      ]
+    },
+    "Tornado": {
+      "elixir": 3,
+      "type": "spell",
+      "roles": [
+        "anti_swarm",
+        "spell"
+      ]
+    },
+    "Valkyrie": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "anti_swarm",
+        "defensive",
+        "mini_tank",
+        "splash"
+      ]
+    },
+    "Vines": {
+      "elixir": 3,
+      "type": "spell",
+      "roles": [
+        "spell"
+      ]
+    },
+    "Void": {
+      "elixir": 3,
+      "type": "spell",
+      "roles": [
+        "spell"
+      ]
+    },
+    "Wall Breakers": {
+      "elixir": 2,
+      "type": "troop",
+      "roles": [
+        "counterpush",
+        "win_condition"
+      ]
+    },
+    "Witch": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    },
+    "Wizard": {
+      "elixir": 5,
+      "type": "troop",
+      "roles": [
+        "air_defense",
+        "anti_swarm",
+        "dps",
+        "splash",
+        "support"
+      ]
+    },
+    "X-Bow": {
+      "elixir": 6,
+      "type": "building",
+      "roles": [
+        "building",
+        "win_condition"
+      ]
+    },
+    "Zap": {
+      "elixir": 2,
+      "type": "spell",
+      "roles": [
+        "anti_swarm",
+        "small_spell",
+        "spell"
+      ]
+    },
+    "Zappies": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "support"
+      ]
+    }
+  },
+  "version": 1
+}
