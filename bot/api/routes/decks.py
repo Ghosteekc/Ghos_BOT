@@ -3,7 +3,7 @@ from bot.services.battle_day_stats import build_last_results, build_most_used_ca
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from bot.api.deps import require_linked_player, require_subscription
+from bot.api.deps import get_db, require_linked_player, require_subscription
 from bot.api.schemas import (
     ArenaDecksResponse,
     CounterDeckResponse,
@@ -30,6 +30,7 @@ from bot.api.schemas import (
     WinrateEntry,
 )
 from bot.models.database import User
+from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 
 from bot.services.battle_cache_reader import get_battles_for_winrate_chart
@@ -61,6 +62,36 @@ async def _get_battles(user: User) -> list:
     if battles is None:
         raise HTTPException(status_code=502, detail="Не удалось загрузить бои")
     return battles
+
+
+async def _live_player_arena(
+    user: User,
+    session: AsyncSession,
+) -> tuple[int, str | None, int | None]:
+    """Актуальные кубки и арена из Clash API; обновляет запись пользователя."""
+    trophies = int(user.trophies or 0)
+    arena_name: str | None = None
+    arena_id = user.arena_id
+
+    if not user.player_tag:
+        return trophies, arena_name, arena_id
+
+    client = ClashRoyaleClient()
+    try:
+        player = await client.get_player(user.player_tag)
+        arena = player.get("arena") or {}
+        arena_name = arena.get("name")
+        arena_id = arena.get("id")
+        trophies = int(player.get("trophies") or trophies)
+        user.trophies = trophies
+        user.arena_id = arena_id
+        await session.commit()
+    except ClashRoyaleAPIError:
+        logger.debug("Arena decks: live player fetch failed for %s", user.player_tag)
+    finally:
+        await client.close()
+
+    return trophies, arena_name, arena_id
 
 
 def _stats_from_battles(battles: list, tag: str):
@@ -302,28 +333,16 @@ async def post_mine_deck_stats(
 @router.get("/decks/arena", response_model=ArenaDecksResponse)
 async def list_arena_decks(
     user: User = Depends(require_linked_player),
+    session: AsyncSession = Depends(get_db),
 ) -> ArenaDecksResponse:
     battles = await _get_battles(user)
-    trophies = user.trophies or 0
-    arena_name: str | None = None
-
-    if user.player_tag and trophies <= 0:
-        client = ClashRoyaleClient()
-        try:
-            player = await client.get_player(user.player_tag)
-            arena = player.get("arena") or {}
-            arena_name = arena.get("name")
-            trophies = int(player.get("trophies") or trophies)
-        except ClashRoyaleAPIError:
-            pass
-        finally:
-            await client.close()
+    trophies, arena_name, arena_id = await _live_player_arena(user, session)
 
     data = await get_arena_popular_decks(
         battles,
         user.player_tag or "",
         trophies,
-        user.arena_id,
+        arena_id,
         arena_name=arena_name,
     )
     decks = [

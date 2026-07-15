@@ -260,7 +260,6 @@ async def get_arena_popular_decks(
     *,
     arena_name: str | None = None,
 ) -> dict:
-    del arena_id
     cache_key = _arena_cache_key(player_tag, trophies)
     cached = _arena_cache.get(cache_key)
     if cached and not cached.expired():
@@ -274,6 +273,7 @@ async def get_arena_popular_decks(
             battles,
             player_tag,
             trophies,
+            arena_id=arena_id,
             arena_name=arena_name,
         )
         _arena_cache[cache_key] = _ArenaCacheEntry(data=data, updated_at=time.time())
@@ -285,6 +285,7 @@ async def _build_arena_popular_decks(
     player_tag: str,
     trophies: int,
     *,
+    arena_id: int | None = None,
     arena_name: str | None = None,
 ) -> dict:
     await ensure_cards_loaded()
@@ -357,7 +358,7 @@ async def _build_arena_popular_decks(
 
     return {
         "arena_name": display_arena,
-        "arena_id": None,
+        "arena_id": arena_id,
         "trophies": trophies,
         "decks": entries[:12],
         "source": source,
