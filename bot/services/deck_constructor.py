@@ -101,7 +101,7 @@ def _build_deck_entry(
 
     stats = analyze_deck(deck_names)
     category = _category_from_archetype(archetype)
-    desc = f"Архетип {archetype} · уверенность {confidence:.0f}% · ср. эликсир {stats.avg_elixir}"
+    desc = f"Синергия {round(synergy_score, 0):.0f}% · эликсир {stats.avg_elixir}"
 
     return {
         "id": id_offset,
@@ -141,12 +141,11 @@ def build_constructor_decks(
 
     for result in built:
         synergy_score, synergy_notes = calculate_deck_synergy(result.deck)
-        display_name = result.source_deck_name or f"{result.archetype} · под ваши карты"
         entry = _build_deck_entry(
             core_parsed,
             result.deck,
             id_offset=deck_id,
-            name=display_name,
+            name="",
             archetype=result.archetype,
             confidence=result.confidence,
             synergy_score=synergy_score or result.synergy_score,

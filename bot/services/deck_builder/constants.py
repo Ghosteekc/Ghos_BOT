@@ -108,3 +108,25 @@ KNOWN_SYNERGY_PAIRS: dict[frozenset[str], int] = {
 SYNERGY_STRONG = 88
 SYNERGY_PARTIAL = 72
 SYNERGY_WEAK = 55
+
+GENERIC_CARDS = frozenset({
+    "The Log", "Zap", "Arrows", "Fireball", "Knight", "Skeletons", "Ice Spirit",
+    "Electro Spirit", "Fire Spirit", "Heal Spirit", "Bats", "Goblins", "Spear Goblins",
+    "Cannon", "Tesla", "Musketeer", "Ice Golem", "Giant Snowball", "Barbarian Barrel",
+})
+
+MAX_SPELLS = 3
+MAX_WINS = 1
+
+ARCHETYPE_PRIMARY_WIN: dict[str, list[str]] = {
+    "Cycle": ["Hog Rider", "Mortar", "Miner"],
+    "Log Bait": ["Goblin Barrel"],
+    "Beatdown": ["Golem", "Giant", "Electro Giant", "P.E.K.K.A"],
+    "Lava": ["Lava Hound", "Balloon"],
+    "Royal Giant": ["Royal Giant"],
+    "Bridge Spam": ["P.E.K.K.A", "Battle Ram", "Royal Ghost", "Bandit"],
+    "Siege": ["X-Bow", "Mortar"],
+    "Control": ["Miner", "X-Bow", "Graveyard"],
+    "Graveyard": ["Graveyard"],
+    "Meta": [],
+}

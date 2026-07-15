@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bot.services.card_data import WIN_CONDITIONS, get_card_elixir
 from bot.services.card_matchups import calculate_deck_synergy, synergy_between
-from bot.services.card_data import get_card_elixir, WIN_CONDITIONS
 from bot.services.deck_builder.constants import (
     ARCHETYPE_ANCHORS,
     ARCHETYPE_ELIXIR,
+    ARCHETYPE_PRIMARY_WIN,
     DEFAULT_ELIXIR_MAX,
     DEFAULT_ELIXIR_MIN,
     FILL_PRIORITY,
+    GENERIC_CARDS,
     KNOWN_SYNERGY_PAIRS,
-    MATCH_CONFIDENCE_THRESHOLD,
+    MAX_SPELLS,
+    MAX_WINS,
     ROLE_AIR,
     ROLE_ANTI_SWARM,
     ROLE_ANTI_TANK,
@@ -26,7 +29,6 @@ from bot.services.deck_builder.constants import (
     ROLE_MINI_TANK,
     ROLE_SMALL_SPELL,
     ROLE_WIN,
-    SYNERGY_MIN_THRESHOLD,
     SYNERGY_PARTIAL,
     SYNERGY_STRONG,
     SYNERGY_WEAK,
@@ -47,7 +49,7 @@ class BuildResult:
     synergy_score: float
     confidence: float
     source_deck_id: str | None = None
-    source_deck_name: str | None = None
+    balanced: bool = True
 
 
 @dataclass
@@ -58,10 +60,11 @@ class ScoredDeck:
     overlap: int
 
 
-def _avg_elixir(cards: list[str]) -> float:
+def _avg_elixir(cards: list[str], db: DeckDatabase) -> float:
     if not cards:
         return 0.0
-    return round(sum(get_card_elixir(c) for c in cards) / len(cards), 2)
+    total = sum(db.get_card(c).elixir if db.get_card(c) else get_card_elixir(c) for c in cards)
+    return round(total / len(cards), 2)
 
 
 def _card_roles(db: DeckDatabase, name: str) -> frozenset[str]:
@@ -69,67 +72,62 @@ def _card_roles(db: DeckDatabase, name: str) -> frozenset[str]:
     return rec.roles if rec else frozenset()
 
 
-def _core_roles(db: DeckDatabase, core: list[str]) -> dict[str, list[str]]:
-    return {card: sorted(_card_roles(db, card)) for card in core}
+def _is_spell(db: DeckDatabase, name: str) -> bool:
+    roles = _card_roles(db, name)
+    return "spell" in roles or ROLE_SMALL_SPELL in roles or ROLE_BIG_SPELL in roles
 
 
-def _detect_archetype(db: DeckDatabase, core: list[str]) -> str:
-    """Шаг 2: определить архетип по якорям или ролям."""
+def _is_win(db: DeckDatabase, name: str) -> bool:
+    return name in WIN_CONDITIONS or ROLE_WIN in _card_roles(db, name)
+
+
+def _detect_archetype(core: list[str]) -> str:
+    core_wins = [c for c in core if c in WIN_CONDITIONS]
+    for win in core_wins:
+        if win in {"Lava Hound", "Balloon"}:
+            return "Lava"
+        if win in {"Golem", "Giant", "Electro Giant"}:
+            return "Beatdown"
+        if win == "Royal Giant":
+            return "Royal Giant"
+        if win in {"Hog Rider", "Battle Ram"}:
+            return "Cycle"
+        if win == "Goblin Barrel":
+            return "Log Bait"
+        if win == "Graveyard":
+            return "Graveyard"
+        if win in {"X-Bow", "Mortar"}:
+            return "Siege"
+        if win in {"P.E.K.K.A", "Mega Knight", "Royal Ghost", "Bandit"}:
+            return "Bridge Spam"
+        if win == "Miner":
+            return "Control"
+
     core_set = set(core)
-    best_arch = "Meta"
-    best_hits = 0
-
+    best, best_hits = "Meta", 0
     for archetype, anchors in ARCHETYPE_ANCHORS.items():
         hits = len(core_set & anchors)
         if hits > best_hits:
-            best_hits = hits
-            best_arch = archetype
-
+            best_hits, best = hits, archetype
     if best_hits > 0:
-        return best_arch
+        return best
 
-    roles_union: set[str] = set()
-    for card in core:
-        roles_union |= set(_card_roles(db, card))
-
-    if ROLE_WIN in roles_union and any(c in WIN_CONDITIONS for c in core):
-        wins = [c for c in core if c in WIN_CONDITIONS]
-        if any(c in {"Lava Hound", "Balloon"} for c in wins + core):
-            return "Lava"
-        if any(c in {"Golem", "Giant", "Electro Giant"} for c in wins):
-            return "Beatdown"
-        if any(c in {"Royal Giant"} for c in wins):
-            return "Royal Giant"
-        if any(c in {"Hog Rider", "Battle Ram"} for c in wins):
-            return "Cycle"
-        if any(c in {"Goblin Barrel"} for c in wins):
-            return "Log Bait"
-        if any(c in {"Graveyard"} for c in wins):
-            return "Graveyard"
-        if any(c in {"X-Bow", "Mortar"} for c in wins + core):
-            return "Siege"
-        if any(c in {"P.E.K.K.A", "Mega Knight"} for c in wins):
-            return "Bridge Spam"
-        if any(c in {"Miner"} for c in wins):
-            return "Control"
-
-    avg = _avg_elixir(core)
-    if avg <= 3.3 and ROLE_CYCLE in roles_union:
+    if any(c in {"X-Bow", "Mortar"} for c in core):
+        return "Siege"
+    avg = _avg_elixir(core, get_database())
+    if avg <= 3.3:
         return "Cycle"
-    if avg >= 4.0 and "tank" in roles_union:
+    if avg >= 4.0:
         return "Beatdown"
-
-    return best_arch
+    return best
 
 
 def _pair_synergy(db: DeckDatabase, a: str, b: str) -> int:
-    """Шаг 6: совместимость пары 0–100."""
     key = frozenset({a, b})
     if key in KNOWN_SYNERGY_PAIRS:
         return KNOWN_SYNERGY_PAIRS[key]
     if key in db.synergy_pairs:
         return db.synergy_pairs[key]
-
     tier = synergy_between(a, b)
     if tier == "strong":
         return SYNERGY_STRONG
@@ -138,23 +136,45 @@ def _pair_synergy(db: DeckDatabase, a: str, b: str) -> int:
     return SYNERGY_WEAK
 
 
-def _deck_synergy_score(db: DeckDatabase, cards: list[str]) -> float:
-    if len(cards) < 2:
-        return 50.0
-    total = 0.0
-    pairs = 0
-    for i, a in enumerate(cards):
-        for b in cards[i + 1:]:
-            total += _pair_synergy(db, a, b)
-            pairs += 1
-    return round(total / pairs, 1) if pairs else 50.0
+def _meaningful_overlap(core: list[str], template_cards: list[str]) -> list[str]:
+    core_set = set(core)
+    return [c for c in template_cards if c in core_set and c not in GENERIC_CARDS]
+
+
+def _template_is_usable(core: list[str], template: DeckRecord) -> bool:
+    core_set = set(core)
+    meaningful = _meaningful_overlap(core, list(template.cards))
+    if len(meaningful) >= 2:
+        return True
+
+    primary = ARCHETYPE_PRIMARY_WIN.get(template.archetype, [])
+    if any(w in core_set for w in primary) and len(meaningful) >= 1:
+        return True
+
+    if any(c in WIN_CONDITIONS for c in core) and len(meaningful) >= 1:
+        return True
+
+    template_wins = [c for c in template.cards if c in WIN_CONDITIONS]
+    if template_wins and not any(w in core_set for w in template_wins):
+        return False
+
+    return len(meaningful) >= 1
+
+
+def _overlap_score(core: list[str], template_cards: list[str]) -> float:
+    core_set = set(core)
+    score = 0.0
+    for card in template_cards:
+        if card not in core_set:
+            continue
+        score += 0.5 if card in GENERIC_CARDS else 4.0
+        if card in WIN_CONDITIONS:
+            score += 6.0
+    return score
 
 
 def _core_synergy_with_deck(db: DeckDatabase, core: list[str], deck_cards: list[str]) -> float:
-    if not core or not deck_cards:
-        return 0.0
-    total = 0.0
-    n = 0
+    total, n = 0.0, 0
     for c in core:
         for d in deck_cards:
             if c != d:
@@ -168,47 +188,37 @@ def _score_deck_match(
     core: list[str],
     archetype: str,
     record: DeckRecord,
-) -> ScoredDeck:
-    """Шаг 3: рейтинг похожести."""
-    core_set = set(core)
-    deck_set = set(record.cards)
-    overlap = len(core_set & deck_set)
+) -> ScoredDeck | None:
+    if not _template_is_usable(core, record):
+        return None
 
-    card_score = overlap * WEIGHT_CARD_MATCH
+    weighted = _overlap_score(core, list(record.cards))
+    card_score = weighted * (WEIGHT_CARD_MATCH / 4)
     arch_score = WEIGHT_ARCHETYPE if record.archetype == archetype else 0.0
-
-    target_avg = _avg_elixir(core)
-    elixir_diff = abs(record.avg_elixir - target_avg)
+    elixir_diff = abs(record.avg_elixir - _avg_elixir(core, db))
     elixir_score = max(0.0, WEIGHT_ELIXIR - elixir_diff * 5.0)
-
-    syn = _core_synergy_with_deck(db, core, list(record.cards))
-    syn_score = (syn / 100.0) * WEIGHT_SYNERGY
-
+    syn_score = (_core_synergy_with_deck(db, core, list(record.cards)) / 100.0) * WEIGHT_SYNERGY
     pop_score = (record.popularity / 100.0) * WEIGHT_POPULARITY
 
     raw = card_score + arch_score + elixir_score + syn_score + pop_score
     max_possible = 4 * WEIGHT_CARD_MATCH + WEIGHT_ARCHETYPE + WEIGHT_ELIXIR + WEIGHT_SYNERGY + WEIGHT_POPULARITY
     confidence = min(100.0, (raw / max_possible) * 100.0)
-
+    overlap = len(_meaningful_overlap(core, list(record.cards)))
     return ScoredDeck(record=record, score=raw, confidence=confidence, overlap=overlap)
 
 
-def _rank_similar_decks(
-    db: DeckDatabase,
-    core: list[str],
-    archetype: str,
-    *,
-    limit: int = 12,
-) -> list[ScoredDeck]:
+def _rank_similar_decks(db: DeckDatabase, core: list[str], archetype: str, *, limit: int = 12) -> list[ScoredDeck]:
     indices = db.candidate_indices(core)
     scored: list[ScoredDeck] = []
     for idx in indices:
         sd = _score_deck_match(db, core, archetype, db.decks[idx])
-        if sd.overlap >= 1 or sd.record.archetype == archetype:
+        if sd:
             scored.append(sd)
     if not scored:
         for record in db.decks:
-            scored.append(_score_deck_match(db, core, archetype, record))
+            sd = _score_deck_match(db, core, archetype, record)
+            if sd:
+                scored.append(sd)
     scored.sort(key=lambda x: (-x.score, -x.confidence, -x.overlap))
     return scored[:limit]
 
@@ -217,41 +227,40 @@ def _elixir_bounds(archetype: str) -> tuple[float, float]:
     return ARCHETYPE_ELIXIR.get(archetype, (DEFAULT_ELIXIR_MIN, DEFAULT_ELIXIR_MAX))
 
 
-def _has_role(deck: list[str], db: DeckDatabase, role: str) -> bool:
-    for card in deck:
-        if role in _card_roles(db, card):
-            return True
-    return False
+def _count_spells(deck: list[str], db: DeckDatabase) -> int:
+    return sum(1 for c in deck if _is_spell(db, c))
 
 
-def _count_role(deck: list[str], db: DeckDatabase, role: str) -> int:
-    return sum(1 for c in deck if role in _card_roles(db, c))
+def _count_wins(deck: list[str], db: DeckDatabase) -> int:
+    return sum(1 for c in deck if _is_win(db, c))
 
 
-def _balance_ok(deck: list[str], db: DeckDatabase, archetype: str) -> tuple[bool, list[str]]:
-    """Шаг 5: проверка баланса."""
-    issues: list[str] = []
+def _balance_issues(deck: list[str], db: DeckDatabase, archetype: str) -> list[str]:
     lo, hi = _elixir_bounds(archetype)
-    avg = _avg_elixir(deck)
+    issues: list[str] = []
+    avg = _avg_elixir(deck, db)
 
-    if not _has_role(deck, db, ROLE_WIN) and not any(c in WIN_CONDITIONS for c in deck):
+    if not any(_is_win(db, c) for c in deck):
         issues.append("win_condition")
-    if not _has_role(deck, db, ROLE_BIG_SPELL):
+    if _count_wins(deck, db) > MAX_WINS:
+        issues.append("too_many_wins")
+    if not any(ROLE_BIG_SPELL in _card_roles(db, c) for c in deck):
         issues.append("big_spell")
-    if not _has_role(deck, db, ROLE_SMALL_SPELL):
+    if not any(ROLE_SMALL_SPELL in _card_roles(db, c) for c in deck):
         issues.append("small_spell")
-    if _count_role(deck, db, ROLE_AIR) < 2:
+    if _count_spells(deck, db) > MAX_SPELLS:
+        issues.append("too_many_spells")
+    if sum(1 for c in deck if ROLE_AIR in _card_roles(db, c)) < 2:
         issues.append("air_defense")
-    if not _has_role(deck, db, ROLE_ANTI_TANK):
+    if not any(ROLE_ANTI_TANK in _card_roles(db, c) for c in deck):
         issues.append("anti_tank")
-    if not _has_role(deck, db, ROLE_DEFENSIVE):
+    if not any(ROLE_DEFENSIVE in _card_roles(db, c) for c in deck):
         issues.append("defensive")
-    if not _has_role(deck, db, ROLE_ANTI_SWARM):
+    if not any(ROLE_ANTI_SWARM in _card_roles(db, c) for c in deck):
         issues.append("anti_swarm")
-    if avg < lo - 0.3 or avg > hi + 0.3:
+    if avg < lo - 0.4 or avg > hi + 0.4:
         issues.append("elixir")
-
-    return len(issues) == 0, issues
+    return issues
 
 
 def _pick_for_role(
@@ -263,6 +272,7 @@ def _pick_for_role(
     archetype: str,
 ) -> str | None:
     lo, hi = _elixir_bounds(archetype)
+    mid = (lo + hi) / 2
     candidates = [
         c for c in pool
         if c not in deck and role in _card_roles(db, c)
@@ -270,106 +280,129 @@ def _pick_for_role(
     if not candidates:
         return None
 
-    def rank(card: str) -> tuple[float, float, float]:
+    def rank(card: str) -> tuple[float, float]:
         syn = sum(_pair_synergy(db, card, x) for x in deck) / max(len(deck), 1)
-        trial_avg = _avg_elixir(deck + [card])
-        elixir_penalty = abs(trial_avg - (lo + hi) / 2)
-        core_bonus = 2.0 if card in core else 0.0
-        return (-syn - core_bonus, elixir_penalty, get_card_elixir(card))
+        elixir_penalty = abs(_avg_elixir(deck + [card], db) - mid)
+        return (-syn, elixir_penalty)
 
     return min(candidates, key=rank)
 
 
-def _auto_complete(
+def _fillers_from_template(core: list[str], template: DeckRecord, db: DeckDatabase) -> list[str]:
+    core_set = set(core)
+    core_has_win = any(c in WIN_CONDITIONS for c in core)
+    wins = [c for c in template.cards if c not in core_set and c in WIN_CONDITIONS]
+    troops = [
+        c for c in template.cards
+        if c not in core_set and c not in WIN_CONDITIONS and not _is_spell(db, c) and c not in GENERIC_CARDS
+    ]
+    spells = [
+        c for c in template.cards
+        if c not in core_set and _is_spell(db, c) and c not in GENERIC_CARDS
+    ]
+    generic = [c for c in template.cards if c not in core_set and c in GENERIC_CARDS]
+    ordered = ([] if core_has_win else wins[:1]) + troops + spells + generic
+    return ordered[:4]
+
+
+def _finalize_deck(
     deck: list[str],
     core: list[str],
     db: DeckDatabase,
     pool: set[str],
     archetype: str,
-    template_fillers: list[str] | None = None,
 ) -> list[str]:
-    """Шаг 4: достроить колоду по ролям."""
-    out = list(dict.fromkeys(deck))
     core_set = set(core)
+    out = list(dict.fromkeys(core + [c for c in deck if c not in core_set]))
 
-    if template_fillers:
-        for card in template_fillers:
+    while _count_spells(out, db) > MAX_SPELLS:
+        removable = [c for c in out if _is_spell(db, c) and c not in core_set]
+        if not removable:
+            break
+        out.remove(min(removable, key=lambda c: sum(_pair_synergy(db, c, x) for x in out if x != c)))
+
+    while _count_wins(out, db) > MAX_WINS:
+        extra = [c for c in out if _is_win(db, c) and c not in core_set]
+        if not extra:
+            break
+        out.remove(extra[0])
+
+    if not any(_is_win(db, c) for c in out):
+        preferred = ARCHETYPE_PRIMARY_WIN.get(archetype, [])
+        win_pick = next((w for w in preferred if w in pool and w not in out), None)
+        if not win_pick:
+            candidates = [c for c in pool if c not in out and c in WIN_CONDITIONS and not _is_spell(db, c)]
+            win_pick = max(candidates, key=lambda c: sum(_pair_synergy(db, c, x) for x in out), default=None)
+        if win_pick:
             if len(out) >= 8:
-                break
-            if card in pool and card not in out:
-                out.append(card)
+                fillers = [c for c in out if c not in core_set]
+                if fillers:
+                    worst = min(fillers, key=lambda c: sum(_pair_synergy(db, c, x) for x in out))
+                    out[out.index(worst)] = win_pick
+            else:
+                out.append(win_pick)
 
-    _, issues = _balance_ok(out, db, archetype)
-    fill_issues = list(issues)
-
+    issues = _balance_issues(out, db, archetype)
     for role in FILL_PRIORITY:
-        while len(out) < 8:
-            need = role in fill_issues or (
-                role == ROLE_WIN and not any(c in WIN_CONDITIONS for c in out)
-            )
-            if not need and _has_role(out, db, role):
-                continue
+        while len(out) < 8 and role in issues:
             pick = _pick_for_role(out, db, pool, role, core, archetype)
             if not pick:
                 break
-            out.append(pick)
-            fill_issues = _balance_ok(out, db, archetype)[1]
-            if role not in fill_issues:
+            if _is_spell(db, pick) and _count_spells(out, db) >= MAX_SPELLS:
                 break
+            if _is_win(db, pick) and _count_wins(out, db) >= MAX_WINS:
+                break
+            out.append(pick)
+            issues = _balance_issues(out, db, archetype)
 
     extras = sorted(
-        [c for c in pool if c not in out],
+        [c for c in pool if c not in out and not _is_spell(db, c)],
         key=lambda c: -sum(_pair_synergy(db, c, x) for x in out),
     )
     for card in extras:
         if len(out) >= 8:
             break
+        if _is_win(db, card) and _count_wins(out, db) >= MAX_WINS:
+            continue
         out.append(card)
+
+    while _count_spells(out, db) > MAX_SPELLS:
+        removable = [c for c in out if _is_spell(db, c) and c not in core_set]
+        if not removable:
+            break
+        out.remove(min(removable, key=lambda c: sum(_pair_synergy(db, c, x) for x in out)))
+
+    while len(out) > 8:
+        droppable = [c for c in out if c not in core_set]
+        if not droppable:
+            break
+        out.remove(min(droppable, key=lambda c: sum(_pair_synergy(db, c, x) for x in out)))
+
+    while len(out) < 8:
+        extra = next((c for c in pool if c not in out and not _is_spell(db, c)), None)
+        if not extra:
+            break
+        out.append(extra)
 
     return out[:8]
 
 
-def _replace_weak_fillers(
-    deck: list[str],
+def _build_one_variant(
     core: list[str],
     db: DeckDatabase,
     pool: set[str],
     archetype: str,
+    template: DeckRecord | None = None,
 ) -> list[str]:
-    """Шаг 6: заменить слабые добавленные карты."""
-    core_set = set(core)
-    out = list(deck)
-    score = _deck_synergy_score(db, out)
-    if score >= SYNERGY_MIN_THRESHOLD:
-        return out
-
-    fillers = [c for c in out if c not in core_set]
-    for _ in range(3):
-        if score >= SYNERGY_MIN_THRESHOLD:
+    fillers = _fillers_from_template(core, template, db) if template else []
+    deck = list(core)
+    for card in fillers:
+        if len(deck) >= 8:
             break
-        worst = min(
-            fillers,
-            key=lambda c: sum(_pair_synergy(db, c, x) for x in out if x != c),
-            default=None,
-        )
-        if not worst:
-            break
-        candidates = [
-            c for c in pool
-            if c not in out and c not in core_set
-        ]
-        if not candidates:
-            break
-        best = max(
-            candidates,
-            key=lambda c: sum(_pair_synergy(db, c, x) for x in out if x != worst),
-        )
-        idx = out.index(worst)
-        out[idx] = best
-        fillers = [c for c in out if c not in core_set]
-        score = _deck_synergy_score(db, out)
-
-    return out
+        if card not in deck:
+            deck.append(card)
+    arch = template.archetype if template else archetype
+    return _finalize_deck(deck, core, db, pool, arch)
 
 
 def build_deck_from_core(
@@ -378,10 +411,6 @@ def build_deck_from_core(
     *,
     db: DeckDatabase | None = None,
 ) -> BuildResult:
-    """
-    Главная точка входа: 4 карты ядра → полная колода 8 карт.
-    Первые 4 карты не изменяются.
-    """
     if len(core) != 4 or len(set(core)) != 4:
         raise ValueError("Нужно ровно 4 уникальные карты")
 
@@ -390,52 +419,21 @@ def build_deck_from_core(
         pool = set(db.cards.keys())
     pool = set(pool) | set(core)
 
-    archetype = _detect_archetype(db, core)
-    ranked = _rank_similar_decks(db, core, archetype, limit=8)
-
+    archetype = _detect_archetype(core)
+    ranked = _rank_similar_decks(db, core, archetype, limit=6)
     best = ranked[0] if ranked else None
-    source_id: str | None = None
-    source_name: str | None = None
-    confidence = best.confidence if best else 0.0
-
-    core_set = set(core)
-    if best and confidence >= MATCH_CONFIDENCE_THRESHOLD:
-        fillers = [c for c in best.record.cards if c not in core_set]
-        deck = list(core) + fillers[:4]
-        source_id = best.record.id
-        source_name = best.record.name
-    elif best and best.overlap >= 2:
-        fillers = [c for c in best.record.cards if c not in core_set]
-        deck = list(core) + fillers[:4]
-        source_id = best.record.id
-        source_name = best.record.name
-        confidence = max(confidence, 60.0)
-    else:
-        deck = list(core)
-        fillers = [c for c in best.record.cards if c not in core_set] if best else None
-        deck = _auto_complete(deck, core, db, pool, archetype, fillers)
-
-    if len(deck) < 8:
-        deck = _auto_complete(deck, core, db, pool, archetype)
-
-    deck = _replace_weak_fillers(deck, core, db, pool, archetype)
-
-    ok, issues = _balance_ok(deck, db, archetype)
-    if not ok:
-        deck = _auto_complete(deck, core, db, pool, archetype)
-
+    deck = _build_one_variant(core, db, pool, archetype, best.record if best else None)
+    issues = _balance_issues(deck, db, archetype)
     synergy_score, _ = calculate_deck_synergy(deck)
-    if synergy_score < SYNERGY_MIN_THRESHOLD:
-        synergy_score = _deck_synergy_score(db, deck)
 
     return BuildResult(
-        deck=deck[:8],
+        deck=deck,
         archetype=archetype,
-        average_elixir=_avg_elixir(deck[:8]),
+        average_elixir=_avg_elixir(deck, db),
         synergy_score=round(synergy_score, 1),
-        confidence=round(confidence, 1),
-        source_deck_id=source_id,
-        source_deck_name=source_name,
+        confidence=round(best.confidence if best else 35.0, 1),
+        source_deck_id=best.record.id if best else None,
+        balanced=len(issues) == 0,
     )
 
 
@@ -445,14 +443,13 @@ def build_multiple_decks(
     *,
     limit: int = 6,
 ) -> list[BuildResult]:
-    """Несколько вариантов из топ похожих колод."""
     db = get_database()
     if pool is None:
         pool = set(db.cards.keys())
     pool = set(pool) | set(core)
 
-    archetype = _detect_archetype(db, core)
-    ranked = _rank_similar_decks(db, core, archetype, limit=limit * 2)
+    archetype = _detect_archetype(core)
+    ranked = _rank_similar_decks(db, core, archetype, limit=limit * 3)
 
     results: list[BuildResult] = []
     seen: set[str] = set()
@@ -460,29 +457,48 @@ def build_multiple_decks(
     for sd in ranked:
         if len(results) >= limit:
             break
-        core_set = set(core)
-        fillers = [c for c in sd.record.cards if c not in core_set][:4]
-        deck = list(core) + fillers
-        if len(deck) < 8:
-            deck = _auto_complete(deck, core, db, pool, sd.record.archetype, fillers)
-        deck = _replace_weak_fillers(deck, core, db, pool, sd.record.archetype)
+        deck = _build_one_variant(core, db, pool, archetype, sd.record)
+        if len(deck) != 8 or "win_condition" in _balance_issues(deck, db, sd.record.archetype):
+            continue
         key = "|".join(sorted(deck))
-        if key in seen or len(deck) != 8:
+        if key in seen:
             continue
         seen.add(key)
-
         synergy_score, _ = calculate_deck_synergy(deck)
         results.append(BuildResult(
             deck=deck,
             archetype=sd.record.archetype,
-            average_elixir=_avg_elixir(deck),
+            average_elixir=_avg_elixir(deck, db),
             synergy_score=round(synergy_score, 1),
             confidence=round(sd.confidence, 1),
             source_deck_id=sd.record.id,
-            source_deck_name=sd.record.name,
+            balanced=len(_balance_issues(deck, db, sd.record.archetype)) == 0,
         ))
 
     if not results:
-        results.append(build_deck_from_core(core, pool, db=db))
+        deck = _build_one_variant(core, db, pool, archetype)
+        synergy_score, _ = calculate_deck_synergy(deck)
+        results.append(BuildResult(
+            deck=deck,
+            archetype=archetype,
+            average_elixir=_avg_elixir(deck, db),
+            synergy_score=round(synergy_score, 1),
+            confidence=35.0,
+            balanced=len(_balance_issues(deck, db, archetype)) == 0,
+        ))
 
+    fallback = _finalize_deck(core, core, db, pool, archetype)
+    fkey = "|".join(sorted(fallback))
+    if fkey not in seen and len(results) < limit:
+        synergy_score, _ = calculate_deck_synergy(fallback)
+        results.append(BuildResult(
+            deck=fallback,
+            archetype=archetype,
+            average_elixir=_avg_elixir(fallback, db),
+            synergy_score=round(synergy_score, 1),
+            confidence=30.0,
+            balanced=len(_balance_issues(fallback, db, archetype)) == 0,
+        ))
+
+    results.sort(key=lambda r: -(r.synergy_score + r.confidence))
     return results[:limit]
