@@ -164,6 +164,10 @@ async def get_cards_catalog() -> list[dict]:
             "icon": info.get("icon") or "",
             "id": info.get("id"),
             "elixir": info.get("elixir"),
+            "max_evolution_level": int(info.get("max_evolution_level") or 0),
+            "has_hero": bool(info.get("hero_icon")),
+            "icon_evo": info.get("evolution_icon") or "",
+            "icon_hero": info.get("hero_icon") or "",
         })
     catalog.sort(key=lambda c: c["name"])
     return catalog

@@ -6,6 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from bot.api.deps import get_db, require_linked_player, require_subscription
 from bot.api.schemas import (
     ArenaDecksResponse,
+    ConstructorRequest,
+    ConstructorResponse,
+    ConstructorDeckEntry,
     CounterDeckResponse,
     CustomizeResponse,
     DeckCardInfo,
@@ -45,7 +48,7 @@ from bot.services.counter_engine import (
 )
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates, get_most_played_cards
 from bot.services.arena_decks import build_classic_meta_entries, get_arena_popular_decks
-from bot.services.deck_compare import compare_decks
+from bot.services.deck_constructor import build_constructor_decks
 from bot.services.deck_detail import build_mine_deck_stats
 from bot.services.top_players import get_top_players
 from bot.services.meta_analyzer import _guess_deck_name
@@ -367,6 +370,44 @@ async def list_arena_decks(
         decks=decks,
         source=data.get("source", "curated"),
         updated_at=data.get("updated_at"),
+    )
+
+
+@router.post("/decks/constructor", response_model=ConstructorResponse)
+async def deck_constructor(
+    body: ConstructorRequest,
+    user: User = Depends(require_linked_player),
+    session: AsyncSession = Depends(get_db),
+) -> ConstructorResponse:
+    if len(body.slots) != 4:
+        raise HTTPException(status_code=400, detail="Нужно выбрать ровно 4 карты")
+
+    names = [s.name.strip() for s in body.slots if s.name.strip()]
+    if len(names) != 4 or len(set(names)) != 4:
+        raise HTTPException(status_code=400, detail="Все 4 карты должны быть разными")
+
+    await ensure_cards_loaded()
+    trophies, _, _ = await _live_player_arena(user, session)
+    slots = [{"name": s.name.strip(), "slot": s.slot} for s in body.slots]
+    result = build_constructor_decks(slots, user.arena_id, trophies)
+
+    return ConstructorResponse(
+        core=[DeckCardInfo(**c) for c in result["core"]],
+        decks=[
+            ConstructorDeckEntry(
+                id=d["id"],
+                name=d["name"],
+                cards=[DeckCardInfo(**c) for c in d["cards"]],
+                synergy_score=d.get("synergy_score", 0),
+                synergy_notes=d.get("synergy_notes", []),
+                avg_elixir=d.get("avg_elixir", 0),
+                deck_link=d.get("deck_link"),
+                description=d.get("description", ""),
+                type="constructor",
+                category=d.get("category", "custom"),
+            )
+            for d in result["decks"]
+        ],
     )
 
 

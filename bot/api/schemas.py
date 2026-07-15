@@ -182,6 +182,33 @@ class SynergyResponse(BaseModel):
     deck_link: str | None = None
 
 
+class ConstructorSlotRequest(BaseModel):
+    name: str
+    slot: int
+
+
+class ConstructorRequest(BaseModel):
+    slots: list[ConstructorSlotRequest]
+
+
+class ConstructorDeckEntry(BaseModel):
+    id: int
+    name: str = ""
+    cards: list[DeckCardInfo]
+    synergy_score: float = 0.0
+    synergy_notes: list[str] = []
+    avg_elixir: float = 0.0
+    deck_link: str | None = None
+    description: str = ""
+    type: str = "constructor"
+    category: str = "custom"
+
+
+class ConstructorResponse(BaseModel):
+    core: list[DeckCardInfo]
+    decks: list[ConstructorDeckEntry]
+
+
 class StatsDeckEntry(BaseModel):
     cards: list[str]
     total: int
@@ -357,6 +384,10 @@ class CardCatalogEntry(BaseModel):
     icon: str = ""
     id: int | None = None
     elixir: int | None = None
+    max_evolution_level: int = 0
+    has_hero: bool = False
+    icon_evo: str = ""
+    icon_hero: str = ""
 
 
 class CardCatalogResponse(BaseModel):
