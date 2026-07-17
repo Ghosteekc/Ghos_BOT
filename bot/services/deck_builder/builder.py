@@ -393,8 +393,12 @@ def _build_one_variant(
     pool: set[str],
     archetype: str,
     template: DeckRecord | None = None,
+    *,
+    filler_skip: int = 0,
 ) -> list[str]:
     fillers = _fillers_from_template(core, template, db) if template else []
+    if filler_skip:
+        fillers = fillers[filler_skip:]
     deck = list(core)
     for card in fillers:
         if len(deck) >= 8:
@@ -449,7 +453,7 @@ def build_multiple_decks(
     pool = set(pool) | set(core)
 
     archetype = _detect_archetype(core)
-    ranked = _rank_similar_decks(db, core, archetype, limit=limit * 3)
+    ranked = _rank_similar_decks(db, core, archetype, limit=limit * 5)
 
     results: list[BuildResult] = []
     seen: set[str] = set()
@@ -457,26 +461,30 @@ def build_multiple_decks(
     for sd in ranked:
         if len(results) >= limit:
             break
-        deck = _build_one_variant(core, db, pool, archetype, sd.record)
-        if len(deck) != 8 or "win_condition" in _balance_issues(deck, db, sd.record.archetype):
-            continue
-        key = "|".join(sorted(deck))
-        if key in seen:
-            continue
-        seen.add(key)
-        synergy_score, _ = calculate_deck_synergy(deck)
-        results.append(BuildResult(
-            deck=deck,
-            archetype=sd.record.archetype,
-            average_elixir=_avg_elixir(deck, db),
-            synergy_score=round(synergy_score, 1),
-            confidence=round(sd.confidence, 1),
-            source_deck_id=sd.record.id,
-            balanced=len(_balance_issues(deck, db, sd.record.archetype)) == 0,
-        ))
+        for filler_skip in (0, 1, 2):
+            deck = _build_one_variant(core, db, pool, archetype, sd.record, filler_skip=filler_skip)
+            if len(deck) != 8 or "win_condition" in _balance_issues(deck, db, sd.record.archetype):
+                continue
+            key = _deck_key(deck)
+            if key in seen:
+                continue
+            seen.add(key)
+            synergy_score, _ = calculate_deck_synergy(deck)
+            results.append(BuildResult(
+                deck=deck,
+                archetype=sd.record.archetype,
+                average_elixir=_avg_elixir(deck, db),
+                synergy_score=round(synergy_score, 1),
+                confidence=round(sd.confidence, 1),
+                source_deck_id=sd.record.id,
+                balanced=len(_balance_issues(deck, db, sd.record.archetype)) == 0,
+            ))
+            break
 
     if not results:
         deck = _build_one_variant(core, db, pool, archetype)
+        key = _deck_key(deck)
+        seen.add(key)
         synergy_score, _ = calculate_deck_synergy(deck)
         results.append(BuildResult(
             deck=deck,
@@ -488,7 +496,7 @@ def build_multiple_decks(
         ))
 
     fallback = _finalize_deck(core, core, db, pool, archetype)
-    fkey = "|".join(sorted(fallback))
+    fkey = _deck_key(fallback)
     if fkey not in seen and len(results) < limit:
         synergy_score, _ = calculate_deck_synergy(fallback)
         results.append(BuildResult(
@@ -501,4 +509,20 @@ def build_multiple_decks(
         ))
 
     results.sort(key=lambda r: -(r.synergy_score + r.confidence))
-    return results[:limit]
+    return _dedupe_build_results(results)[:limit]
+
+
+def _deck_key(deck: list[str]) -> str:
+    return "|".join(sorted(deck))
+
+
+def _dedupe_build_results(results: list[BuildResult]) -> list[BuildResult]:
+    out: list[BuildResult] = []
+    seen: set[str] = set()
+    for item in results:
+        key = _deck_key(item.deck)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out

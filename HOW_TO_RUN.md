@@ -104,7 +104,13 @@ python -m bot.main
 | `TRIAL_DAYS` | `3` | опционально |
 | `SUBSCRIPTION_PRICE_STARS` | `250` | опционально |
 
-На Vercel в переменных проекта `webapp` укажите `VITE_API_URL` — HTTPS URL туннеля к API (см. `scripts/localtunnel/README.md`).
+На Vercel в переменных проекта `webapp`:
+
+1. **`VITE_API_URL` — оставьте пустым** (удалите или очистите значение).
+2. URL туннеля укажите в **`webapp/vercel.json`** → `rewrites` → `destination` (например `https://ghosteekcr.loca.lt/api/:path*`).
+3. После смены subdomain туннеля — обновите `vercel.json` и **Redeploy**.
+
+Так друзья не ходят на `loca.lt` напрямую и не видят **Forbidden** (защита localtunnel для новых IP).
 
 ### Проверка деплоя
 

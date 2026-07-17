@@ -11,6 +11,7 @@ from bot.services.card_data import (
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_matchups import card_counters_target, synergy_partners
 from bot.services.deck_analyzer import analyze_deck, extract_deck, find_opponent_threats
+from bot.services.deck_improver import improve_player_deck
 
 _AIR_OFFENSE = {
     "Minions", "Minion Horde", "Baby Dragon", "Mega Minion", "Inferno Dragon",
@@ -52,6 +53,43 @@ _EXTRA_THREATS = {
     "P.E.K.K.A", "Dark Prince", "Valkyrie", "Witch", "Royal Giant", "Goblin Barrel",
 }
 
+_SUPPORT_THREATS = frozenset({
+    "Wizard", "Executioner", "Night Witch", "Witch", "Mother Witch",
+    "Baby Dragon", "Electro Wizard", "Mega Minion", "Hunter", "Firecracker",
+    "Ice Wizard", "Magic Archer", "Lumberjack", "Mini P.E.K.K.A",
+})
+
+_CHAMPION_THREATS = frozenset({
+    "Little Prince", "Monk", "Golden Knight", "Archer Queen",
+    "Skeleton King", "Mighty Miner", "Boss Bandit", "Ronin",
+})
+
+_SPAM_THREATS = frozenset({
+    "Skeleton Army", "Goblin Gang", "Minion Horde", "Guards", "Barbarians",
+    "Goblins", "Skeletons", "Bats",
+})
+
+_OPP_SPLASH = frozenset({
+    "Wizard", "Executioner", "Witch", "Night Witch", "Baby Dragon",
+    "Bowler", "Valkyrie", "Fireball", "Poison", "Arrows", "Royal Delivery",
+})
+
+_SPLASH_VULNERABLE = frozenset({
+    "Mega Knight", "Mini P.E.K.K.A", "P.E.K.K.A", "Wizard", "Witch",
+    "Night Witch", "Skeleton Army", "Goblin Gang", "Barbarians",
+    "Elite Barbarians", "Mega Minion", "Minion Horde",
+})
+
+# Тяжёлые атакующие карты — не подходят как контр-пики
+_COUNTER_DECK_BANNED = frozenset({
+    "Mega Knight", "P.E.K.K.A", "Golem", "Giant", "Electro Giant",
+    "Lava Hound", "Sparky", "Elixir Golem", "Boss Bandit", "Rune Giant",
+    "Three Musketeers", "Elite Barbarians", "Wall Breakers", "Goblin Giant",
+    "Skeleton Barrel", "Battle Ram", "Ram Rider", "Monk", "Ronin",
+})
+
+_MIN_COUNTER_SCORE = 2.0
+
 
 def _card_ru(name: str) -> str:
     return card_name_ru(name, short=True) or name
@@ -78,10 +116,12 @@ def suggest_counter_deck(
     for card in pool:
         if card in opponent_deck:
             continue
+        if card in _COUNTER_DECK_BANNED:
+            continue
         if not opp_has_air and _skip_without_opponent_air(card):
             continue
         score = _score_counter_card(card, opponent_deck, threats, preferred_cards)
-        if score > 0:
+        if score >= _MIN_COUNTER_SCORE:
             ranked.append((score, card))
     ranked.sort(key=lambda x: (-x[0], x[1]))
 
@@ -96,46 +136,57 @@ def suggest_counter_deck(
     deck = _ensure_win_condition(deck, pool, preferred_cards)
     deck = _ensure_building(deck, pool, opponent_deck)
     deck = _trim_excess(deck, opponent_deck, threats, preferred_cards)
+    deck = _fill_counter_gaps(deck, ranked, pool, opponent_deck)
+    deck = _trim_weak_cards(deck, ranked, opponent_deck, threats, preferred_cards)
 
-    for filler in ("Skeletons", "Ice Spirit", "Electro Spirit", "Knight", "Archers"):
-        if len(deck) >= 8:
-            break
-        if filler in pool and _can_add(filler, deck):
-            deck.append(filler)
-
-    while len(deck) < 8:
-        added = False
+    if len(deck) < 8:
+        deck = _fill_counter_gaps(deck, ranked, pool, opponent_deck)
         for _, card in ranked:
-            if card not in deck and _can_add(card, deck):
-                deck.append(card)
-                added = True
+            if len(deck) >= 8:
                 break
-        if not added:
-            for card in pool:
-                if card not in deck and card not in opponent_deck and _can_add(card, deck):
-                    deck.append(card)
-                    added = True
-                    break
-        if not added:
-            break
+            if card in deck or card in opponent_deck:
+                continue
+            if _can_add(card, deck):
+                deck.append(card)
 
-    return _trim_excess(deck, opponent_deck, threats, preferred_cards)[:8]
+    return deck[:8]
 
 
 _GROUND_COUNTERS = {"Inferno Tower", "Tesla", "Cannon", "Tombstone"}
 
+_GROUND_ANTI_AIR = frozenset({
+    "Musketeer", "Hunter", "Archers", "Firecracker", "Wizard", "Executioner",
+    "Bowler", "Valkyrie", "Mini P.E.K.K.A",
+})
+
 
 def _skip_without_opponent_air(card: str) -> bool:
     """Не брать чистый анти-воздух, если у соперника нет воздуха."""
-    if card in _GROUND_COUNTERS:
+    if card in _GROUND_COUNTERS or card in _GROUND_ANTI_AIR:
         return False
     return _is_anti_air_specialist(card) or card in _FLYING_TROOPS
 
 
 def _key_threats(opponent_deck: list[str]) -> list[str]:
-    base = find_opponent_threats(opponent_deck)
-    extra = [c for c in opponent_deck if c in _EXTRA_THREATS and c not in base]
-    return list(dict.fromkeys(base + extra))
+    threats: list[str] = []
+    danger = (
+        _EXTRA_THREATS | _SUPPORT_THREATS | _CHAMPION_THREATS | _SPAM_THREATS | _AIR_OFFENSE
+    )
+
+    for card in opponent_deck:
+        if card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
+            threats.append(card)
+
+    for card in opponent_deck:
+        if card in danger and card not in threats:
+            threats.append(card)
+
+    if _deck_has_air(opponent_deck):
+        for card in opponent_deck:
+            if card in _AIR_OFFENSE and card not in threats:
+                threats.append(card)
+
+    return list(dict.fromkeys(threats))
 
 
 def _monk_worth_it(opponent_deck: list[str]) -> bool:
@@ -174,44 +225,77 @@ def _can_add(card: str, deck: list[str]) -> bool:
     return True
 
 
+def _opponent_splash_count(opponent_deck: list[str]) -> int:
+    return sum(1 for c in opponent_deck if c in _OPP_SPLASH)
+
+
 def _score_counter_card(
     card: str,
     opponent_deck: list[str],
     threats: list[str],
     preferred: list[str],
 ) -> float:
+    if card in _COUNTER_DECK_BANNED:
+        return -100.0
     if card in _REFLECT_CHAMPIONS and not _monk_worth_it(opponent_deck):
-        return -1.0
+        return -100.0
     if _swarm_hard_countered(card, opponent_deck):
-        return -1.0
+        return -100.0
 
     score = 0.0
+    threat_set = set(threats)
+
     for threat in threats:
         tier = card_counters_target(card, threat)
+        weight = 8.0 if threat in WIN_CONDITIONS or get_card_role(threat) == "win_condition" else 5.0
         if tier == "strong":
-            score += 7.0
+            score += weight
         elif tier == "partial":
-            score += 2.5
+            score += weight * 0.35
         if is_point_target_threat(threat) and card in POINT_TARGET_COUNTERS and card not in _REFLECT_CHAMPIONS:
-            score += 3.0
+            score += 2.5
 
     for opp in opponent_deck:
-        if opp in threats:
+        if opp in threat_set:
             continue
         tier = card_counters_target(card, opp)
         if tier == "strong":
-            score += 1.5
+            score += 1.0
         elif tier == "partial":
-            score += 0.5
+            score += 0.3
 
+    splash_n = _opponent_splash_count(opponent_deck)
     for opp in opponent_deck:
         if opp in _SPELL_KILLERS and _swarm_hard_countered(card, [opp]):
-            score -= 5.0
+            score -= 6.0
         tier = card_counters_target(opp, card)
         if tier == "strong":
-            score -= 4.0
+            score -= 7.0
         elif tier == "partial":
-            score -= 1.5
+            score -= 2.5
+
+    if splash_n >= 2 and card in _SPLASH_VULNERABLE:
+        score -= 12.0
+    elif splash_n >= 1 and card in {"Mega Knight", "Mini P.E.K.K.A", "Skeleton Army", "Goblin Gang"}:
+        score -= 6.0
+
+    if card == "Ice Golem" and _deck_has_air(opponent_deck):
+        score -= 8.0
+
+    if "Balloon" in opponent_deck and card in {"Inferno Tower", "Musketeer", "Inferno Dragon", "Tesla", "Hunter"}:
+        score += 6.0
+
+    if set(opponent_deck) & _CHAMPION_THREATS:
+        if card in {"Ice Golem", "Mini P.E.K.K.A", "Lumberjack", "Hunter"}:
+            score -= 10.0
+        if card in {"Musketeer", "Bowler", "Executioner", "Tesla", "Inferno Tower", "Inferno Dragon"}:
+            score += 5.0
+
+    elixir = get_card_elixir(card)
+    if elixir >= 6:
+        score -= 10.0
+    elif elixir >= 5:
+        score -= 4.0
 
     if card in preferred[:10]:
         score += 1.5
@@ -219,7 +303,7 @@ def _score_counter_card(
         score += 1.0
 
     if card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
-        score -= 2.0
+        score -= 4.0
 
     return score
 
@@ -299,6 +383,89 @@ def _ensure_building(deck: list[str], pool: set[str], opponent_deck: list[str]) 
     return deck
 
 
+def _fill_counter_gaps(
+    deck: list[str],
+    ranked: list[tuple[float, str]],
+    pool: set[str],
+    opponent_deck: list[str],
+) -> list[str]:
+    out = list(deck)
+    for score, card in ranked:
+        if len(out) >= 8:
+            break
+        if card in out or card in opponent_deck or card in _COUNTER_DECK_BANNED:
+            continue
+        if score < _MIN_COUNTER_SCORE:
+            continue
+        if _can_add(card, out):
+            out.append(card)
+
+    for score, card in ranked:
+        if len(out) >= 8:
+            break
+        if card in out or card in opponent_deck:
+            continue
+        if score < 1.0:
+            continue
+        if _can_add(card, out):
+            out.append(card)
+
+    return out
+
+
+def _trim_weak_cards(
+    deck: list[str],
+    ranked: list[tuple[float, str]],
+    opponent_deck: list[str],
+    threats: list[str],
+    preferred: list[str],
+) -> list[str]:
+    out = list(deck)
+    ranked_map = {card: score for score, card in ranked}
+    candidates = [card for score, card in ranked if card not in out]
+
+    for _ in range(8):
+        if not candidates:
+            break
+        weakest = min(
+            out,
+            key=lambda c: (
+                1 if c in WIN_CONDITIONS or get_card_role(c) == "win_condition" else 0,
+                1 if get_card_role(c) == "spell" and _deck_role_counts(out)["spell"] <= 1 else 0,
+                _card_score_in_context(c, opponent_deck, threats),
+            ),
+        )
+        weak_score = _card_score_in_context(weakest, opponent_deck, threats)
+        if weak_score >= _MIN_COUNTER_SCORE:
+            break
+
+        replaced = False
+        for card in candidates:
+            if not _can_add(card, out) and card not in out:
+                continue
+            new_score = ranked_map.get(card, _card_score_in_context(card, opponent_deck, threats))
+            if new_score <= weak_score + 1.0:
+                continue
+            if card in out:
+                continue
+            idx = out.index(weakest)
+            if get_card_role(card) == "spell" and get_card_role(weakest) == "spell":
+                out[idx] = card
+            elif card in WIN_CONDITIONS and weakest in WIN_CONDITIONS:
+                out[idx] = card
+            elif card not in WIN_CONDITIONS and weakest not in WIN_CONDITIONS:
+                out[idx] = card
+            else:
+                continue
+            candidates.remove(card)
+            replaced = True
+            break
+        if not replaced:
+            break
+
+    return _trim_excess(out, opponent_deck, threats, preferred)
+
+
 def _trim_excess(
     deck: list[str],
     opponent_deck: list[str],
@@ -340,54 +507,29 @@ def _is_anti_air_specialist(card: str) -> bool:
 
 
 def build_synergy_deck(
-    core_cards: list[str],
+    current_deck: list[str],
     arena_id: int | None = None,
-) -> dict:
-    """Сборка колоды вокруг любимых карт пользователя."""
-    pool = _get_arena_pool(arena_id)
-    deck = [c for c in core_cards if c in pool][:3]
-    suggestions: dict[str, list[str]] = {}
+    trophies: int | None = None,
+    preferred_cards: list[str] | None = None,
+) -> dict | None:
+    """Точечное улучшение текущей колоды. None — если замены не нужны."""
+    result = improve_player_deck(
+        current_deck,
+        arena_id,
+        trophies,
+        preferred_cards,
+    )
+    if not result["needed"]:
+        return None
 
-    for core in deck:
-        strong, partial = synergy_partners(core, pool, limit=4)
-        available = strong + [p for p in partial if p not in strong]
-        suggestions[core] = available[:4]
-        for s in available[:2]:
-            if len(deck) < 8 and s not in deck:
-                deck.append(s)
-
-    has_spell = any(get_card_role(c) == "spell" for c in deck)
-    if not has_spell:
-        for spell in ["Zap", "Fireball", "The Log", "Arrows"]:
-            if spell in pool and spell not in deck:
-                deck.append(spell)
-                break
-
-    has_win = any(c in WIN_CONDITIONS or get_card_role(c) == "win_condition" for c in deck)
-    if not has_win:
-        for wc in core_cards:
-            if wc in WIN_CONDITIONS:
-                has_win = True
-                break
-        if not has_win:
-            for wc in ["Hog Rider", "Balloon", "Royal Giant"]:
-                if wc in pool and wc not in deck:
-                    deck.append(wc)
-                    break
-
-    fill_cards = ["Knight", "Skeletons", "Ice Spirit", "Musketeer", "Cannon", "Ice Golem"]
-    for card in fill_cards:
-        if len(deck) >= 8:
-            break
-        if card in pool and card not in deck:
-            deck.append(card)
-
-    stats = analyze_deck(deck[:8])
+    stats = analyze_deck(result["improved"])
     return {
-        "deck": deck[:8],
-        "synergies": suggestions,
-        "avg_elixir": stats.avg_elixir,
+        "deck": result["improved"],
+        "synergies": result["synergies"],
+        "avg_elixir": result["avg_elixir"],
         "win_conditions": stats.win_conditions,
+        "core": result["locked"],
+        "issues": result["issues"],
     }
 
 
@@ -397,74 +539,21 @@ def customize_deck_for_arena(
     preferred_cards: list[str] | None = None,
     trophies: int | None = None,
 ) -> dict:
-    """Кастомизация колоды под арену и предпочтения."""
-    pool = _get_arena_pool(arena_id, trophies)
-    # Карты из колоды и частых пиков игрока — он уже ими играет
-    pool.update(current_deck)
-    pool.update(preferred_cards or [])
-    preferred_cards = preferred_cards or []
-    issues = []
-    new_deck = list(current_deck)
-    had_fixes = False
-
-    for i, card in enumerate(new_deck):
-        if card not in pool:
-            had_fixes = True
-            issues.append(f"❌ {_card_ru(card)} — редкая для низкой арены, предложена замена")
-            replacement = _find_replacement(card, pool, new_deck)
-            if replacement:
-                new_deck[i] = replacement
-                issues.append(f"   → замена на {_card_ru(replacement)}")
-
-    stats = analyze_deck(new_deck)
-    if stats.avg_elixir > 4.2:
-        heavy = max(new_deck, key=get_card_elixir)
-        if get_card_elixir(heavy) >= 5:
-            light_opts = [c for c in ["Skeletons", "Ice Spirit", "Bats", "Fire Spirit"]
-                          if c in pool and c not in new_deck]
-            if light_opts and heavy in new_deck:
-                had_fixes = True
-                idx = new_deck.index(heavy)
-                new_deck[idx] = light_opts[0]
-                issues.append(f"⚖️ {_card_ru(heavy)} → {_card_ru(light_opts[0])} (снижение среднего эликсира)")
-
-    for pref in preferred_cards[:3]:
-        if pref in pool and pref not in new_deck:
-            replaceable = [
-                c for c in new_deck
-                if c not in preferred_cards
-                and c not in WIN_CONDITIONS
-                and get_card_role(c) != "win_condition"
-            ]
-            if not replaceable:
-                continue
-            weakest = min(replaceable, key=lambda c: preferred_cards.count(c) if c in preferred_cards else 0)
-            idx = new_deck.index(weakest)
-            new_deck[idx] = pref
-            issues.append(f"⭐ Рекомендуем {_card_ru(pref)} вместо {_card_ru(weakest)} — часто играете")
-
-    stats = analyze_deck(new_deck)
-    if not stats.spells:
-        for spell in ["Zap", "Fireball", "Arrows"]:
-            if spell in pool:
-                replace_idx = next(
-                    (i for i, c in enumerate(new_deck) if get_card_role(c) not in ("win_condition", "spell")),
-                    None,
-                )
-                if replace_idx is not None:
-                    had_fixes = True
-                    old = new_deck[replace_idx]
-                    new_deck[replace_idx] = spell
-                    issues.append(f"🪄 Добавлено заклинание {_card_ru(spell)} вместо {_card_ru(old)}")
-                    break
-
-    new_stats = analyze_deck(new_deck)
+    """Кастомизация колоды: только обязательные замены под арену и баланс."""
+    result = improve_player_deck(
+        current_deck,
+        arena_id,
+        trophies,
+        preferred_cards,
+    )
+    new_stats = analyze_deck(result["improved"])
     return {
-        "original": current_deck,
-        "customized": new_deck,
-        "issues": issues,
+        "original": result["original"],
+        "customized": result["improved"],
+        "issues": result["issues"],
         "avg_elixir": new_stats.avg_elixir,
         "win_conditions": new_stats.win_conditions,
+        "needed": result["needed"],
     }
 
 

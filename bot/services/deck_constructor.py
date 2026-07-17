@@ -63,6 +63,23 @@ def _category_from_archetype(archetype: str) -> str:
     return mapping.get(archetype, "meta")
 
 
+def _deck_entry_key(entry: dict) -> str:
+    names = [c.get("name") for c in entry.get("cards", []) if c.get("name")]
+    return "|".join(sorted(names))
+
+
+def _dedupe_constructor_entries(entries: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    seen: set[str] = set()
+    for entry in entries:
+        key = _deck_entry_key(entry)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(entry)
+    return out
+
+
 def _build_deck_entry(
     core_parsed: list[dict],
     deck_names: list[str],
@@ -155,6 +172,7 @@ def build_constructor_decks(
             decks.append(entry)
             deck_id += 1
 
+    decks = _dedupe_constructor_entries(decks)
     decks.sort(key=lambda d: -d.get("total_score", 0))
     return {
         "core": [deck_card_info_from_parsed(c, slot=c.get("slot", i)) for i, c in enumerate(core_parsed)],

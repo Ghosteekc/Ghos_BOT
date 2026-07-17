@@ -623,16 +623,25 @@ async def customize_deck(user: User = Depends(require_subscription)) -> Customiz
 async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyResponse:
     battles = await _get_battles(user)
     tag = normalize_tag(user.player_tag)
-    top_cards = get_most_played_cards(battles, tag, top_n=3)
-    core = [c for c, _ in top_cards]
+    preferred = [c for c, _ in get_most_played_cards(battles, tag)]
 
-    if not core:
-        raise HTTPException(status_code=404, detail="Недостаточно данных по картам")
+    current_deck: list[str] = []
+    for battle in battles:
+        team = battle.get("team", [{}])[0]
+        if normalize_tag(team.get("tag") or "") == tag:
+            current_deck = [c["name"] for c in team.get("cards", [])]
+            break
 
-    result = build_synergy_deck(core, user.arena_id)
+    if not current_deck:
+        raise HTTPException(status_code=404, detail="Колода не найдена в последних боях")
+
+    result = build_synergy_deck(current_deck, user.arena_id, user.trophies, preferred)
+    if not result:
+        raise HTTPException(status_code=404, detail="Колода сбалансирована — улучшения не требуются")
+
     await ensure_cards_loaded()
     return SynergyResponse(
-        core=core,
+        core=result.get("core", []),
         deck=result["deck"],
         synergies=result["synergies"],
         avg_elixir=result["avg_elixir"],
@@ -689,9 +698,11 @@ async def recommendations(user: User = Depends(require_subscription)) -> Recomme
         except Exception:
             deck_result = None
 
-    top_cards = get_most_played_cards(battles, tag, top_n=3)
-    core = [c for c, _ in top_cards]
-    synergy = build_synergy_deck(core, user.arena_id) if core else None
+    synergy = (
+        build_synergy_deck(current_deck, user.arena_id, user.trophies, preferred)
+        if current_deck
+        else None
+    )
 
     last_summary = None
     if last_battle:
@@ -715,7 +726,7 @@ async def recommendations(user: User = Depends(require_subscription)) -> Recomme
         avg_elixir=deck_result["avg_elixir"] if deck_result else 0.0,
         issues=deck_result["issues"] if deck_result else [],
         customized_deck=deck_result["customized"] if deck_result else [],
-        synergy_core=core,
+        synergy_core=synergy.get("core", []) if synergy else [],
         synergy_deck=synergy["deck"] if synergy else [],
         last_battle=last_summary,
     )

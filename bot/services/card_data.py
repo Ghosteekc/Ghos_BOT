@@ -174,7 +174,10 @@ COUNTERS: dict[str, list[str]] = {
     "Skeleton King": ["Mini P.E.K.K.A", "Inferno Tower", "P.E.K.K.A", "Poison"],
     "Mighty Miner": ["Tesla", "Cannon", "Skeleton Army", "Knight"],
     "Monk": ["Skeleton Army", "Mini P.E.K.K.A", "Inferno Tower", "Knight"],
-    "Little Prince": ["Fireball", "Arrows", "The Log", "Mega Minion"],
+    "Little Prince": [
+        "Fireball", "Arrows", "The Log", "Mega Minion", "Musketeer", "Bowler",
+        "Tesla", "Inferno Tower", "Skeleton Army", "Bats", "Minions",
+    ],
     "Phoenix": ["Inferno Tower", "Inferno Dragon", "Mega Minion", "Musketeer"],
     "Electro Wizard": ["Sparky", "Elite Barbarians", "Barbarians"],
     "Tornado": ["Balloon", "Lava Hound", "Miner", "Goblin Barrel"],
@@ -268,9 +271,15 @@ OFFENSE_COUNTER_ALLOWED: dict[str, frozenset[str]] = {
 # Ручные правки поверх DeckShop (кого карта реально контрит)
 MANUAL_COUNTERS_STRONG: dict[str, frozenset[str]] = {
     "Guards": frozenset({"P.E.K.K.A", "Mini P.E.K.K.A"}),
+    "Little Prince": frozenset({
+        "Mega Knight", "Mini P.E.K.K.A", "P.E.K.K.A", "Prince", "Dark Prince",
+        "Knight", "Valkyrie", "Bandit", "Mega Minion", "Barbarians",
+    }),
 }
 
-MANUAL_COUNTERS_PARTIAL: dict[str, frozenset[str]] = {}
+MANUAL_COUNTERS_PARTIAL: dict[str, frozenset[str]] = {
+    "Little Prince": frozenset({"Ice Golem", "Lumberjack", "Hunter"}),
+}
 
 
 def get_card_elixir(name: str) -> int:

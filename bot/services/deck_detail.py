@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from bot.services.card_data import COUNTERS, WIN_CONDITIONS, get_card_elixir, get_card_role, is_pure_spell
+from bot.services.deck_builder.builder import _is_spell
+from bot.services.deck_builder.loader import get_database
 from bot.services.card_names_ru import card_name_ru
 from bot.services.clash_api import normalize_tag
 from bot.services.deck_analyzer import analyze_deck, extract_deck
@@ -111,6 +112,7 @@ def _suggest_improvements(cards: list[str]) -> list[dict]:
 
     stats = analyze_deck(cards)
     deck_set = set(cards)
+    db = get_database()
     suggestions: list[dict] = []
 
     def add(category: str, message: str, suggested: list[str], *, force: bool = False) -> None:
@@ -123,7 +125,7 @@ def _suggest_improvements(cards: list[str]) -> list[dict]:
             "suggested_cards": missing,
         })
 
-    if not stats.spells:
+    if not stats.spells and not any(_is_spell(db, c) for c in cards):
         add(
             "spells",
             "В колоде нет заклинаний — сложнее контролировать поле и добивать башни",
@@ -178,10 +180,10 @@ def _suggest_improvements(cards: list[str]) -> list[dict]:
             _CYCLE_SUGGESTIONS,
         )
 
-    if len(stats.win_conditions) > 2:
+    if len(stats.win_conditions) > 1:
         add(
             "focus",
-            "Несколько win-condition — колода менее сфокусирована, сложнее циклировь к нужной карте",
+            "Несколько win-condition — оставьте одну основную атакующую карту",
             [],
             force=True,
         )
