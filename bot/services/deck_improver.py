@@ -33,7 +33,29 @@ from bot.services.deck_builder.constants import (
     ROLE_WIN,
 )
 from bot.services.deck_builder.loader import get_database
-from bot.services.deck_detail import _suggest_improvements
+
+_SMALL_SPELLS = frozenset({
+    "Zap", "The Log", "Giant Snowball", "Barbarian Barrel", "Ice Spirit", "Electro Spirit",
+})
+_FINISHERS = frozenset({"Fireball", "Rocket", "Lightning", "Poison"})
+_ANTI_AIR_CARDS = frozenset({
+    "Musketeer", "Wizard", "Executioner", "Inferno Dragon", "Mini P.E.K.K.A",
+    "Mega Minion", "Electro Wizard", "Hunter", "Inferno Tower", "Tesla",
+    "Archers", "Bats", "Minions", "Phoenix", "Firecracker", "Ice Wizard", "Baby Dragon",
+})
+_SPLASH_CARDS = frozenset({
+    "Wizard", "Baby Dragon", "Valkyrie", "Bowler", "Executioner",
+    "Fireball", "Arrows", "Poison", "Earthquake", "Electro Dragon",
+    "Goblin Demolisher", "Magic Archer",
+})
+_DEFENSE_ROLES = frozenset({
+    ROLE_AIR, ROLE_SPLASH, ROLE_ANTI_TANK, ROLE_DEFENSIVE, ROLE_ANTI_SWARM, ROLE_BUILDING,
+})
+
+_SPLASH_TROOPS = frozenset({
+    "Executioner", "Wizard", "Bowler", "Valkyrie", "Baby Dragon",
+    "Electro Wizard", "Hunter", "Magic Archer", "Firecracker",
+})
 
 _CATEGORY_ROLE: dict[str, str | None] = {
     "spells": ROLE_BIG_SPELL,
@@ -54,19 +76,146 @@ def _card_ru(name: str) -> str:
     return card_name_ru(name, short=True) or name
 
 
-def _locked_cards(deck: list[str], db) -> set[str]:
-    """Основной win-condition и заклинания игрока не трогаем."""
-    locked: set[str] = set()
-    wins = [
-        c for c in deck
-        if _is_win(db, c) or c in WIN_CONDITIONS or get_card_role(c) == "win_condition"
-    ]
-    if wins:
-        locked.add(wins[0])
+def _has_small_spell_answer(cards: list[str]) -> bool:
+    return any(c in _SMALL_SPELLS for c in cards)
 
+
+def _has_finisher(cards: list[str], db) -> bool:
+    return any(c in _FINISHERS or ROLE_BIG_SPELL in _card_roles(db, c) for c in cards)
+
+
+def _is_defensive_core(db, card: str) -> bool:
+    if card in _ANTI_AIR_CARDS or card in _SPLASH_TROOPS:
+        return True
+    roles = _card_roles(db, card)
+    return bool(roles & _DEFENSE_ROLES)
+
+
+def _defensive_core_cards(deck: list[str], db) -> set[str]:
+    return {c for c in deck if _is_defensive_core(db, c)}
+
+
+def _needs_building(deck: list[str], stats, db) -> bool:
+    if stats.buildings:
+        return False
+    defensive = _defensive_core_cards(deck, db)
+    if len(defensive) >= 2 and stats.air_coverage and stats.point_target_coverage:
+        return False
+    if stats.air_coverage and stats.splash_coverage and stats.point_target_coverage:
+        return False
+    return True
+
+
+def _collect_improvement_gaps(deck: list[str], db) -> list[dict]:
+    """Только реальные пробелы — если роль уже закрыта картами в колоде, замечания нет."""
+    if len(deck) != 8:
+        return []
+
+    stats = analyze_deck(deck)
+    deck_set = set(deck)
+    gaps: list[dict] = []
+
+    def add(category: str, message: str, suggested: list[str]) -> None:
+        missing = [c for c in suggested if c not in deck_set][:4]
+        if not missing:
+            return
+        gaps.append({
+            "category": category,
+            "message": message,
+            "suggested_cards": missing,
+        })
+
+    has_spells = bool(stats.spells) or any(_is_spell(db, c) for c in deck)
+    if not has_spells:
+        add(
+            "spells",
+            "В колоде нет заклинаний — сложнее контролировать поле и добивать башни",
+            ["The Log", "Fireball", "Zap", "Arrows"],
+        )
+    elif not _has_finisher(deck, db):
+        add(
+            "finishers",
+            "Мало добивающих заклинаний — добавьте Fireball или Rocket для финиша",
+            ["Fireball", "Rocket", "Lightning"],
+        )
+
+    if not stats.air_coverage:
+        add(
+            "anti_air",
+            "Слабая защита от воздуха — Balloon и Minions будут опасны",
+            ["Musketeer", "Mega Minion", "Inferno Dragon", "Tesla", "Archers"],
+        )
+
+    if not stats.splash_coverage:
+        add(
+            "splash",
+            "Нет сплеша — спам и связки Goblin Gang / Skeleton Army сложно зачищать",
+            ["Valkyrie", "Wizard", "Baby Dragon", "Fireball", "Arrows"],
+        )
+
+    if _needs_building(deck, stats, db):
+        add(
+            "defense",
+            "Нет построек — Hog Rider и Balloon сложнее останавливать на мосту",
+            ["Cannon", "Tesla", "Tombstone", "Inferno Tower"],
+        )
+
+    if not stats.point_target_coverage:
+        add(
+            "point_target",
+            "Нет ответа на точечный урон — Стражи держат P.E.K.K.A, Мини P.E.K.K.A, Хог и подобных",
+            ["Guards", "Knight", "Ice Golem", "Skeleton Army"],
+        )
+
+    if not _has_small_spell_answer(deck):
+        add(
+            "swarm",
+            "Нет дешёвого ответа на спам — Zap или Ice Spirit сильно помогут в цикле",
+            list(_SMALL_SPELLS),
+        )
+
+    if stats.avg_elixir > 4.2 and not any(ROLE_CYCLE in _card_roles(db, c) for c in deck):
+        add(
+            "cycle",
+            f"Тяжёлая колода ({stats.avg_elixir} эл.) — добавьте дешёвый цикл для давления",
+            ["Skeletons", "Ice Spirit", "Electro Spirit", "Ice Golem"],
+        )
+
+    if not stats.win_conditions:
+        add(
+            "win_condition",
+            "Нет явного win-condition — добавьте карту для урона по башне",
+            ["Hog Rider", "Balloon", "Royal Giant", "Miner", "Goblin Barrel"],
+        )
+
+    return gaps
+
+
+def _swap_keeps_balance(deck: list[str], drop: str, pick: str, db) -> bool:
+    before = analyze_deck(deck)
+    after_deck = list(deck)
+    after_deck[after_deck.index(drop)] = pick
+    after = analyze_deck(after_deck)
+
+    if before.air_coverage and not after.air_coverage:
+        return False
+    if before.splash_coverage and not after.splash_coverage:
+        return False
+    if before.point_target_coverage and not after.point_target_coverage:
+        return False
+    if _has_finisher(deck, db) and not _has_finisher(after_deck, db):
+        return False
+    if _has_small_spell_answer(deck) and not _has_small_spell_answer(after_deck):
+        return False
+    return True
+
+
+def _locked_cards(deck: list[str], db) -> set[str]:
+    """Win-condition и заклинания игрока не трогаем."""
+    locked: set[str] = set()
     for card in deck:
-        if card in locked:
-            continue
+        if _is_win(db, card) or card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
+            locked.add(card)
         if _is_spell(db, card) or get_card_role(card) == "spell":
             locked.add(card)
     return locked
@@ -82,22 +231,31 @@ def _avg_synergy_with_deck(db, card: str, deck: list[str]) -> float:
 def _pick_replaceable(
     deck: list[str],
     locked: set[str],
+    db,
     *,
     avoid_roles: frozenset[str] | None = None,
 ) -> str | None:
-    candidates = [c for c in deck if c not in locked]
+    protected = locked | _defensive_core_cards(deck, db)
+    candidates = [
+        c for c in deck
+        if c not in protected
+        and not (_is_win(db, c) or c in WIN_CONDITIONS or get_card_role(c) == "win_condition")
+    ]
     if not candidates:
         return None
 
-    def rank(card: str) -> tuple[int, int, float, int]:
-        roles = _card_roles(get_database(), card)
-        penalty = 1 if avoid_roles and roles & avoid_roles else 0
-        generic = 0 if card in GENERIC_CARDS else 1
-        syn = _avg_synergy_with_deck(get_database(), card, deck)
-        elixir = get_card_elixir(card)
-        return (penalty, generic, syn, -elixir)
+    generic = [c for c in candidates if c in GENERIC_CARDS]
+    pool = generic or candidates
 
-    return min(candidates, key=rank)
+    def rank(card: str) -> tuple[int, int, float, int]:
+        roles = _card_roles(db, card)
+        penalty = 1 if avoid_roles and roles & avoid_roles else 0
+        generic_rank = 0 if card in GENERIC_CARDS else 1
+        syn = _avg_synergy_with_deck(db, card, deck)
+        elixir = get_card_elixir(card)
+        return (penalty, generic_rank, syn, -elixir)
+
+    return min(pool, key=rank)
 
 
 def _pick_replacement(
@@ -182,42 +340,6 @@ def _fix_elixir_if_needed(deck: list[str], pool: set[str], locked: set[str], iss
     return True
 
 
-def _fix_too_many_wins(
-    deck: list[str],
-    locked: set[str],
-    pool: set[str],
-    archetype: str,
-    issues: list[str],
-    db,
-) -> bool:
-    wins = [c for c in deck if _is_win(db, c)]
-    if len(wins) <= MAX_WINS:
-        return False
-
-    removable = [c for c in wins if c not in locked]
-    if not removable:
-        return False
-
-    drop = removable[0]
-    pick = _pick_replacement(
-        deck,
-        pool,
-        locked,
-        archetype,
-        role=ROLE_DEFENSIVE,
-        suggestions=["The Log", "Zap", "Fireball", "Musketeer", "Ice Golem"],
-        db=db,
-    )
-    if not pick:
-        pick = _pick_replacement(deck, pool, locked, archetype, role=ROLE_CYCLE, db=db)
-    if not pick:
-        return False
-
-    deck[deck.index(drop)] = pick
-    issues.append(f"🎯 {_card_ru(drop)} → {_card_ru(pick)}: лишний win-condition")
-    return True
-
-
 def _apply_suggestion(
     deck: list[str],
     pool: set[str],
@@ -232,7 +354,7 @@ def _apply_suggestion(
     suggested_cards = suggestion.get("suggested_cards") or []
 
     if category == "focus":
-        return _fix_too_many_wins(deck, locked, pool, archetype, issues, db)
+        return False
 
     role = _CATEGORY_ROLE.get(category)
     avoid_roles: frozenset[str] | None = None
@@ -241,9 +363,9 @@ def _apply_suggestion(
     elif category == "point_target":
         avoid_roles = frozenset({ROLE_ANTI_TANK, ROLE_DEFENSIVE})
     elif category == "defense":
-        avoid_roles = frozenset({ROLE_BUILDING, ROLE_DEFENSIVE})
+        avoid_roles = frozenset({ROLE_BUILDING, ROLE_DEFENSIVE, ROLE_SPLASH})
 
-    drop = _pick_replaceable(deck, locked, avoid_roles=avoid_roles)
+    drop = _pick_replaceable(deck, locked, db, avoid_roles=avoid_roles)
     if not drop:
         return False
 
@@ -263,6 +385,10 @@ def _apply_suggestion(
         return False
     if _is_spell(db, pick) and _count_spells(deck, db) >= MAX_SPELLS:
         return False
+    if _is_win(db, drop) or drop in WIN_CONDITIONS:
+        return False
+    if not _swap_keeps_balance(deck, drop, pick, db):
+        return False
 
     deck[deck.index(drop)] = pick
     issues.append(f"🔧 {_card_ru(drop)} → {_card_ru(pick)}: {message}")
@@ -276,12 +402,6 @@ def _trim_spell_and_win_limits(deck: list[str], locked: set[str], db) -> None:
             break
         worst = min(removable, key=lambda c: _avg_synergy_with_deck(db, c, deck))
         deck.remove(worst)
-
-    while _count_wins(deck, db) > MAX_WINS:
-        extra = [c for c in deck if _is_win(db, c) and c not in locked]
-        if not extra:
-            break
-        deck.remove(extra[0])
 
 
 def _build_synergy_map(deck: list[str], locked: set[str], pool: set[str]) -> dict[str, list[str]]:
@@ -330,7 +450,7 @@ def improve_player_deck(
     locked = _locked_cards(deck, db)
     archetype = _detect_archetype(list(locked) or deck)
 
-    suggestions = _suggest_improvements(deck)
+    suggestions = _collect_improvement_gaps(deck, db)
     needs_balance = bool(suggestions) or arena_changed
 
     if not needs_balance:
@@ -347,11 +467,6 @@ def improve_player_deck(
 
     if not arena_changed:
         _fix_elixir_if_needed(deck, pool, locked, issues)
-
-    if _count_wins(deck, db) > MAX_WINS:
-        _fix_too_many_wins(deck, locked, pool, archetype, issues, db)
-        locked = _locked_cards(deck, db)
-        suggestions = _suggest_improvements(deck)
 
     for suggestion in suggestions:
         if len(deck) != 8:

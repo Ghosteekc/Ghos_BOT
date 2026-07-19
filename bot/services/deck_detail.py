@@ -152,7 +152,9 @@ def _suggest_improvements(cards: list[str]) -> list[dict]:
             _SPLASH_SUGGESTIONS,
         )
 
-    if not stats.buildings:
+    if not stats.buildings and not (
+        stats.air_coverage and stats.splash_coverage and stats.point_target_coverage
+    ):
         add(
             "defense",
             "Нет построек — Hog Rider и Balloon сложнее останавливать на мосту",
@@ -180,10 +182,10 @@ def _suggest_improvements(cards: list[str]) -> list[dict]:
             _CYCLE_SUGGESTIONS,
         )
 
-    if len(stats.win_conditions) > 1:
+    if len(stats.win_conditions) > 2:
         add(
             "focus",
-            "Несколько win-condition — оставьте одну основную атакующую карту",
+            "Слишком много win-condition — колода теряет фокус",
             [],
             force=True,
         )
