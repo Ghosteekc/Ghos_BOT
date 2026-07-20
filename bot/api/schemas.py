@@ -46,6 +46,8 @@ class CollectionCardEntry(BaseModel):
     elixir: int | None = None
     evolution_level: int = 0
     max_evolution_level: int = 0
+    has_evolution_unlocked: bool = False
+    has_hero_unlocked: bool = False
     display_mode: str = "base"
     icon: str = ""
     icon_base: str = ""

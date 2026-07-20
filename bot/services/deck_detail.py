@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bot.services.card_data import COUNTERS, get_card_role, is_pure_spell
 from bot.services.deck_builder.builder import _is_spell
 from bot.services.deck_builder.loader import get_database
 from bot.services.card_names_ru import card_name_ru

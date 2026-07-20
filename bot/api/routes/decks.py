@@ -49,6 +49,7 @@ from bot.services.counter_engine import (
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates, get_most_played_cards
 from bot.services.arena_decks import build_classic_meta_entries, get_arena_popular_decks
 from bot.services.deck_constructor import build_constructor_decks
+from bot.services.deck_compare import compare_decks
 from bot.services.deck_detail import build_mine_deck_stats
 from bot.services.top_players import get_top_players
 from bot.services.meta_analyzer import _guess_deck_name
