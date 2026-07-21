@@ -11,7 +11,7 @@
 | **Несколько копий** | Два `npx localtunnel --port 8080` → конфликты и путаница с URL |
 | **Subdomain «busy» после перезагрузки ПК** | Имена на loca.lt **глобальные**; сервер держит «зомби»-резерв часами. Перезагрузка ПК не помогает. Используйте другое имя: `-Subdomain ghosteekcr2` |
 
-**Вывод:** голый `npx localtunnel` в Cursor — не «постоянный» режим. Нужно отдельное окно + автоперезапуск (скрипт ниже) или Cloudflare Tunnel.
+**Вывод:** голый `npx localtunnel` в Cursor — не «постоянный» режим. Нужно отдельное окно + автоперезапуск (скрипт ниже).
 
 Проверка:
 
@@ -53,17 +53,5 @@ cd G:\проги\ss\scripts\localtunnel
 - пишет URL в `tunnel-url.txt`.
 
 **Не закрывайте окно 2.**
-
----
-
-## Более стабильная альтернатива
-
-Cloudflare Tunnel реже падает, чем loca.lt:
-
-```powershell
-.\scripts\cloudflare-tunnel\start-quick.ps1
-```
-
-Named Tunnel — **постоянный** URL на своём домене (см. `scripts/cloudflare-tunnel/README.md`).
 
 Статус loca.lt: https://status.loca.lt

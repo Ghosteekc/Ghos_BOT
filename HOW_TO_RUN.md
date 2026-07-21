@@ -75,7 +75,7 @@ FastAPI будет раздавать собранный frontend из `webapp/d
 | Компонент | Где работает |
 |-----------|--------------|
 | **Backend** (бот + API) | Ваш ПК или VPS: `python -m bot.main` |
-| **HTTPS для API** | [localtunnel](scripts/localtunnel/README.md) или [Cloudflare Tunnel](scripts/cloudflare-tunnel/README.md) |
+| **HTTPS для API** | [localtunnel](scripts/localtunnel/README.md) |
 | **Mini App** | [Vercel](https://vercel.com) (отдельный репозиторий `webapp`) |
 | **Clash Royale API** | Прямой доступ или VPS-прокси ([cr-proxy](scripts/cr-proxy/README.md)) |
 
