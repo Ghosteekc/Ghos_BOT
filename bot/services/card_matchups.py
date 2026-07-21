@@ -187,6 +187,34 @@ def synergy_between(a: str, b: str) -> str | None:
     return None
 
 
+_SPIRIT_CARDS = frozenset({"Ice Spirit", "Fire Spirit", "Electro Spirit", "Heal Spirit"})
+
+
+def _is_spirit_card(name: str) -> bool:
+    return name in _SPIRIT_CARDS
+
+
+def _is_attacking_card(name: str) -> bool:
+    return is_offense_win_condition(name)
+
+
+def is_valid_synergy_pair(a: str, b: str) -> bool:
+    """Синергия только с участием атакующей карты; духи/здания/заклинания — не между собой."""
+    if a == b:
+        return False
+    if _is_spirit_card(a) and (is_pure_spell(b) or is_building(b)):
+        return False
+    if _is_spirit_card(b) and (is_pure_spell(a) or is_building(a)):
+        return False
+    if is_pure_spell(a) and is_building(b):
+        return False
+    if is_pure_spell(b) and is_building(a):
+        return False
+    if is_pure_spell(a) and is_pure_spell(b):
+        return False
+    return _is_attacking_card(a) or _is_attacking_card(b)
+
+
 def synergy_partners(
     card: str,
     pool: list[str] | None = None,
@@ -241,6 +269,17 @@ def calculate_matchup_score(defender_deck: list[str], attacker_deck: list[str]) 
     return round(max(0.0, min(100.0, base)), 1)
 
 
+def _synergy_tier_pair(a: str, b: str) -> str | None:
+    """Сильнейший уровень синергии для неупорядоченной пары."""
+    tier_a = synergy_between(a, b)
+    tier_b = synergy_between(b, a)
+    if tier_a == "strong" or tier_b == "strong":
+        return "strong"
+    if tier_a == "partial" or tier_b == "partial":
+        return "partial"
+    return None
+
+
 def calculate_deck_synergy(cards: list[str]) -> tuple[float, list[str]]:
     """Оценка внутренней синергии колоды 0–100 и короткие строки на русском."""
     if len(cards) < 2:
@@ -249,17 +288,21 @@ def calculate_deck_synergy(cards: list[str]) -> tuple[float, list[str]]:
     total = 0.0
     pairs = 0
     highlights: list[str] = []
+    seen_highlight_keys: set[tuple[str, str]] = set()
 
-    for a in cards:
-        for b in cards:
-            if a == b:
+    for i, a in enumerate(cards):
+        for b in cards[i + 1 :]:
+            if not is_valid_synergy_pair(a, b):
                 continue
-            tier = synergy_between(a, b)
+            tier = _synergy_tier_pair(a, b)
             pairs += 1
             if tier == "strong":
                 total += 1.0
-                if len(highlights) < 6:
-                    highlights.append(f"{ru(a)} + {ru(b)}")
+                key = tuple(sorted((a, b)))
+                if key not in seen_highlight_keys and len(highlights) < 6:
+                    seen_highlight_keys.add(key)
+                    left, right = sorted((a, b))
+                    highlights.append(f"{ru(left)} + {ru(right)}")
             elif tier == "partial":
                 total += 0.35
 
