@@ -63,7 +63,7 @@ ARCHETYPE_ELIXIR: dict[str, tuple[float, float]] = {
     "Meta": (2.8, 4.4),
 }
 
-# Приоритет добора (шаг 4)
+# Приоритет добора (legacy; в finalize используется scoring, не жёсткий цикл).
 FILL_PRIORITY: list[str] = [
     ROLE_WIN,
     ROLE_BIG_SPELL,

@@ -193,6 +193,20 @@ class ConstructorRequest(BaseModel):
     slots: list[ConstructorSlotRequest]
 
 
+class ScoreBreakdownEntry(BaseModel):
+    synergy: float = 0.0
+    offense: float = 0.0
+    defense: float = 0.0
+    anti_air: float = 0.0
+    anti_swarm: float = 0.0
+    spell_balance: float = 0.0
+    elixir: float = 0.0
+    archetype_fit: float = 0.0
+    total: float = 0.0
+    hard_issues: list[str] = []
+    soft_issues: list[str] = []
+
+
 class ConstructorDeckEntry(BaseModel):
     id: int
     name: str = ""
@@ -206,6 +220,8 @@ class ConstructorDeckEntry(BaseModel):
     category: str = "custom"
     archetype: str = ""
     confidence: float = 0.0
+    balanced: bool = True
+    score_breakdown: ScoreBreakdownEntry | None = None
 
 
 class ConstructorResponse(BaseModel):

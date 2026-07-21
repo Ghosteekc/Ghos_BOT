@@ -6,29 +6,23 @@ from dataclasses import dataclass
 
 from bot.services.card_data import WIN_CONDITIONS, get_card_elixir
 from bot.services.card_matchups import calculate_deck_synergy, synergy_between
+from bot.services.deck_builder.balance import (
+    ScoreBreakdown,
+    compute_score_breakdown,
+    finalize_deck as balance_finalize_deck,
+    hard_constraint_issues,
+    is_playable_balanced,
+    is_spell,
+    is_win,
+)
 from bot.services.deck_builder.constants import (
     ARCHETYPE_ANCHORS,
     ARCHETYPE_ELIXIR,
     ARCHETYPE_PRIMARY_WIN,
     DEFAULT_ELIXIR_MAX,
     DEFAULT_ELIXIR_MIN,
-    FILL_PRIORITY,
     GENERIC_CARDS,
     KNOWN_SYNERGY_PAIRS,
-    MAX_SPELLS,
-    MAX_WINS,
-    ROLE_AIR,
-    ROLE_ANTI_SWARM,
-    ROLE_ANTI_TANK,
-    ROLE_BIG_SPELL,
-    ROLE_BUILDING,
-    ROLE_COUNTERPUSH,
-    ROLE_CYCLE,
-    ROLE_DEFENSIVE,
-    ROLE_DPS,
-    ROLE_MINI_TANK,
-    ROLE_SMALL_SPELL,
-    ROLE_WIN,
     SYNERGY_PARTIAL,
     SYNERGY_STRONG,
     SYNERGY_WEAK,
@@ -50,6 +44,7 @@ class BuildResult:
     confidence: float
     source_deck_id: str | None = None
     balanced: bool = True
+    score_breakdown: ScoreBreakdown | None = None
 
 
 @dataclass
@@ -65,20 +60,6 @@ def _avg_elixir(cards: list[str], db: DeckDatabase) -> float:
         return 0.0
     total = sum(db.get_card(c).elixir if db.get_card(c) else get_card_elixir(c) for c in cards)
     return round(total / len(cards), 2)
-
-
-def _card_roles(db: DeckDatabase, name: str) -> frozenset[str]:
-    rec = db.get_card(name)
-    return rec.roles if rec else frozenset()
-
-
-def _is_spell(db: DeckDatabase, name: str) -> bool:
-    roles = _card_roles(db, name)
-    return "spell" in roles or ROLE_SMALL_SPELL in roles or ROLE_BIG_SPELL in roles
-
-
-def _is_win(db: DeckDatabase, name: str) -> bool:
-    return name in WIN_CONDITIONS or ROLE_WIN in _card_roles(db, name)
 
 
 def _detect_archetype(core: list[str]) -> str:
@@ -223,69 +204,24 @@ def _rank_similar_decks(db: DeckDatabase, core: list[str], archetype: str, *, li
     return scored[:limit]
 
 
-def _elixir_bounds(archetype: str) -> tuple[float, float]:
-    return ARCHETYPE_ELIXIR.get(archetype, (DEFAULT_ELIXIR_MIN, DEFAULT_ELIXIR_MAX))
-
-
-def _count_spells(deck: list[str], db: DeckDatabase) -> int:
-    return sum(1 for c in deck if _is_spell(db, c))
-
-
-def _count_wins(deck: list[str], db: DeckDatabase) -> int:
-    return sum(1 for c in deck if _is_win(db, c))
-
-
-def _balance_issues(deck: list[str], db: DeckDatabase, archetype: str) -> list[str]:
-    lo, hi = _elixir_bounds(archetype)
-    issues: list[str] = []
-    avg = _avg_elixir(deck, db)
-
-    if not any(_is_win(db, c) for c in deck):
-        issues.append("win_condition")
-    if _count_wins(deck, db) > MAX_WINS:
-        issues.append("too_many_wins")
-    if not any(ROLE_BIG_SPELL in _card_roles(db, c) for c in deck):
-        issues.append("big_spell")
-    if not any(ROLE_SMALL_SPELL in _card_roles(db, c) for c in deck):
-        issues.append("small_spell")
-    if _count_spells(deck, db) > MAX_SPELLS:
-        issues.append("too_many_spells")
-    if sum(1 for c in deck if ROLE_AIR in _card_roles(db, c)) < 2:
-        issues.append("air_defense")
-    if not any(ROLE_ANTI_TANK in _card_roles(db, c) for c in deck):
-        issues.append("anti_tank")
-    if not any(ROLE_DEFENSIVE in _card_roles(db, c) for c in deck):
-        issues.append("defensive")
-    if not any(ROLE_ANTI_SWARM in _card_roles(db, c) for c in deck):
-        issues.append("anti_swarm")
-    if avg < lo - 0.4 or avg > hi + 0.4:
-        issues.append("elixir")
-    return issues
-
-
-def _pick_for_role(
+def _build_score_breakdown(
     deck: list[str],
-    db: DeckDatabase,
-    pool: set[str],
-    role: str,
     core: list[str],
+    db: DeckDatabase,
     archetype: str,
-) -> str | None:
-    lo, hi = _elixir_bounds(archetype)
-    mid = (lo + hi) / 2
-    candidates = [
-        c for c in pool
-        if c not in deck and role in _card_roles(db, c)
-    ]
-    if not candidates:
-        return None
+) -> ScoreBreakdown:
+    return compute_score_breakdown(deck, db, core, archetype, pair_synergy=lambda a, b: _pair_synergy(db, a, b))
 
-    def rank(card: str) -> tuple[float, float]:
-        syn = sum(_pair_synergy(db, card, x) for x in deck) / max(len(deck), 1)
-        elixir_penalty = abs(_avg_elixir(deck + [card], db) - mid)
-        return (-syn, elixir_penalty)
 
-    return min(candidates, key=rank)
+def _result_balanced(deck: list[str], core: list[str], db: DeckDatabase, archetype: str) -> bool:
+    breakdown = _build_score_breakdown(deck, core, db, archetype)
+    core_avg = sum(
+        _pair_synergy(db, c, d)
+        for c in core
+        for d in deck
+        if c != d
+    ) / max(len(core) * max(len(deck) - 1, 1), 1)
+    return is_playable_balanced(breakdown, core_synergy_avg=core_avg)
 
 
 def _fillers_from_template(core: list[str], template: DeckRecord, db: DeckDatabase) -> list[str]:
@@ -294,11 +230,11 @@ def _fillers_from_template(core: list[str], template: DeckRecord, db: DeckDataba
     wins = [c for c in template.cards if c not in core_set and c in WIN_CONDITIONS]
     troops = [
         c for c in template.cards
-        if c not in core_set and c not in WIN_CONDITIONS and not _is_spell(db, c) and c not in GENERIC_CARDS
+        if c not in core_set and c not in WIN_CONDITIONS and not is_spell(db, c) and c not in GENERIC_CARDS
     ]
     spells = [
         c for c in template.cards
-        if c not in core_set and _is_spell(db, c) and c not in GENERIC_CARDS
+        if c not in core_set and is_spell(db, c) and c not in GENERIC_CARDS
     ]
     generic = [c for c in template.cards if c not in core_set and c in GENERIC_CARDS]
     ordered = ([] if core_has_win else wins[:1]) + troops + spells + generic
@@ -312,79 +248,14 @@ def _finalize_deck(
     pool: set[str],
     archetype: str,
 ) -> list[str]:
-    core_set = set(core)
-    out = list(dict.fromkeys(core + [c for c in deck if c not in core_set]))
-
-    while _count_spells(out, db) > MAX_SPELLS:
-        removable = [c for c in out if _is_spell(db, c) and c not in core_set]
-        if not removable:
-            break
-        out.remove(min(removable, key=lambda c: sum(_pair_synergy(db, c, x) for x in out if x != c)))
-
-    while _count_wins(out, db) > MAX_WINS:
-        extra = [c for c in out if _is_win(db, c) and c not in core_set]
-        if not extra:
-            break
-        out.remove(extra[0])
-
-    if not any(_is_win(db, c) for c in out):
-        preferred = ARCHETYPE_PRIMARY_WIN.get(archetype, [])
-        win_pick = next((w for w in preferred if w in pool and w not in out), None)
-        if not win_pick:
-            candidates = [c for c in pool if c not in out and c in WIN_CONDITIONS and not _is_spell(db, c)]
-            win_pick = max(candidates, key=lambda c: sum(_pair_synergy(db, c, x) for x in out), default=None)
-        if win_pick:
-            if len(out) >= 8:
-                fillers = [c for c in out if c not in core_set]
-                if fillers:
-                    worst = min(fillers, key=lambda c: sum(_pair_synergy(db, c, x) for x in out))
-                    out[out.index(worst)] = win_pick
-            else:
-                out.append(win_pick)
-
-    issues = _balance_issues(out, db, archetype)
-    for role in FILL_PRIORITY:
-        while len(out) < 8 and role in issues:
-            pick = _pick_for_role(out, db, pool, role, core, archetype)
-            if not pick:
-                break
-            if _is_spell(db, pick) and _count_spells(out, db) >= MAX_SPELLS:
-                break
-            if _is_win(db, pick) and _count_wins(out, db) >= MAX_WINS:
-                break
-            out.append(pick)
-            issues = _balance_issues(out, db, archetype)
-
-    extras = sorted(
-        [c for c in pool if c not in out and not _is_spell(db, c)],
-        key=lambda c: -sum(_pair_synergy(db, c, x) for x in out),
+    return balance_finalize_deck(
+        deck,
+        core,
+        db,
+        pool,
+        archetype,
+        lambda a, b: _pair_synergy(db, a, b),
     )
-    for card in extras:
-        if len(out) >= 8:
-            break
-        if _is_win(db, card) and _count_wins(out, db) >= MAX_WINS:
-            continue
-        out.append(card)
-
-    while _count_spells(out, db) > MAX_SPELLS:
-        removable = [c for c in out if _is_spell(db, c) and c not in core_set]
-        if not removable:
-            break
-        out.remove(min(removable, key=lambda c: sum(_pair_synergy(db, c, x) for x in out)))
-
-    while len(out) > 8:
-        droppable = [c for c in out if c not in core_set]
-        if not droppable:
-            break
-        out.remove(min(droppable, key=lambda c: sum(_pair_synergy(db, c, x) for x in out)))
-
-    while len(out) < 8:
-        extra = next((c for c in pool if c not in out and not _is_spell(db, c)), None)
-        if not extra:
-            break
-        out.append(extra)
-
-    return out[:8]
 
 
 def _build_one_variant(
@@ -427,8 +298,8 @@ def build_deck_from_core(
     ranked = _rank_similar_decks(db, core, archetype, limit=6)
     best = ranked[0] if ranked else None
     deck = _build_one_variant(core, db, pool, archetype, best.record if best else None)
-    issues = _balance_issues(deck, db, archetype)
     synergy_score, _ = calculate_deck_synergy(deck)
+    breakdown = _build_score_breakdown(deck, core, db, archetype)
 
     return BuildResult(
         deck=deck,
@@ -437,7 +308,8 @@ def build_deck_from_core(
         synergy_score=round(synergy_score, 1),
         confidence=round(best.confidence if best else 35.0, 1),
         source_deck_id=best.record.id if best else None,
-        balanced=len(issues) == 0,
+        balanced=_result_balanced(deck, core, db, archetype),
+        score_breakdown=breakdown,
     )
 
 
@@ -463,21 +335,24 @@ def build_multiple_decks(
             break
         for filler_skip in (0, 1, 2):
             deck = _build_one_variant(core, db, pool, archetype, sd.record, filler_skip=filler_skip)
-            if len(deck) != 8 or "win_condition" in _balance_issues(deck, db, sd.record.archetype):
+            arch = sd.record.archetype
+            if len(deck) != 8 or hard_constraint_issues(deck, db, core):
                 continue
             key = _deck_key(deck)
             if key in seen:
                 continue
             seen.add(key)
             synergy_score, _ = calculate_deck_synergy(deck)
+            breakdown = _build_score_breakdown(deck, core, db, arch)
             results.append(BuildResult(
                 deck=deck,
-                archetype=sd.record.archetype,
+                archetype=arch,
                 average_elixir=_avg_elixir(deck, db),
                 synergy_score=round(synergy_score, 1),
                 confidence=round(sd.confidence, 1),
                 source_deck_id=sd.record.id,
-                balanced=len(_balance_issues(deck, db, sd.record.archetype)) == 0,
+                balanced=_result_balanced(deck, core, db, arch),
+                score_breakdown=breakdown,
             ))
             break
 
@@ -486,29 +361,37 @@ def build_multiple_decks(
         key = _deck_key(deck)
         seen.add(key)
         synergy_score, _ = calculate_deck_synergy(deck)
+        breakdown = _build_score_breakdown(deck, core, db, archetype)
         results.append(BuildResult(
             deck=deck,
             archetype=archetype,
             average_elixir=_avg_elixir(deck, db),
             synergy_score=round(synergy_score, 1),
             confidence=35.0,
-            balanced=len(_balance_issues(deck, db, archetype)) == 0,
+            balanced=_result_balanced(deck, core, db, archetype),
+            score_breakdown=breakdown,
         ))
 
     fallback = _finalize_deck(core, core, db, pool, archetype)
     fkey = _deck_key(fallback)
     if fkey not in seen and len(results) < limit:
         synergy_score, _ = calculate_deck_synergy(fallback)
+        breakdown = _build_score_breakdown(fallback, core, db, archetype)
         results.append(BuildResult(
             deck=fallback,
             archetype=archetype,
             average_elixir=_avg_elixir(fallback, db),
             synergy_score=round(synergy_score, 1),
             confidence=30.0,
-            balanced=len(_balance_issues(fallback, db, archetype)) == 0,
+            balanced=_result_balanced(fallback, core, db, archetype),
+            score_breakdown=breakdown,
         ))
 
-    results.sort(key=lambda r: -(r.synergy_score + r.confidence))
+    def _rank_key(r: BuildResult) -> float:
+        total = r.score_breakdown.total if r.score_breakdown else 0.0
+        return total * 0.5 + r.synergy_score * 0.3 + r.confidence * 0.2
+
+    results.sort(key=lambda r: -_rank_key(r))
     return _dedupe_build_results(results)[:limit]
 
 
@@ -526,3 +409,51 @@ def _dedupe_build_results(results: list[BuildResult]) -> list[BuildResult]:
         seen.add(key)
         out.append(item)
     return out
+
+
+# Совместимость для deck_improver / deck_detail (не используются в finalize).
+def _card_roles(db: DeckDatabase, name: str) -> frozenset[str]:
+    rec = db.get_card(name)
+    return rec.roles if rec else frozenset()
+
+
+def _count_spells(deck: list[str], db: DeckDatabase) -> int:
+    return sum(1 for c in deck if is_spell(db, c))
+
+
+def _count_wins(deck: list[str], db: DeckDatabase) -> int:
+    return sum(1 for c in deck if is_win(db, c))
+
+
+def _is_spell(db: DeckDatabase, name: str) -> bool:
+    return is_spell(db, name)
+
+
+def _is_win(db: DeckDatabase, name: str) -> bool:
+    return is_win(db, name)
+
+
+def _elixir_bounds(archetype: str) -> tuple[float, float]:
+    return ARCHETYPE_ELIXIR.get(archetype, (DEFAULT_ELIXIR_MIN, DEFAULT_ELIXIR_MAX))
+
+
+def _pick_for_role(
+    deck: list[str],
+    db: DeckDatabase,
+    pool: set[str],
+    role: str,
+    core: list[str],
+    archetype: str,
+) -> str | None:
+    lo, hi = _elixir_bounds(archetype)
+    mid = (lo + hi) / 2
+    candidates = [c for c in pool if c not in deck and role in _card_roles(db, c)]
+    if not candidates:
+        return None
+
+    def rank(card: str) -> tuple[float, float]:
+        syn = sum(_pair_synergy(db, card, x) for x in deck) / max(len(deck), 1)
+        elixir_penalty = abs(_avg_elixir(deck + [card], db) - mid)
+        return (-syn, elixir_penalty)
+
+    return min(candidates, key=rank)

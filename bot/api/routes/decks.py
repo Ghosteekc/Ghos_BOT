@@ -408,6 +408,8 @@ async def deck_constructor(
                 category=d.get("category", "custom"),
                 archetype=d.get("archetype", ""),
                 confidence=d.get("confidence", 0),
+                balanced=d.get("balanced", True),
+                score_breakdown=d.get("score_breakdown"),
             )
             for d in result["decks"]
         ],

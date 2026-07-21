@@ -90,6 +90,8 @@ def _build_deck_entry(
     confidence: float,
     synergy_score: float,
     synergy_notes: list[str],
+    balanced: bool = True,
+    score_breakdown: dict | None = None,
 ) -> dict | None:
     core_names = [c["name"] for c in core_parsed]
     if len(deck_names) != 8 or len(set(deck_names)) != 8:
@@ -118,14 +120,15 @@ def _build_deck_entry(
 
     stats = analyze_deck(deck_names)
     category = _category_from_archetype(archetype)
-    desc = f"Синергия {round(synergy_score, 0):.0f}% · эликсир {stats.avg_elixir}"
+    total = score_breakdown.get("total", 0) if score_breakdown else 0
+    desc = f"Синергия {round(synergy_score, 0):.0f}% · баланс {round(total, 0):.0f} · эликсир {stats.avg_elixir}"
 
     return {
         "id": id_offset,
         "name": name,
         "cards": [deck_card_info_from_parsed(c, slot=i) for i, c in enumerate(out_parsed)],
         "synergy_score": round(synergy_score, 1),
-        "total_score": round(synergy_score * 0.6 + confidence * 0.4, 1),
+        "total_score": round(total * 0.5 + synergy_score * 0.3 + confidence * 0.2, 1),
         "synergy_notes": synergy_notes[:4],
         "avg_elixir": stats.avg_elixir,
         "deck_link": build_deck_share_link(deck_names),
@@ -134,6 +137,8 @@ def _build_deck_entry(
         "description": desc,
         "archetype": archetype,
         "confidence": round(confidence, 1),
+        "balanced": balanced,
+        "score_breakdown": score_breakdown,
     }
 
 
@@ -167,6 +172,8 @@ def build_constructor_decks(
             confidence=result.confidence,
             synergy_score=synergy_score or result.synergy_score,
             synergy_notes=synergy_notes,
+            balanced=result.balanced,
+            score_breakdown=result.score_breakdown.as_dict() if result.score_breakdown else None,
         )
         if entry:
             decks.append(entry)
