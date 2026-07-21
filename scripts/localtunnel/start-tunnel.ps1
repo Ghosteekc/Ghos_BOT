@@ -74,43 +74,48 @@ function Save-TunnelUrl {
     return $true
 }
 
-function Read-ProcessLines {
+function Process-LtOutputLine {
     param(
-        [System.Diagnostics.Process]$Process,
+        [string]$Line,
         [ref]$SavedUrl,
-        [ref]$WrongSubdomain,
-        [ref]$RandomUrl,
         [switch]$AcceptRandom
     )
 
-    foreach ($stream in @($Process.StandardOutput, $Process.StandardError)) {
-        while ($stream.Peek() -ge 0) {
-            $line = $stream.ReadLine()
-            if (-not $line) { continue }
-            Write-LogLine $line
-            if ($line -match "(https://[\w-]+\.loca\.lt)") {
-                $url = $Matches[1]
-                if ($SavedUrl.Value) { continue }
-                if (Test-SubdomainUrl -Url $url) {
-                    if (Save-TunnelUrl -Url $url) {
-                        $SavedUrl.Value = $true
-                    }
-                } elseif ($AcceptRandom) {
-                    if (Save-TunnelUrl -Url $url -Force) {
-                        $SavedUrl.Value = $true
-                        $RandomUrl.Value = $url
-                    }
-                } else {
-                    Write-LogLine "Subdomain '$Subdomain' busy on loca.lt - got random URL: $url" "Red"
-                    Write-LogLine "This is NOT your PC: the name is reserved globally on loca.lt (often hours after disconnect)." "DarkGray"
-                    Write-LogLine "Killing wrong tunnel, will retry for '$Subdomain'..." "Yellow"
-                    $WrongSubdomain.Value = $true
-                    $RandomUrl.Value = $url
-                    return
-                }
-            }
-        }
+    if (-not $Line) { return $false }
+
+    Write-LogLine $Line
+
+    if ($Line -notmatch "(https://[\w-]+\.loca\.lt)") {
+        return $false
     }
+
+    $url = $Matches[1]
+    if ($SavedUrl.Value) { return $false }
+
+    if (Test-SubdomainUrl -Url $url) {
+        if (Save-TunnelUrl -Url $url) {
+            $SavedUrl.Value = $true
+        }
+        return $false
+    }
+
+    if ($AcceptRandom) {
+        if (Save-TunnelUrl -Url $url -Force) {
+            $SavedUrl.Value = $true
+        }
+        return $false
+    }
+
+    if ($Subdomain) {
+        Write-LogLine "Subdomain '$Subdomain' busy — loca.lt выдал: $url" "Red"
+        Write-LogLine "Подождите и перезапустите скрипт, или: -AllowRandomFallback" "Yellow"
+        return $true
+    }
+
+    if (Save-TunnelUrl -Url $url) {
+        $SavedUrl.Value = $true
+    }
+    return $false
 }
 
 function Start-LocalTunnelSession {
@@ -119,63 +124,40 @@ function Start-LocalTunnelSession {
         [switch]$AcceptRandom
     )
 
-    $argText = ($Arguments | ForEach-Object {
-        if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
-    }) -join " "
-
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "cmd.exe"
-    $psi.Arguments = "/c npx $argText"
-    $psi.WorkingDirectory = $Root
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-    $null = $proc.Start()
-
     $savedUrl = [ref]$false
     $wrongSubdomain = [ref]$false
-    $randomUrl = [ref]""
 
-    while (-not $proc.HasExited) {
-        Read-ProcessLines -Process $proc -SavedUrl $savedUrl -WrongSubdomain $wrongSubdomain -RandomUrl $randomUrl -AcceptRandom:$AcceptRandom
-        if ($wrongSubdomain.Value) {
-            try {
-                Write-LogLine "Stopping wrong tunnel (PID $($proc.Id))..." "Yellow"
-                $proc.Kill()
-                $proc.WaitForExit(5000)
-            } catch {}
-            Stop-ExistingTunnels
-            return @{
-                ExitCode = -1
-                WrongSubdomain = $true
-                SavedUrl = $savedUrl.Value
-                RandomUrl = $randomUrl.Value
-            }
-        }
-        Start-Sleep -Milliseconds 150
+    $ltCmd = Get-Command lt -ErrorAction SilentlyContinue
+    if ($ltCmd) {
+        Write-LogLine "Using lt: $($ltCmd.Source)" "DarkGray"
+        $runArgs = @("--port", "$Port")
+        if ($Subdomain) { $runArgs += @("--subdomain", $Subdomain) }
+        Write-LogLine "Command: lt $($runArgs -join ' ')" "DarkGray"
+    } else {
+        Write-LogLine "Command: npx $($Arguments -join ' ')" "DarkGray"
+        Write-LogLine "Если тишина 1-3 мин — npx скачивает localtunnel, это нормально." "Yellow"
     }
 
-    Read-ProcessLines -Process $proc -SavedUrl $savedUrl -WrongSubdomain $wrongSubdomain -RandomUrl $randomUrl -AcceptRandom:$AcceptRandom
+    Set-Location $Root
 
-    if ($wrongSubdomain.Value) {
-        Stop-ExistingTunnels
-        return @{
-            ExitCode = -1
-            WrongSubdomain = $true
-            SavedUrl = $savedUrl.Value
-            RandomUrl = $randomUrl.Value
+    if ($ltCmd) {
+        & lt @runArgs 2>&1 | ForEach-Object {
+            if (Process-LtOutputLine -Line "$_" -SavedUrl $savedUrl -AcceptRandom:$AcceptRandom) {
+                $wrongSubdomain.Value = $true
+            }
+        }
+    } else {
+        & npx @Arguments 2>&1 | ForEach-Object {
+            if (Process-LtOutputLine -Line "$_" -SavedUrl $savedUrl -AcceptRandom:$AcceptRandom) {
+                $wrongSubdomain.Value = $true
+            }
         }
     }
 
     return @{
-        ExitCode = $proc.ExitCode
-        WrongSubdomain = $false
+        ExitCode = $LASTEXITCODE
+        WrongSubdomain = $wrongSubdomain.Value
         SavedUrl = $savedUrl.Value
-        RandomUrl = $randomUrl.Value
     }
 }
 
@@ -194,7 +176,7 @@ $ltArgs = @("--yes", "localtunnel", "--port", "$Port")
 if ($Subdomain) {
     $ltArgs += @("--subdomain", $Subdomain)
     Write-LogLine "Requested subdomain: $Subdomain" "Cyan"
-    Write-LogLine "Vercel VITE_API_URL=https://$Subdomain.loca.lt (set once, no redeploy on restart)" "Cyan"
+    Write-LogLine "Vercel: VITE_API_URL=https://$Subdomain.loca.lt (как у вас — redeploy не нужен при перезапуске)" "Cyan"
 }
 
 Write-LogLine "Backend OK. Auto-restart on loca.lt disconnect." "Green"
@@ -231,7 +213,7 @@ while ($true) {
             }
             exit 2
         }
-        $waitSec = [Math]::Min(30 + ($reclaimAttempt * 15), 90)
+        $waitSec = [Math]::Min(15 + ($reclaimAttempt * 10), 45)
         Write-LogLine "Reclaim attempt $reclaimAttempt/$MaxReclaimAttempts failed. Waiting $waitSec sec..." "Yellow"
         Stop-ExistingTunnels
         Start-Sleep -Seconds $waitSec
@@ -239,7 +221,7 @@ while ($true) {
     }
 
     $reclaimAttempt = 0
-    $restartDelay = if ($Subdomain) { 45 } else { 5 }
+    $restartDelay = if ($Subdomain) { 10 } else { 5 }
     Write-LogLine "Tunnel exited (code $($session.ExitCode)). Restart in $restartDelay sec..." "Yellow"
     Stop-ExistingTunnels
     Start-Sleep -Seconds $restartDelay
