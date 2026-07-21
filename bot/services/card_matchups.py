@@ -1,13 +1,20 @@
-"""Контры и синергии карт (данные DeckShop, локализация под бота).
+"""Контры и синергии карт.
 
-Источник: bot/data/deckshop_counters.py — локальный снимок, без запросов к сайту.
+Приоритет источников контров:
+1. Ручные правила (MANUAL_COUNTERS, spells, offense WC)
+2. DeckShop offline snapshot (если доступен)
+3. Legacy COUNTERS из card_data
+4. Роли карт (air_defense / anti_swarm / anti_tank)
+
+Синергии: DeckShop → SYNERGIES из card_data.
+Snapshot читается только с диска — без HTTP к DeckShop.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
-from bot.data.deckshop_counters import DECKSHOP_COUNTERS
 from bot.services.card_data import (
     COUNTERS,
     MANUAL_COUNTERS_PARTIAL,
@@ -18,10 +25,13 @@ from bot.services.card_data import (
     get_card_elixir,
     is_building,
     is_offense_win_condition,
+    is_point_target_threat,
     is_pure_spell,
+    is_spam_card,
     spell_counter_tier_vs_building,
 )
 from bot.services.card_names_ru import card_name_ru
+from bot.services.deckshop_data import get_deckshop_status_summary, load_deckshop_snapshot
 
 
 @dataclass(frozen=True)
@@ -32,6 +42,19 @@ class CardMatchups:
     counters_partial: frozenset[str]
     synergy_strong: frozenset[str]
     synergy_partial: frozenset[str]
+
+
+# Воздушные угрозы для role-fallback (без импорта counter_engine).
+_AIR_THREATS = frozenset({
+    "Minions", "Minion Horde", "Baby Dragon", "Mega Minion", "Inferno Dragon",
+    "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix",
+    "Flying Machine", "Electro Dragon",
+})
+
+_ROLE_AIR = "air_defense"
+_ROLE_ANTI_SWARM = "anti_swarm"
+_ROLE_ANTI_TANK = "anti_tank"
+_ROLE_SPLASH = "splash"
 
 
 def _dedupe(names: list[str]) -> list[str]:
@@ -69,9 +92,52 @@ def _tier(raw: dict | None) -> tuple[list[str], list[str]]:
     return _dedupe(raw.get("strong") or []), _dedupe(raw.get("partial") or [])
 
 
-def _build_index() -> dict[str, CardMatchups]:
+@lru_cache(maxsize=1)
+def _card_roles(name: str) -> frozenset[str]:
+    try:
+        from bot.services.deck_builder.loader import get_database
+
+        rec = get_database().get_card(name)
+        if rec:
+            return rec.roles
+    except Exception:
+        pass
+    return frozenset()
+
+
+def _role_counter_tier(counter_card: str, target: str) -> str | None:
+    """Базовый fallback по ролям — слабее DeckShop/manual."""
+    roles = _card_roles(counter_card)
+    if not roles:
+        return None
+
+    if target in _AIR_THREATS:
+        if _ROLE_AIR in roles:
+            return "partial"
+        return None
+
+    if is_spam_card(target):
+        if _ROLE_ANTI_SWARM in roles or _ROLE_SPLASH in roles:
+            return "partial"
+        return None
+
+    if is_point_target_threat(target) or target in {"Golem", "Giant", "Electro Giant", "P.E.K.K.A"}:
+        if _ROLE_ANTI_TANK in roles:
+            return "partial"
+        return None
+
+    if is_building(target):
+        if _ROLE_SPLASH in roles:
+            return "partial"
+
+    return None
+
+
+def _build_index(deckshop_counters: dict[str, dict]) -> dict[str, CardMatchups]:
     index: dict[str, CardMatchups] = {}
-    for name, raw in DECKSHOP_COUNTERS.items():
+    for name, raw in deckshop_counters.items():
+        if not isinstance(raw, dict):
+            continue
         strong, partial = _tier(raw.get("counters_vs_attack"))
         strong, partial = _apply_spell_counter_rules(name, strong, partial)
         syn_strong, syn_partial = _tier(raw.get("synergy_offense"))
@@ -85,10 +151,43 @@ def _build_index() -> dict[str, CardMatchups]:
             synergy_strong=frozenset(syn_strong),
             synergy_partial=frozenset(syn_partial),
         )
+
+    for name, partners in SYNERGIES.items():
+        if name in index:
+            existing = index[name]
+            if existing.synergy_strong:
+                continue
+            index[name] = CardMatchups(
+                name=existing.name,
+                name_ru=existing.name_ru,
+                counters_strong=existing.counters_strong,
+                counters_partial=existing.counters_partial,
+                synergy_strong=frozenset(_dedupe(partners)),
+                synergy_partial=existing.synergy_partial,
+            )
+            continue
+        index[name] = CardMatchups(
+            name=name,
+            name_ru=card_name_ru(name) or name,
+            counters_strong=frozenset(),
+            counters_partial=frozenset(),
+            synergy_strong=frozenset(_dedupe(partners)),
+            synergy_partial=frozenset(),
+        )
     return index
 
 
-_MATCHUPS: dict[str, CardMatchups] = _build_index()
+_DECKSHOP_COUNTERS, _DECKSHOP_SOURCE, _DECKSHOP_STATUS = load_deckshop_snapshot()
+_MATCHUPS: dict[str, CardMatchups] = _build_index(_DECKSHOP_COUNTERS)
+
+
+def deckshop_matchup_status() -> dict:
+    """Metadata snapshot для API/админки."""
+    return get_deckshop_status_summary()
+
+
+def deckshop_available() -> bool:
+    return _DECKSHOP_STATUS.available
 
 
 def get_matchups(card: str) -> CardMatchups | None:
@@ -151,9 +250,11 @@ def card_counters_target(counter_card: str, target: str) -> str | None:
         return "strong"
 
     if is_building(target):
-        return spell_counter_tier_vs_building(counter_card)
+        tier = spell_counter_tier_vs_building(counter_card)
+        if tier:
+            return tier
 
-    return None
+    return _role_counter_tier(counter_card, target)
 
 
 def targets_countered_by(card: str, opponent_deck: list[str]) -> tuple[list[str], list[str]]:

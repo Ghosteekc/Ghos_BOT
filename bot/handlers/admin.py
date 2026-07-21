@@ -31,6 +31,18 @@ async def cmd_admin_sub(message: Message) -> None:
     )
 
 
+@router.message(Command("deckshop_check"))
+async def cmd_deckshop_check(message: Message) -> None:
+    if not _is_admin(message.from_user.id):
+        await message.answer("🔒 Команда доступна только администратору.")
+        return
+
+    from bot.services.deckshop_data import format_deckshop_status
+
+    text = format_deckshop_status()
+    await message.answer("📦 DeckShop\n" + text.replace("DeckShop snapshot", "Snapshot"))
+
+
 @router.message(Command("sync_now"))
 async def cmd_sync_now(message: Message) -> None:
     user_id = message.from_user.id

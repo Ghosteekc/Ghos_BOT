@@ -3,9 +3,10 @@
 
 Источник при сборке: https://www.deckshop.pro/ru/
 Обновление: python scripts/scrape_deckshop_counters.py
+Проверка: python scripts/check_deckshop_data.py
 
-В рантайме бот читает только этот файл — без HTTP к DeckShop.
-Использование: bot/services/card_matchups.py
+Рантайм загрузка: bot/services/deckshop_data.py (без HTTP, с fallback).
+Использование matchups: bot/services/card_matchups.py
 """
 
 from __future__ import annotations

@@ -167,7 +167,14 @@ async def get_player_collection(
 
 @router.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "stats_days": 14, "ladder_only_daily_trophies": True}
+    from bot.services.deckshop_data import get_deckshop_status_summary
+
+    return {
+        "status": "ok",
+        "stats_days": 14,
+        "ladder_only_daily_trophies": True,
+        "deckshop": get_deckshop_status_summary(),
+    }
 
 
 @router.get("/home", response_model=HomeResponse)
