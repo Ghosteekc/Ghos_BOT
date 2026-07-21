@@ -1,0 +1,8 @@
+{
+  "name": "ghosteek-localtunnel",
+  "private": true,
+  "description": "Local localtunnel binary for start-tunnel.ps1 (no npx wait)",
+  "dependencies": {
+    "localtunnel": "2.0.2"
+  }
+}

@@ -49,6 +49,39 @@ function Stop-ExistingTunnels {
     Start-Sleep -Seconds 2
 }
 
+function Test-LocaLt {
+    try {
+        $r = Invoke-WebRequest -Uri "https://loca.lt/" -TimeoutSec 8 -UseBasicParsing
+        return $r.StatusCode -ge 200
+    } catch {
+        return $false
+    }
+}
+
+function Ensure-LocalLt {
+    $ltJs = Join-Path $PSScriptRoot "node_modules\localtunnel\bin\lt.js"
+    if (Test-Path $ltJs) {
+        return $ltJs
+    }
+
+    Write-LogLine "First run: npm install in scripts/localtunnel (one time)..." "Yellow"
+    Set-Location $PSScriptRoot
+    & npm install 2>&1 | ForEach-Object { Write-LogLine $_ "DarkGray" }
+    if (-not (Test-Path $ltJs)) {
+        Write-LogLine "npm install failed. Run manually: cd `"$PSScriptRoot`"; npm install" "Red"
+        exit 3
+    }
+    return $ltJs
+}
+
+function Build-LtRunArgs {
+    $runArgs = @("--port", "$Port")
+    if ($Subdomain) {
+        $runArgs += @("--subdomain", $Subdomain)
+    }
+    return $runArgs
+}
+
 function Test-SubdomainUrl {
     param([string]$Url)
     if (-not $Subdomain) { return $true }
@@ -120,37 +153,21 @@ function Process-LtOutputLine {
 
 function Start-LocalTunnelSession {
     param(
-        [string[]]$Arguments,
+        [string]$LtJs,
         [switch]$AcceptRandom
     )
 
     $savedUrl = [ref]$false
     $wrongSubdomain = [ref]$false
+    $runArgs = Build-LtRunArgs
 
-    $ltCmd = Get-Command lt -ErrorAction SilentlyContinue
-    if ($ltCmd) {
-        Write-LogLine "Using lt: $($ltCmd.Source)" "DarkGray"
-        $runArgs = @("--port", "$Port")
-        if ($Subdomain) { $runArgs += @("--subdomain", $Subdomain) }
-        Write-LogLine ("Command: lt {0}" -f ($runArgs -join " ")) "DarkGray"
-    } else {
-        Write-LogLine ("Command: npx {0}" -f ($Arguments -join " ")) "DarkGray"
-        Write-LogLine "If silent 1-3 min, npx is downloading localtunnel (normal)." "Yellow"
-    }
+    Write-LogLine ("Command: node lt.js {0}" -f ($runArgs -join " ")) "DarkGray"
+    Write-LogLine "Connecting to loca.lt server (10-30 sec)..." "Yellow"
 
-    Set-Location $Root
-
-    if ($ltCmd) {
-        & lt @runArgs 2>&1 | ForEach-Object {
-            if (Process-LtOutputLine -Line "$_" -SavedUrl $savedUrl -AcceptRandom:$AcceptRandom) {
-                $wrongSubdomain.Value = $true
-            }
-        }
-    } else {
-        & npx @Arguments 2>&1 | ForEach-Object {
-            if (Process-LtOutputLine -Line "$_" -SavedUrl $savedUrl -AcceptRandom:$AcceptRandom) {
-                $wrongSubdomain.Value = $true
-            }
+    Set-Location $PSScriptRoot
+    & node $LtJs @runArgs 2>&1 | ForEach-Object {
+        if (Process-LtOutputLine -Line "$_" -SavedUrl $savedUrl -AcceptRandom:$AcceptRandom) {
+            $wrongSubdomain.Value = $true
         }
     }
 
@@ -172,9 +189,20 @@ if (-not (Test-Backend)) {
 
 Stop-ExistingTunnels
 
-$ltArgs = @("--yes", "localtunnel", "--port", "$Port")
+Write-LogLine "Checking loca.lt reachability..." "Cyan"
+if (-not (Test-LocaLt)) {
+    Write-LogLine "loca.lt is NOT reachable from this network (timeout)." "Red"
+    Write-LogLine "start-tunnel.ps1 cannot work until loca.lt responds." "Yellow"
+    Write-LogLine "Try: VPN or mobile hotspot, then run this script again." "Yellow"
+    Write-LogLine "Or use Cloudflare (works now): ..\cloudflare-tunnel\start-quick.ps1" "Cyan"
+    Write-LogLine "  then set Vercel VITE_API_URL to the trycloudflare URL and Redeploy." "Cyan"
+    exit 4
+}
+Write-LogLine "loca.lt OK." "Green"
+
+$LtJs = Ensure-LocalLt
+
 if ($Subdomain) {
-    $ltArgs += @("--subdomain", $Subdomain)
     Write-LogLine "Requested subdomain: $Subdomain" "Cyan"
     Write-LogLine ("Vercel VITE_API_URL=https://{0}.loca.lt (no redeploy on tunnel restart)" -f $Subdomain) "Cyan"
 }
@@ -194,8 +222,8 @@ while ($true) {
     $attempt++
     Write-LogLine "Starting localtunnel (session $attempt)..." "Cyan"
 
-    Set-Location $Root
-    $session = Start-LocalTunnelSession -Arguments $ltArgs -AcceptRandom:$AllowRandomFallback
+    Set-Location $PSScriptRoot
+    $session = Start-LocalTunnelSession -LtJs $LtJs -AcceptRandom:$AllowRandomFallback
 
     if ($session.WrongSubdomain) {
         $reclaimAttempt++
@@ -207,7 +235,6 @@ while ($true) {
             if ($AllowRandomFallback) {
                 Write-LogLine "Starting without fixed subdomain..." "Yellow"
                 $Subdomain = ""
-                $ltArgs = @("--yes", "localtunnel", "--port", "$Port")
                 $reclaimAttempt = 0
                 continue
             }
