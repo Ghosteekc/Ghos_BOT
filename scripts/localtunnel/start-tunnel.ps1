@@ -1,4 +1,4 @@
-# Stable localtunnel to bot on :8080
+# Tunnel to bot on :8080 (loca.lt or Cloudflare auto-fallback)
 # Run in a SEPARATE Windows PowerShell window - NOT in Cursor terminal.
 #
 # Examples:
@@ -9,7 +9,9 @@ param(
     [int]$Port = 8080,
     [string]$Subdomain = "",
     [int]$MaxReclaimAttempts = 3,
-    [switch]$AllowRandomFallback
+    [switch]$AllowRandomFallback,
+    [switch]$ForceCloudflare,
+    [switch]$ForceLocaltunnel
 )
 
 $Root = (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent)
@@ -46,7 +48,26 @@ function Stop-ExistingTunnels {
             Write-LogLine "Stopping localtunnel cmd (PID $($_.ProcessId))" "Yellow"
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
+    Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Write-LogLine "Stopping cloudflared (PID $($_.ProcessId))" "Yellow"
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
     Start-Sleep -Seconds 2
+}
+
+function Resolve-Cloudflared {
+    $candidates = @(
+        "C:\Program Files (x86)\cloudflared\cloudflared.exe",
+        "C:\Program Files\cloudflared\cloudflared.exe"
+    )
+    foreach ($path in $candidates) {
+        if (Test-Path $path) { return $path }
+    }
+    $cmd = Get-Command cloudflared -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    Write-LogLine "cloudflared not found. Install: winget install Cloudflare.cloudflared" "Red"
+    exit 5
 }
 
 function Test-LocaLt {
@@ -100,8 +121,10 @@ function Save-TunnelUrl {
     Set-Content -Path $UrlFile -Value $Url -Encoding UTF8
     Write-LogLine "Tunnel URL: $Url" "Green"
     Write-LogLine "Saved to: $UrlFile" "DarkGray"
-    if ($Force -and $Subdomain) {
-        Write-LogLine "Using random URL because '$Subdomain' is stuck on loca.lt servers." "Yellow"
+    if ($Url -match "trycloudflare\.com") {
+        Write-LogLine "Vercel -> VITE_API_URL -> $Url -> Redeploy (once per new Cloudflare URL)" "Yellow"
+    } elseif ($Force -and $Subdomain) {
+        Write-LogLine "Using random URL because subdomain is stuck on loca.lt servers." "Yellow"
         Write-LogLine "Update Vercel VITE_API_URL to: $Url" "Yellow"
     }
     return $true
@@ -178,7 +201,35 @@ function Start-LocalTunnelSession {
     }
 }
 
-Write-LogLine "=== Ghosteek localtunnel ===" "Cyan"
+function Start-CloudflareTunnelSession {
+    param([string]$CloudflaredPath)
+
+    $savedUrl = [ref]$false
+    Write-LogLine "Command: cloudflared tunnel --url http://127.0.0.1:$Port" "DarkGray"
+    Write-LogLine "Starting Cloudflare Quick Tunnel..." "Yellow"
+
+    & $CloudflaredPath tunnel `
+        --url "http://127.0.0.1:$Port" `
+        --protocol http2 `
+        --edge-ip-version 4 `
+        --ha-connections 1 2>&1 | ForEach-Object {
+            $line = "$_"
+            Write-LogLine $line
+            if ($savedUrl.Value) { return }
+            if ($line -match "(https://[\w-]+\.trycloudflare\.com)") {
+                if (Save-TunnelUrl -Url $Matches[1] -Force) {
+                    $savedUrl.Value = $true
+                }
+            }
+        }
+
+    return @{
+        ExitCode = $LASTEXITCODE
+        SavedUrl = $savedUrl.Value
+    }
+}
+
+Write-LogLine "=== Ghosteek API tunnel ===" "Cyan"
 Write-LogLine "Do not close this window. Cursor kills background npx when session ends." "DarkGray"
 Write-LogLine "Log file: $LogFile" "DarkGray"
 
@@ -189,16 +240,38 @@ if (-not (Test-Backend)) {
 
 Stop-ExistingTunnels
 
-Write-LogLine "Checking loca.lt reachability..." "Cyan"
-if (-not (Test-LocaLt)) {
-    Write-LogLine "loca.lt is NOT reachable from this network (timeout)." "Red"
-    Write-LogLine "start-tunnel.ps1 cannot work until loca.lt responds." "Yellow"
-    Write-LogLine "Try: VPN or mobile hotspot, then run this script again." "Yellow"
-    Write-LogLine "Or use Cloudflare (works now): ..\cloudflare-tunnel\start-quick.ps1" "Cyan"
-    Write-LogLine "  then set Vercel VITE_API_URL to the trycloudflare URL and Redeploy." "Cyan"
-    exit 4
+$UseCloudflare = $ForceCloudflare.IsPresent
+if (-not $UseCloudflare -and -not $ForceLocaltunnel.IsPresent) {
+    Write-LogLine "Checking loca.lt reachability..." "Cyan"
+    if (Test-LocaLt) {
+        Write-LogLine "loca.lt OK - using localtunnel (classic mode)." "Green"
+    } else {
+        Write-LogLine "loca.lt is blocked on this network (ISP/router). It worked before when loca.lt was open." "Yellow"
+        Write-LogLine "Auto-switching to Cloudflare tunnel - same script, same two windows." "Cyan"
+        $UseCloudflare = $true
+    }
+} elseif ($ForceLocaltunnel.IsPresent) {
+    Write-LogLine "ForceLocaltunnel: trying loca.lt even if blocked." "Yellow"
 }
-Write-LogLine "loca.lt OK." "Green"
+
+if ($UseCloudflare) {
+    $CloudflaredPath = Resolve-Cloudflared
+    Write-LogLine "Backend OK. Keep this window open." "Green"
+    $attempt = 0
+    while ($true) {
+        if (-not (Test-Backend)) {
+            Write-LogLine "Backend offline, waiting 10 sec..." "Red"
+            Start-Sleep -Seconds 10
+            continue
+        }
+        $attempt++
+        Write-LogLine "Starting Cloudflare tunnel (session $attempt)..." "Cyan"
+        $session = Start-CloudflareTunnelSession -CloudflaredPath $CloudflaredPath
+        Write-LogLine "Tunnel exited (code $($session.ExitCode)). Restart in 10 sec..." "Yellow"
+        Stop-ExistingTunnels
+        Start-Sleep -Seconds 10
+    }
+}
 
 $LtJs = Ensure-LocalLt
 
