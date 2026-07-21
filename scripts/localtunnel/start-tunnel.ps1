@@ -107,8 +107,8 @@ function Process-LtOutputLine {
     }
 
     if ($Subdomain) {
-        Write-LogLine "Subdomain '$Subdomain' busy — loca.lt выдал: $url" "Red"
-        Write-LogLine "Подождите и перезапустите скрипт, или: -AllowRandomFallback" "Yellow"
+        Write-LogLine ("Subdomain {0} busy - loca.lt gave: {1}" -f $Subdomain, $url) "Red"
+        Write-LogLine "Wait and restart, or use: -AllowRandomFallback" "Yellow"
         return $true
     }
 
@@ -132,10 +132,10 @@ function Start-LocalTunnelSession {
         Write-LogLine "Using lt: $($ltCmd.Source)" "DarkGray"
         $runArgs = @("--port", "$Port")
         if ($Subdomain) { $runArgs += @("--subdomain", $Subdomain) }
-        Write-LogLine "Command: lt $($runArgs -join ' ')" "DarkGray"
+        Write-LogLine ("Command: lt {0}" -f ($runArgs -join " ")) "DarkGray"
     } else {
-        Write-LogLine "Command: npx $($Arguments -join ' ')" "DarkGray"
-        Write-LogLine "Если тишина 1-3 мин — npx скачивает localtunnel, это нормально." "Yellow"
+        Write-LogLine ("Command: npx {0}" -f ($Arguments -join " ")) "DarkGray"
+        Write-LogLine "If silent 1-3 min, npx is downloading localtunnel (normal)." "Yellow"
     }
 
     Set-Location $Root
@@ -176,7 +176,7 @@ $ltArgs = @("--yes", "localtunnel", "--port", "$Port")
 if ($Subdomain) {
     $ltArgs += @("--subdomain", $Subdomain)
     Write-LogLine "Requested subdomain: $Subdomain" "Cyan"
-    Write-LogLine "Vercel: VITE_API_URL=https://$Subdomain.loca.lt (как у вас — redeploy не нужен при перезапуске)" "Cyan"
+    Write-LogLine ("Vercel VITE_API_URL=https://{0}.loca.lt (no redeploy on tunnel restart)" -f $Subdomain) "Cyan"
 }
 
 Write-LogLine "Backend OK. Auto-restart on loca.lt disconnect." "Green"
@@ -200,7 +200,7 @@ while ($true) {
     if ($session.WrongSubdomain) {
         $reclaimAttempt++
         if ($reclaimAttempt -ge $MaxReclaimAttempts) {
-            Write-LogLine "Subdomain '$Subdomain' still busy after $reclaimAttempt attempt(s)." "Red"
+            Write-LogLine ("Subdomain {0} still busy after {1} attempt(s)." -f $Subdomain, $reclaimAttempt) "Red"
             Write-LogLine "loca.lt keeps names globally; rebooting PC does not release them." "Yellow"
             Write-LogLine "Try another name, e.g.: .\start-tunnel.ps1 -Subdomain ghosteekcr2" "Cyan"
             Write-LogLine "Or accept random URL: .\start-tunnel.ps1 -AllowRandomFallback" "Cyan"
