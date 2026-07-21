@@ -13,3 +13,9 @@ build/
 
 # Frontend деплоится отдельно на Vercel (репозиторий Ghos_web)
 webapp/
+
+# localtunnel runtime
+scripts/localtunnel/node_modules/
+scripts/localtunnel/tunnel.log
+scripts/localtunnel/tunnel-session.log
+scripts/localtunnel/tunnel-url.txt
