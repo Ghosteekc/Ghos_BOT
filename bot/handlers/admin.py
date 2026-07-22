@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -6,6 +8,9 @@ from bot.config import get_admin_telegram_ids
 from bot.models.database import async_session
 from bot.services.clash_api import SubscriptionService
 from bot.services.sync_service import sync_all_once
+from bot.user_errors import log_error, user_message
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -62,5 +67,6 @@ async def cmd_sync_now(message: Message) -> None:
         for tag, cnt in res.items():
             lines.append(f"• {tag}: {cnt} новых")
         await message.answer("\n".join(lines))
-    except Exception as e:
-        await message.answer(f"Ошибка при синхронизации: {e}")
+    except Exception as exc:
+        log_error(logger, "E080", "Admin sync_now failed", exc=exc, user_id=user_id)
+        await message.answer(user_message("E080"))

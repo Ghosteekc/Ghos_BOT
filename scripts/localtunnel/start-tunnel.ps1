@@ -7,7 +7,7 @@
 
 param(
     [int]$Port = 8080,
-    [string]$Subdomain = "",
+    [string]$Subdomain = "ghosteekcr",
     [int]$MaxReclaimAttempts = 3,
     [switch]$AllowRandomFallback,
     [switch]$SkipLocaLtCheck

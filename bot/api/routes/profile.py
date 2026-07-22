@@ -13,6 +13,7 @@ from bot.services.battle_cache_reader import get_battles_for_winrate_chart
 from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist, load_pvp_battles
 from bot.services.player_collection import build_player_collection, build_collection_stats_from_player
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
+from bot.user_errors import http_error_from_clash
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +158,7 @@ async def get_player_collection(
     try:
         player = await client.get_player(user.player_tag or "")
     except ClashRoyaleAPIError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        raise http_error_from_clash(e, status=502) from e
     finally:
         await client.close()
 

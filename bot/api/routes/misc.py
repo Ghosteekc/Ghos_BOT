@@ -8,6 +8,7 @@ from bot.models.database import BattleCache, FavoriteDeck, User, async_session
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_cards_catalog
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag, validate_tag
 from bot.services.battle_service import load_and_persist
+from bot.user_errors import http_error, http_error_from_clash
 
 router = APIRouter(prefix="/api", tags=["misc"])
 
@@ -31,16 +32,17 @@ async def search_player(
     del user
     tag = normalize_tag(q.strip())
     if not validate_tag(tag):
-        raise HTTPException(
-            status_code=400,
-            detail="Поиск только по тегу игрока, например #ABC123",
+        raise http_error(
+            "E001",
+            status=400,
+            message="Поиск только по тегу игрока, например #ABC123",
         )
 
     client = ClashRoyaleClient()
     try:
         player = await client.get_player(tag)
     except ClashRoyaleAPIError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        raise http_error_from_clash(e) from e
     finally:
         await client.close()
 
@@ -67,13 +69,13 @@ async def get_player_preview(
     del user
     normalized = normalize_tag(tag.strip())
     if not validate_tag(normalized):
-        raise HTTPException(status_code=400, detail="Некорректный тег игрока")
+        raise http_error("E001", status=400, message="Некорректный тег игрока")
 
     client = ClashRoyaleClient()
     try:
         player = await client.get_player(normalized)
     except ClashRoyaleAPIError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        raise http_error_from_clash(e) from e
     finally:
         await client.close()
 

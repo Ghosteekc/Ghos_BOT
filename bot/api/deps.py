@@ -5,9 +5,10 @@ from fastapi import Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.api.auth import InitDataError, validate_init_data
-from bot.config import settings
+from bot.config import get_admin_telegram_ids, settings
 from bot.models.database import User, async_session
 from bot.services.clash_api import SubscriptionService
+from bot.user_errors import http_error, log_error
 
 logger = logging.getLogger(__name__)
 
@@ -18,36 +19,59 @@ async def get_db() -> AsyncSession:
 
 
 async def get_current_user(
-    x_telegram_init_data: str = Header(..., alias="X-Telegram-Init-Data"),
+    x_telegram_init_data: str | None = Header(default=None, alias="X-Telegram-Init-Data"),
     session: AsyncSession = Depends(get_db),
 ) -> User:
-    logger.info(f"WebApp auth attempt: initData length={len(x_telegram_init_data)}, first_100={x_telegram_init_data[:100]!r}")
+    if not x_telegram_init_data or not x_telegram_init_data.strip():
+        raise http_error("E090", status=401)
+
     try:
-        tg_user = validate_init_data(x_telegram_init_data, settings.bot_token)
+        tg_user = validate_init_data(
+            x_telegram_init_data,
+            settings.bot_token,
+            max_age_seconds=settings.init_data_max_age_seconds,
+            clock_skew_seconds=settings.init_data_clock_skew_seconds,
+        )
         telegram_id = int(tg_user["id"])
-        logger.info(f"WebApp auth success: telegram_id={telegram_id}, username={tg_user.get('username')}")
-    except InitDataError as e:
-        logger.error(f"WebApp auth failed: {e}, initData preview={x_telegram_init_data[:200]!r}")
-        raise HTTPException(status_code=401, detail=str(e)) from e
+    except InitDataError as exc:
+        log_error(logger, "E090", str(exc), exc=exc)
+        code = "E091" if "истекла" in str(exc).lower() else "E090"
+        raise http_error(code, status=401) from exc
+    except (TypeError, ValueError) as exc:
+        log_error(logger, "E090", "invalid telegram id", exc=exc)
+        raise http_error("E090", status=401) from exc
 
     sub_service = SubscriptionService(session)
     user = await sub_service.get_or_create_user(telegram_id)
-    logger.info(f"WebApp user: id={user.id}, telegram_id={user.telegram_id}, player_tag={user.player_tag}")
+    logger.debug(
+        "WebApp auth ok: telegram_id=%s user_id=%s linked=%s",
+        user.telegram_id,
+        user.id,
+        bool(user.player_tag),
+    )
     return user
 
 
 async def require_linked_player(user: User = Depends(get_current_user)) -> User:
     if not user.player_tag:
-        raise HTTPException(
-            status_code=403,
-            detail="Тег игрока не привязан. Используйте /link #ТЕГ в чате бота.",
-        )
+        raise http_error("E092", status=403)
     return user
 
 
 async def require_subscription(
     user: User = Depends(require_linked_player),
+    session: AsyncSession = Depends(get_db),
 ) -> User:
+    """Требует привязанный тег; подписка сейчас бесплатная для всех."""
+    sub_service = SubscriptionService(session)
+    if not await sub_service.has_active_subscription(user):
+        raise http_error("E093", status=403, message="Подписка не активна.")
+    return user
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    if user.telegram_id not in get_admin_telegram_ids():
+        raise http_error("E093", status=403)
     return user
 
 

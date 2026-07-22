@@ -13,6 +13,7 @@ from bot.middleware.subscription import SubscriptionMiddleware
 from bot.models.database import init_db
 from bot.services import sync_service
 from bot.services.clash_api import ClashRoyaleClient
+from bot.services.tunnel_manager import start_tunnel, stop_tunnel_process
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,15 +70,38 @@ async def main() -> None:
     sync_task = asyncio.create_task(sync_service.run_periodic(stop_event))
     api_task = asyncio.create_task(run_api())
 
+    tunnel_proc = None
+    if settings.tunnel_auto_start:
+        await asyncio.sleep(1.5)
+        tunnel_proc = await asyncio.to_thread(
+            start_tunnel,
+            subdomain=settings.tunnel_subdomain,
+            port=settings.api_port,
+            skip_loca_lt_check=settings.tunnel_skip_loca_lt_check,
+        )
+
     logger.info(f"Bot and API started (API on {settings.api_host}:{settings.api_port})")
+    if settings.tunnel_auto_start:
+        logger.info(
+            "Tunnel auto-start enabled -> https://%s.loca.lt",
+            settings.tunnel_subdomain,
+        )
     logger.info("Starting polling...")
+    await bot.delete_webhook(drop_pending_updates=True)
+    logger.info("Webhook cleared — using long polling")
     try:
         await dp.start_polling(bot)
     finally:
         logger.info("Shutting down...")
         stop_event.set()
+        if settings.tunnel_auto_start:
+            await asyncio.to_thread(stop_tunnel_process, tunnel_proc)
         api_task.cancel()
-        await sync_task
+        sync_task.cancel()
+        try:
+            await asyncio.wait_for(sync_task, timeout=settings.sync_shutdown_timeout_sec)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            logger.warning("Battle sync task did not stop within timeout")
         try:
             await api_task
         except asyncio.CancelledError:

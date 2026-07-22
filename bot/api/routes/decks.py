@@ -3,7 +3,7 @@ from bot.services.battle_day_stats import build_last_results, build_most_used_ca
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from bot.api.deps import get_db, require_linked_player, require_subscription
+from bot.user_errors import http_error
 from bot.api.schemas import (
     ArenaDecksResponse,
     ConstructorRequest,
@@ -64,7 +64,7 @@ _opponents_cache: dict[int, list] = {}
 async def _get_battles(user: User) -> list:
     battles = await load_and_persist(user)
     if battles is None:
-        raise HTTPException(status_code=502, detail="Не удалось загрузить бои")
+        raise http_error("E020", status=502)
     return battles
 
 
@@ -492,7 +492,8 @@ async def random_deck(
     try:
         data = await generate_random_deck(rofl=rofl, exclude_key=exclude_key)
     except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
+        logger.warning("Random deck generation failed: %s", e)
+        raise http_error("E053", status=503) from e
 
     card_infos = [
         DeckCardInfo(
@@ -573,7 +574,7 @@ async def counter_deck(index: int, user: User = Depends(require_subscription)) -
         _opponents_cache[user.telegram_id] = opponents
 
     if index < 0 or index >= len(opponents):
-        raise HTTPException(status_code=404, detail="Соперник не найден")
+        raise http_error("E005", status=404)
 
     opp = opponents[index]
     battles = await _get_battles(user)
@@ -609,7 +610,7 @@ async def customize_deck(user: User = Depends(require_subscription)) -> Customiz
             break
 
     if not current_deck:
-        raise HTTPException(status_code=404, detail="Колода не найдена в последних боях")
+        raise http_error("E006", status=404)
 
     result = customize_deck_for_arena(current_deck, user.arena_id, preferred, user.trophies)
     await ensure_cards_loaded()
@@ -636,7 +637,7 @@ async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyRes
             break
 
     if not current_deck:
-        raise HTTPException(status_code=404, detail="Колода не найдена в последних боях")
+        raise http_error("E006", status=404)
 
     result = build_synergy_deck(current_deck, user.arena_id, user.trophies, preferred)
     if not result:
@@ -656,7 +657,7 @@ async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyRes
 async def extended_stats(user: User = Depends(require_subscription)) -> StatsOverviewResponse:
     battles = await _get_battles(user)
     if battles is None:
-        raise HTTPException(status_code=502, detail="Не удалось загрузить бои")
+        raise http_error("E020", status=502)
     stats = await get_cached_stats(user.player_tag)
     if stats is None and battles:
         stats = _stats_from_battles(battles, user.player_tag or "")

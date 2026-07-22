@@ -8,6 +8,7 @@ from bot.services.battle_service import filter_pvp_battles
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates
 from bot.services.deck_analyzer import get_most_played_cards
+from bot.user_errors import log_error, user_message, user_message_plain
 from aiogram.filters import Command
 from sqlalchemy import select
 from bot.models.database import BattleCache
@@ -94,7 +95,7 @@ async def analyze_battles(message: Message, user: User) -> None:
     battles = await _load_battles(user, message.from_user.id)
 
     if battles is None:
-        await message.answer("❌ Не удалось загрузить бои.")
+        await message.answer(user_message("E020"))
         return
     if not battles:
         await message.answer("Нет PvP-боёв в истории.")
@@ -129,7 +130,7 @@ async def battle_detail(callback: CallbackQuery, user: User) -> None:
     battles = _battle_cache.get(callback.from_user.id, [])
 
     if idx >= len(battles):
-        await callback.answer("Бой не найден", show_alert=True)
+        await callback.answer(user_message_plain("E004"), show_alert=True)
         return
 
     battle = battles[idx]
@@ -161,8 +162,8 @@ async def battle_detail(callback: CallbackQuery, user: User) -> None:
         await callback.message.edit_text(text)
         logger.info(f"Showed battle {idx} analysis to user {callback.from_user.id}")
     except Exception as e:
-        logger.error(f"Error showing battle detail to user {callback.from_user.id}: {e}", exc_info=True)
-        await callback.message.edit_text("❌ Ошибка анализа боя. Попробуйте позже.")
+        log_error(logger, "E040", "Error showing battle detail", exc=e, user_id=callback.from_user.id)
+        await callback.message.edit_text(user_message("E040"))
     await callback.answer()
 
 
@@ -173,7 +174,7 @@ async def deck_winrates(message: Message, user: User) -> None:
     battles = await _load_battles(user, message.from_user.id)
 
     if battles is None:
-        await message.answer("❌ Не удалось загрузить бои.")
+        await message.answer(user_message("E020"))
         return
 
     try:
@@ -197,15 +198,15 @@ async def deck_winrates(message: Message, user: User) -> None:
         await message.answer("\n".join(lines))
         logger.info(f"Showed deck winrates to user {message.from_user.id}")
     except Exception as e:
-        logger.error(f"Error calculating winrates for user {message.from_user.id}: {e}", exc_info=True)
-        await message.answer("❌ Ошибка расчёта винрейта. Попробуйте позже.")
+        log_error(logger, "E041", "Error calculating winrates", exc=e, user_id=message.from_user.id)
+        await message.answer(user_message("E041"))
 
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message, user: User) -> None:
     logger.info(f"User {message.from_user.id} requested detailed stats")
     if not user.player_tag:
-        await message.answer("❌ Тег не привязан. Используйте /link #ВАШТЕГ")
+        await message.answer(user_message("E003") + "\n\nИспользуйте /link #ВАШТЕГ")
         return
 
     # Detailed statistics from cached battles
@@ -294,5 +295,5 @@ async def cmd_stats(message: Message, user: User) -> None:
         await message.answer("\n".join(lines))
         logger.info(f"Showed detailed stats to user {message.from_user.id}")
     except Exception as e:
-        logger.error(f"Error showing stats to user {message.from_user.id}: {e}", exc_info=True)
-        await message.answer("❌ Ошибка загрузки статистики. Попробуйте позже.")
+        log_error(logger, "E042", "Error showing stats", exc=e, user_id=message.from_user.id)
+        await message.answer(user_message("E042"))

@@ -23,14 +23,39 @@ curl.exe -H "Bypass-Tunnel-Reminder: true" "https://ВАШ-URL.loca.lt/api/healt
 
 ## Как запускать (рекомендуется)
 
-**Окно 1 — бот:**
+**Один процесс — бот + туннель:**
 
 ```powershell
 cd G:\проги\ss
 python -m bot.main
 ```
 
-**Окно 2 — туннель (Win+R → powershell, или двойной клик `start-tunnel.cmd`):**
+При старте бот:
+1. поднимает API на `:8080`;
+2. останавливает старые процессы localtunnel;
+3. запускает `start-tunnel.ps1` с subdomain **`ghosteekcr`** → `https://ghosteekcr.loca.lt`.
+
+Отдельное окно для туннеля **не нужно** (можно закрыть, если было открыто раньше).
+
+Отключить автозапуск: в `.env` → `TUNNEL_AUTO_START=false`, тогда вручную:
+
+```powershell
+cd G:\проги\ss\scripts\localtunnel
+.\start-tunnel.ps1
+```
+
+---
+
+## Ручной режим (два окна)
+
+**Окно 1 — бот** (`TUNNEL_AUTO_START=false`):
+
+```powershell
+cd G:\проги\ss
+python -m bot.main
+```
+
+**Окно 2 — туннель:**
 
 ```powershell
 cd G:\проги\ss\scripts\localtunnel

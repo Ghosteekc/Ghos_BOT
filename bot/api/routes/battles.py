@@ -11,6 +11,7 @@ from bot.services.battle_time import format_battle_played_at
 from bot.services.battle_report import analyze_battle_enhanced
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_analyzer import analyze_deck, calculate_matchup_score
+from bot.user_errors import http_error
 
 router = APIRouter(prefix="/api/battles", tags=["battles"])
 
@@ -65,10 +66,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
 async def list_battles(user: User = Depends(require_subscription)) -> BattleListResponse:
     battles = await load_and_persist(user)
     if battles is None:
-        raise HTTPException(
-            status_code=502,
-            detail="Не удалось загрузить бои. Попробуйте позже.",
-        )
+        raise http_error("E020", status=502)
 
     _set_battle_cache(user, battles)
 
@@ -91,7 +89,7 @@ async def _load_user_battles(user: User) -> list:
     if battles is None:
         battles = await load_and_persist(user)
         if battles is None:
-            raise HTTPException(status_code=502, detail="Не удалось загрузить бои")
+            raise http_error("E020", status=502)
         _set_battle_cache(user, battles)
     return battles
 
@@ -148,12 +146,12 @@ async def battle_detail_by_time(
     for i, battle in enumerate(battles):
         if _battle_timestamp(battle) == raw:
             return _build_battle_detail(i, battle)
-    raise HTTPException(status_code=404, detail="Бой не найден")
+    raise http_error("E004", status=404)
 
 
 @router.get("/{index}", response_model=BattleDetailResponse)
 async def battle_detail(index: int, user: User = Depends(require_subscription)) -> BattleDetailResponse:
     battles = await _load_user_battles(user)
     if index < 0 or index >= len(battles):
-        raise HTTPException(status_code=404, detail="Бой не найден")
+        raise http_error("E004", status=404)
     return _build_battle_detail(index, battles[index])

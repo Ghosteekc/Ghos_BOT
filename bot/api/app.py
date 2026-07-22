@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from bot.api.errors import register_exception_handlers
 from bot.api.routes import battles, decks, misc, profile
 
 WEBAPP_DIST = Path(__file__).resolve().parents[2] / "webapp" / "dist"
@@ -13,6 +14,7 @@ STATIC_CARDS = Path(__file__).resolve().parents[1] / "static" / "cards"
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Ghosteek CR Assistant API", version="1.0.0")
+    register_exception_handlers(app)
 
     app.add_middleware(
         CORSMiddleware,

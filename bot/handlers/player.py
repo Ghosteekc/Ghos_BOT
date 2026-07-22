@@ -19,6 +19,7 @@ from bot.services.clash_api import (
     normalize_tag,
     validate_tag,
 )
+from bot.user_errors import code_from_clash_api, log_error, user_message
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +49,8 @@ async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
     if not validate_tag(tag):
         _pending_link.add(message.from_user.id)
         await message.answer(
-            "❌ Неверный формат тега. Используйте символы: 0289PYLQGRJCUV\n"
-            "Пример: <code>#ABC123</code>\n\n"
-            "Отправьте тег ещё раз."
+            user_message("E001")
+            + "\n\nПример: <code>#ABC123</code>\n\nОтправьте тег ещё раз."
         )
         return
 
@@ -58,20 +58,28 @@ async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
     try:
         player = await client.get_player(tag)
     except ClashRoyaleAPIError as e:
-        logger.error(f"Failed to link player {tag} for user {message.from_user.id}: {e}")
-        error_msg = f"❌ {str(e)}"
-        if e.details and e.status == 403:
-            error_msg += f"\n\nДетали: {e.details[:200]}"
-        _pending_link.add(message.from_user.id)
-        await message.answer(error_msg)
-        return
-    except Exception as e:
-        logger.error(
-            f"Unexpected error linking player {tag} for user {message.from_user.id}: {e}",
-            exc_info=True,
+        code = code_from_clash_api(e)
+        log_error(
+            logger,
+            code,
+            f"Failed to link player {tag}: {e}",
+            exc=e,
+            user_id=message.from_user.id,
+            status=e.status,
         )
         _pending_link.add(message.from_user.id)
-        await message.answer(f"❌ Неожиданная ошибка: {str(e)}")
+        await message.answer(user_message(code))
+        return
+    except Exception:
+        log_error(
+            logger,
+            "E061",
+            f"Unexpected error linking player {tag}",
+            user_id=message.from_user.id,
+        )
+        logger.exception("Unexpected error linking player %s", tag)
+        _pending_link.add(message.from_user.id)
+        await message.answer(user_message("E061"))
         return
     finally:
         await client.close()
@@ -95,12 +103,15 @@ async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
             "Откройте приложение через Menu Button для анализа боёв и колод."
         )
     except Exception as e:
-        logger.error(
-            f"Database error linking player {tag} for user {message.from_user.id}: {e}",
-            exc_info=True,
+        log_error(
+            logger,
+            "E030",
+            f"Database error linking player {tag}",
+            exc=e,
+            user_id=message.from_user.id,
         )
         _pending_link.add(message.from_user.id)
-        await message.answer(f"❌ Ошибка сохранения данных: {str(e)}")
+        await message.answer(user_message("E030"))
 
 
 @router.message(Command("link"))
@@ -139,8 +150,8 @@ async def cmd_profile(message: Message) -> None:
 
     if not user.player_tag:
         await message.answer(
-            "❌ Тег не привязан.\n\n"
-            "Нажмите «📝 Регистрация» или отправьте команду /link"
+            user_message("E003")
+            + "\n\nНажмите «📝 Регистрация» или отправьте команду /link"
         )
         return
 
@@ -148,12 +159,14 @@ async def cmd_profile(message: Message) -> None:
     try:
         player = await client.get_player(user.player_tag)
     except ClashRoyaleAPIError as e:
-        logger.error(f"Failed to load profile for {user.player_tag}: {e}")
-        await message.answer(f"❌ Ошибка загрузки профиля: {e}")
+        code = code_from_clash_api(e)
+        log_error(logger, code, f"Failed to load profile for {user.player_tag}: {e}", status=e.status)
+        await message.answer(user_message(code))
         return
-    except Exception as e:
-        logger.error(f"Unexpected error loading profile for {user.player_tag}: {e}", exc_info=True)
-        await message.answer(f"❌ Неожиданная ошибка: {str(e)}")
+    except Exception:
+        log_error(logger, "E060", f"Unexpected error loading profile for {user.player_tag}")
+        logger.exception("Unexpected error loading profile for %s", user.player_tag)
+        await message.answer(user_message("E060"))
         return
     finally:
         await client.close()

@@ -13,6 +13,7 @@ from bot.services.counter_engine import (
 )
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_analyzer import get_most_played_cards
+from bot.user_errors import log_error, user_message, user_message_plain
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ async def opponent_decks(message: Message, user: User) -> None:
     await message.answer("⏳ Анализирую колоды соперников...")
     battles = await _load_battles(user)
     if battles is None:
-        await message.answer("❌ Не удалось загрузить данные.")
+        await message.answer(user_message("E020"))
         return
 
     try:
@@ -69,8 +70,8 @@ async def opponent_decks(message: Message, user: User) -> None:
         await message.answer("\n".join(lines))
         logger.info(f"Showed {len(opponents)} opponent decks to user {message.from_user.id}")
     except Exception as e:
-        logger.error(f"Error analyzing opponent decks for user {message.from_user.id}: {e}", exc_info=True)
-        await message.answer("❌ Ошибка анализа колод соперников. Попробуйте позже.")
+        log_error(logger, "E050", "Error analyzing opponent decks", exc=e, user_id=message.from_user.id)
+        await message.answer(user_message("E050"))
 
 
 @router.message(F.text == "⚔️ Контр-колоды")
@@ -79,7 +80,7 @@ async def counter_decks(message: Message, user: User) -> None:
     await message.answer("⏳ Подбираю контр-колоды...")
     battles = await _load_battles(user)
     if battles is None:
-        await message.answer("❌ Не удалось загрузить данные.")
+        await message.answer(user_message("E020"))
         return
 
     try:
@@ -97,8 +98,8 @@ async def counter_decks(message: Message, user: User) -> None:
             reply_markup=opponent_select_keyboard(len(opponents)),
         )
     except Exception as e:
-        logger.error(f"Error preparing counter decks for user {message.from_user.id}: {e}", exc_info=True)
-        await message.answer("❌ Ошибка подбора контр-колод. Попробуйте позже.")
+        log_error(logger, "E051", "Error preparing counter decks", exc=e, user_id=message.from_user.id)
+        await message.answer(user_message("E051"))
 
 
 @router.callback_query(F.data.startswith("opp_"))
@@ -107,7 +108,7 @@ async def counter_deck_detail(callback: CallbackQuery, user: User) -> None:
     opponents = _opponents_cache.get(callback.from_user.id, [])
 
     if idx >= len(opponents):
-        await callback.answer("Соперник не найден", show_alert=True)
+        await callback.answer(user_message_plain("E005"), show_alert=True)
         return
 
     opp = opponents[idx]
@@ -138,8 +139,8 @@ async def counter_deck_detail(callback: CallbackQuery, user: User) -> None:
         await callback.message.edit_text(text)
         logger.info(f"Showed counter deck for opponent {idx} to user {callback.from_user.id}")
     except Exception as e:
-        logger.error(f"Error showing counter deck for user {callback.from_user.id}: {e}", exc_info=True)
-        await callback.message.edit_text("❌ Ошибка подбора контр-колоды. Попробуйте позже.")
+        log_error(logger, "E051", "Error showing counter deck", exc=e, user_id=callback.from_user.id)
+        await callback.message.edit_text(user_message("E051"))
     await callback.answer()
 
 
@@ -149,7 +150,7 @@ async def customize_deck(message: Message, user: User) -> None:
     await message.answer("⏳ Анализирую вашу текущую колоду...")
     battles = await _load_battles(user)
     if battles is None:
-        await message.answer("❌ Не удалось загрузить данные.")
+        await message.answer(user_message("E020"))
         return
 
     try:
@@ -182,8 +183,8 @@ async def customize_deck(message: Message, user: User) -> None:
         await message.answer(text)
         logger.info(f"Showed deck customization to user {message.from_user.id}")
     except Exception as e:
-        logger.error(f"Error customizing deck for user {message.from_user.id}: {e}", exc_info=True)
-        await message.answer("❌ Ошибка кастомизации колоды. Попробуйте позже.")
+        log_error(logger, "E052", "Error customizing deck", exc=e, user_id=message.from_user.id)
+        await message.answer(user_message("E052"))
 
 
 @router.message(F.text == "✨ Синергии")
@@ -192,7 +193,7 @@ async def synergy_deck(message: Message, user: User) -> None:
     await message.answer("⏳ Строю колоду на основе ваших карт...")
     battles = await _load_battles(user)
     if battles is None:
-        await message.answer("❌ Не удалось загрузить данные.")
+        await message.answer(user_message("E020"))
         return
 
     try:
@@ -223,5 +224,5 @@ async def synergy_deck(message: Message, user: User) -> None:
         await message.answer(text)
         logger.info(f"Showed synergy deck to user {message.from_user.id}")
     except Exception as e:
-        logger.error(f"Error building synergy deck for user {message.from_user.id}: {e}", exc_info=True)
-        await message.answer("❌ Ошибка построения колоды. Попробуйте позже.")
+        log_error(logger, "E053", "Error building synergy deck", exc=e, user_id=message.from_user.id)
+        await message.answer(user_message("E053"))

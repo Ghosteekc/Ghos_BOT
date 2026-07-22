@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message
 
 from bot.config import settings
+from bot.user_errors import user_message
 
 router = Router()
 
@@ -25,6 +26,6 @@ async def cmd_support(message: Message) -> None:
         return
 
     await message.answer(
-        "💬 <b>Поддержка</b>\n\n"
-        "Контакт поддержки не настроен. Укажите SUPPORT_USERNAME в .env"
+        user_message("E900")
+        + "\n\n💬 Опишите проблему в следующем сообщении — мы передадим её администратору."
     )
