@@ -3,6 +3,7 @@ from bot.services.battle_day_stats import build_last_results, build_most_used_ca
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from bot.api.deps import get_db, require_linked_player, require_subscription
 from bot.user_errors import http_error
 from bot.api.schemas import (
     ArenaDecksResponse,
