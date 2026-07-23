@@ -1,4 +1,4 @@
-"""Meme / rofl deck presets — post-ironic chaos, not boomer puns."""
+"""Meme / rofl deck presets — post-ironic chaos in Russian."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class RoflDeck:
 ROFL_DECKS: list[RoflDeck] = [
     RoflDeck(
         "skill-issue",
-        "Skill Issue",
+        "Нет скилла",
         (
             "Hog Rider",
             "Balloon",
@@ -28,11 +28,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "X-Bow",
             "P.E.K.K.A",
         ),
-        "Просто играй лучше. (Колода специально против этого.)",
+        "Просто играй лучше. Колода специально против этого.",
     ),
     RoflDeck(
         "npc-pack",
-        "NPC Starter Pack",
+        "Набор NPC",
         (
             "Knight",
             "Archers",
@@ -43,11 +43,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Witch",
             "Baby Dragon",
         ),
-        "Default settings игрок. Без DLC на мозги.",
+        "Игрок с настройками по умолчанию. Без DLC на мозги.",
     ),
     RoflDeck(
         "delulu",
-        "Delulu Push",
+        "Делулу-пуш",
         (
             "Balloon",
             "Rage",
@@ -58,11 +58,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Sparky",
             "Mirror",
         ),
-        "Delulu is the solulu. Король всё равно упадёт (нет).",
+        "Сейчас точно затащу. Король всё равно упадёт — нет.",
     ),
     RoflDeck(
         "sigma-3am",
-        "Sigma 3AM Grind",
+        "Сигма в 3 ночи",
         (
             "P.E.K.K.A",
             "Mega Knight",
@@ -73,11 +73,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Dark Prince",
             "Lumberjack",
         ),
-        "Проснулся. Заапгрейдил. Проиграл. Повтори. Sigma.",
+        "Проснулся. Заапгрейдил. Проиграл. Повтори.",
     ),
     RoflDeck(
         "ohio-boss",
-        "Ohio Final Boss",
+        "Босс из Огайо",
         (
             "Mega Knight",
             "Electro Giant",
@@ -88,11 +88,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Lava Hound",
             "Wizard",
         ),
-        "Only in Ohio. На самом деле — в каждом втором матче.",
+        "Только в Огайо. На деле — в каждом втором матче.",
     ),
     RoflDeck(
         "main-character",
-        "Main Character",
+        "Главный герой",
         (
             "Golden Knight",
             "Princess",
@@ -103,11 +103,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Sparky",
             "Mega Knight",
         ),
-        "Plot armor не включился. Сюжет — поражение.",
+        "Броня сюжета не включилась. Финал — поражение.",
     ),
     RoflDeck(
         "low-taper",
-        "Low Taper Fade",
+        "Низкий пробор",
         (
             "Royal Ghost",
             "Bandit",
@@ -118,11 +118,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Wall Breakers",
             "The Log",
         ),
-        "What do you want bro? Low taper fade на мосту.",
+        "Какой пробор тебе нужен? Вот тебе колода на мосту.",
     ),
     RoflDeck(
         "trust-me-bro",
-        "Trust Me Bro",
+        "Поверь, братан",
         (
             "Elite Barbarians",
             "Rage",
@@ -133,11 +133,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Skeleton Barrel",
             "Dart Goblin",
         ),
-        "Trust me bro, это последний пуш. (Спойлер: не последний.)",
+        "Это последний пуш, честно. Спойлер: не последний.",
     ),
     RoflDeck(
         "chat-real",
-        "Chat Is This Real",
+        "Чат, это реально?",
         (
             "Mirror",
             "Clone",
@@ -148,11 +148,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "The Log",
             "Giant Snowball",
         ),
-        "Chat, is this winnable? No. Спасибо за attention.",
+        "Чат, это можно выиграть? Нет. Спасибо за внимание.",
     ),
     RoflDeck(
         "tiktok-montage",
-        "TikTok Montage",
+        "ТикТок-монтаж",
         (
             "Sparky",
             "Inferno Dragon",
@@ -163,7 +163,7 @@ ROFL_DECKS: list[RoflDeck] = [
             "Clone",
             "Mega Minion",
         ),
-        "0.3 сек клипа, 8 эликсира и полный copium.",
+        "Клип на полсекунды, минус восемь эликсира и полный угар.",
     ),
     RoflDeck(
         "mom-bedtime",
@@ -182,7 +182,7 @@ ROFL_DECKS: list[RoflDeck] = [
     ),
     RoflDeck(
         "l-plus-ratio",
-        "L + Ratio",
+        "Лайк + рейд",
         (
             "Rocket",
             "Fireball",
@@ -193,11 +193,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Zap",
             "The Log",
         ),
-        "Войск нет. Зато L на короля закинуть можно.",
+        "Войск нет. Зато лайк на короля закинуть можно.",
     ),
     RoflDeck(
         "fanum-tax",
-        "Fanum Tax",
+        "Налог на эликсир",
         (
             "Goblin Cage",
             "Elixir Collector",
@@ -208,11 +208,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Goblin Gang",
             "Fire Spirit",
         ),
-        "Забираем эликсир. Отдаём трофеи. Fair trade.",
+        "Забираем эликсир. Отдаём кубки. Справедливо.",
     ),
     RoflDeck(
         "gym-bro",
-        "Gym Bro Cycle",
+        "Качок на мосту",
         (
             "Hog Rider",
             "Elite Barbarians",
@@ -223,7 +223,7 @@ ROFL_DECKS: list[RoflDeck] = [
             "Balloon",
             "Zap",
         ),
-        "Leg day каждый раунд. Кардио — проигрыш.",
+        "День ног — каждый раунд. Кардио — это поражение.",
     ),
     RoflDeck(
         "grandma-hangup",
@@ -238,11 +238,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Bowler",
             "Ice Wizard",
         ),
-        "Объяснял колоду бабушке. Она повесила трубку через 4 карты.",
+        "Объяснял колоду бабушке. Она повесила трубку через четыре карты.",
     ),
     RoflDeck(
         "ping-999",
-        "Ping 999",
+        "Пинг 999",
         (
             "Golem",
             "Lava Hound",
@@ -257,7 +257,7 @@ ROFL_DECKS: list[RoflDeck] = [
     ),
     RoflDeck(
         "based-cringe",
-        "Based & Cringe",
+        "База и кринж",
         (
             "Mirror",
             "Clone",
@@ -268,11 +268,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Elite Barbarians",
             "Wizard",
         ),
-        "Одновременно based и cringe. Schrödinger meta.",
+        "Одновременно база и кринж. Колода Шрёдингера.",
     ),
     RoflDeck(
         "steal-brainrot",
-        "Steal a Brainrot",
+        "Украл с ТикТока",
         (
             "Minion Horde",
             "Skeleton Army",
@@ -283,11 +283,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Fireball",
             "Rage",
         ),
-        "Украл чужую колоду с TikTok. Вернул только минус trophies.",
+        "Снял чужую колоду с ТикТока. Вернул только минус кубки.",
     ),
     RoflDeck(
         "rizz-minus",
-        "Rizz -100",
+        "Харизма −100",
         (
             "Prince",
             "Dark Prince",
@@ -298,11 +298,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Barbarians",
             "Arrows",
         ),
-        "Rizz отрицательный. Ratio положительный. У соперника.",
+        "Харизмы нет. Кубки у соперника.",
     ),
     RoflDeck(
         "touch-grass",
-        "Touch Grass (нет)",
+        "Тронь траву (нет)",
         (
             "Cannon",
             "Tesla",
@@ -313,11 +313,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Goblin Cage",
             "X-Bow",
         ),
-        "Сказали touch grass. Собрали только постройки у башни.",
+        "Сказали выйти на улицу. Собрали только постройки у башни.",
     ),
     RoflDeck(
         "gen-alpha",
-        "Gen Alpha National Team",
+        "Сборная зумеров",
         (
             "Mega Knight",
             "Elite Barbarians",
@@ -328,11 +328,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Rage",
             "Mirror",
         ),
-        "Сборная поколения, которое смеётся над твоим лadder push.",
+        "Сборная, которая смеётся над твоим пушем в рейтинг.",
     ),
     RoflDeck(
         "aura-farm",
-        "Aura Farming",
+        "Фарм ауры",
         (
             "Golden Knight",
             "Princess",
@@ -343,11 +343,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Balloon",
             "The Log",
         ),
-        "Фармишь aura. Сливаешь trophies. Priorities.",
+        "Фармишь ауру. Сливаешь кубки. Приоритеты.",
     ),
     RoflDeck(
         "one-brain-cell",
-        "One Brain Cell",
+        "Один нейрон",
         (
             "Skeletons",
             "Bats",
@@ -362,7 +362,7 @@ ROFL_DECKS: list[RoflDeck] = [
     ),
     RoflDeck(
         "skull-emoji",
-        "💀 Deck",
+        "💀 колода",
         (
             "Skeletons",
             "Skeleton Army",
@@ -373,11 +373,11 @@ ROFL_DECKS: list[RoflDeck] = [
             "Tombstone",
             "Guards",
         ),
-        "💀💀💀. Не смешно? Значит ты old.",
+        "💀💀💀. Не смешно? Значит, ты старпер.",
     ),
     RoflDeck(
         "cope-castle",
-        "Copium Castle",
+        "Замок отмазок",
         (
             "Elixir Collector",
             "Mirror",
@@ -388,23 +388,23 @@ ROFL_DECKS: list[RoflDeck] = [
             "Tombstone",
             "Barbarian Hut",
         ),
-        "Копим copium у своей башни. Мета в шоке (ему плевать).",
+        "Копим отмазки у своей башни. Мете плевать.",
     ),
 ]
 
 _CHAOS_TAGLINES = (
-    "Алгоритм не виноват. Ты нажал «Заново».",
-    "Это не баг, это post-irony.",
-    "School tier S+. Ladder tier F.",
-    "Сгенерировано на чистом brainrot.",
-    "Meta analysts hate this one trick.",
+    "Алгоритм не виноват. Ты сам нажал «Заново».",
+    "Это не баг — это рофл.",
+    "Для смеха — пять звёзд. Для рейтинга — ноль.",
+    "Сгенерировано на чистом угаре.",
+    "Мета-аналитики ненавидят этот трюк.",
 )
 
 _CHAOS_NAMES = (
-    "Chaos Draft",
-    "Random Brainrot",
-    "Algorithm Said No",
-    "Certified Silly",
+    "Хаос-черновик",
+    "Случайный бред",
+    "Алгоритм сказал «нет»",
+    "Сертифицированный угар",
 )
 
 
