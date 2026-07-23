@@ -13,7 +13,7 @@ from bot.api.schemas import (
     SettingsUpdateRequest,
     SyncResponse,
 )
-from bot.models.database import BattleCache, FavoriteDeck, User, async_session
+from bot.models.database import FavoriteDeck, User, async_session
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_cards_catalog
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag, validate_tag
 from bot.services.battle_service import load_and_persist
@@ -185,16 +185,16 @@ async def update_settings(
 
 @router.post("/cache/clear")
 async def clear_cache(user: User = Depends(get_current_user)) -> dict:
+    """Clear in-memory session cache only.
+
+    battle_cache is the persistent battle history store (beyond CR API's ~25
+    recent battles). It must not be wiped by this endpoint.
+    """
     from bot.services.battle_session_cache import clear_user
     from bot.services.clash_api import normalize_tag
 
     tag = normalize_tag(user.player_tag) if user.player_tag else None
     clear_user(user.telegram_id, tag)
-
-    if user.player_tag:
-        async with async_session() as session:
-            await session.execute(delete(BattleCache).where(BattleCache.player_tag == tag))
-            await session.commit()
 
     return {"ok": True}
 
