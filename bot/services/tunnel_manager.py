@@ -39,6 +39,9 @@ def stop_existing_tunnels() -> None:
         Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -match 'localtunnel|lt\.js' } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -match 'localtunnel|lt\.js' } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -match 'start-tunnel\.ps1' } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -78,8 +81,10 @@ def start_tunnel(
         return None
 
     if not wait_for_backend(port):
-        logger.error("Backend is not ready on :%s — tunnel not started", port)
-        return None
+        logger.warning(
+            "Backend is not ready on :%s — tunnel supervisor will wait for API",
+            port,
+        )
 
     stop_existing_tunnels()
 
@@ -88,6 +93,7 @@ def start_tunnel(
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
+        "-NoExit",
         "-File",
         str(TUNNEL_SCRIPT),
         "-Port",
@@ -98,15 +104,17 @@ def start_tunnel(
     if skip_loca_lt_check:
         args.append("-SkipLocaLtCheck")
 
-    logger.info("Starting localtunnel -> https://%s.loca.lt", subdomain)
+    logger.info("Starting localtunnel supervisor -> https://%s.loca.lt", subdomain)
     proc = subprocess.Popen(
         args,
         cwd=str(TUNNEL_DIR),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
     )
-    logger.info("Localtunnel supervisor started (PID %s). Log: scripts/localtunnel/tunnel.log", proc.pid)
+    logger.info(
+        "Localtunnel supervisor started (PID %s). Watch the tunnel window or %s",
+        proc.pid,
+        TUNNEL_DIR / "tunnel.log",
+    )
     return proc
 
 

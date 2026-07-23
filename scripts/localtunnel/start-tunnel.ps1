@@ -1,21 +1,43 @@
-# Stable localtunnel to bot on :8080
+# Stable localtunnel to bot on :8080 - only fixed subdomain ghosteekcr.
 # Run in a SEPARATE Windows PowerShell window - NOT in Cursor terminal.
 #
-# Examples:
 #   .\start-tunnel.ps1
 #   .\start-tunnel.ps1 -Subdomain ghosteekcr
 
 param(
     [int]$Port = 8080,
     [string]$Subdomain = "ghosteekcr",
-    [int]$MaxReclaimAttempts = 3,
-    [switch]$AllowRandomFallback,
     [switch]$SkipLocaLtCheck
 )
 
+$ErrorActionPreference = "Continue"
 $Root = (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent)
 $UrlFile = Join-Path $PSScriptRoot "tunnel-url.txt"
 $LogFile = Join-Path $PSScriptRoot "tunnel.log"
+$ExpectedUrl = "https://$Subdomain.loca.lt"
+$MyPid = $PID
+
+function Write-LogLine {
+    param([string]$Message, [string]$Color = "White")
+    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "[$stamp] $Message"
+    Write-Host $line -ForegroundColor $Color
+    Add-Content -Path $LogFile -Value $line -Encoding UTF8
+}
+
+function Write-SuccessBanner {
+    param([string]$Url)
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host "  TUNNEL READY" -ForegroundColor Green
+    Write-Host "  $Url" -ForegroundColor Green
+    Write-Host "  Backend port $Port - OK" -ForegroundColor Green
+    Write-Host "  Public API health - OK" -ForegroundColor Green
+    Write-Host "  Do not close this window." -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host ""
+    Write-LogLine "TUNNEL READY: $Url (public health OK)" "Green"
+}
 
 function Test-Backend {
     try {
@@ -26,28 +48,24 @@ function Test-Backend {
     }
 }
 
-function Write-LogLine {
-    param([string]$Message, [string]$Color = "White")
-    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $line = "[$stamp] $Message"
-    Write-Host $line -ForegroundColor $Color
-    Add-Content -Path $LogFile -Value $line -Encoding UTF8
+function Wait-ForBackend {
+    while (-not (Test-Backend)) {
+        $hint = "Waiting for backend on port $Port - run: cd `"$Root`"; python -m bot.main"
+        Write-LogLine $hint "Yellow"
+        Start-Sleep -Seconds 5
+    }
+    Write-LogLine "Backend is online on port $Port" "Green"
 }
 
-function Stop-ExistingTunnels {
-    Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match "localtunnel|lt\.js" } |
-        ForEach-Object {
-            Write-LogLine "Stopping localtunnel node (PID $($_.ProcessId))" "Yellow"
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match "localtunnel" } |
-        ForEach-Object {
-            Write-LogLine "Stopping localtunnel cmd (PID $($_.ProcessId))" "Yellow"
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    Start-Sleep -Seconds 2
+function Test-TunnelPublicHealth {
+    param([string]$Url)
+    try {
+        $headers = @{ "Bypass-Tunnel-Reminder" = "true" }
+        $r = Invoke-RestMethod -Uri "$Url/api/health" -Headers $headers -TimeoutSec 20
+        return $r.status -eq "ok"
+    } catch {
+        return $false
+    }
 }
 
 function Test-LocaLt {
@@ -57,6 +75,34 @@ function Test-LocaLt {
     } catch {
         return $false
     }
+}
+
+function Stop-ExistingTunnels {
+    Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match "localtunnel|lt\.js" } |
+        ForEach-Object {
+            Write-LogLine "Stopping localtunnel node (PID $($_.ProcessId))" "Yellow"
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+
+    Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match "localtunnel|lt\.js" } |
+        ForEach-Object {
+            Write-LogLine "Stopping localtunnel cmd (PID $($_.ProcessId))" "Yellow"
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.ProcessId -ne $MyPid -and
+            $_.CommandLine -match "start-tunnel\.ps1"
+        } |
+        ForEach-Object {
+            Write-LogLine "Stopping other tunnel supervisor (PID $($_.ProcessId))" "Yellow"
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+
+    Start-Sleep -Seconds 2
 }
 
 function Ensure-LocalLt {
@@ -75,125 +121,110 @@ function Ensure-LocalLt {
     return $ltJs
 }
 
-function Build-LtRunArgs {
-    $runArgs = @("--port", "$Port")
-    if ($Subdomain) {
-        $runArgs += @("--subdomain", $Subdomain)
-    }
-    return $runArgs
+function Save-TunnelUrl {
+    param([string]$Url)
+    Set-Content -Path $UrlFile -Value $Url -Encoding UTF8
+    Write-LogLine "Saved URL to: $UrlFile" "DarkGray"
 }
 
 function Test-SubdomainUrl {
     param([string]$Url)
-    if (-not $Subdomain) { return $true }
     return $Url -match "https://$([regex]::Escape($Subdomain))\.loca\.lt/?$"
 }
 
-function Save-TunnelUrl {
-    param(
-        [string]$Url,
-        [switch]$Force
-    )
-    if (-not $Url) { return $false }
-    if (-not $Force -and -not (Test-SubdomainUrl -Url $Url)) {
-        return $false
-    }
-    Set-Content -Path $UrlFile -Value $Url -Encoding UTF8
-    Write-LogLine "Tunnel URL: $Url" "Green"
-    Write-LogLine "Saved to: $UrlFile" "DarkGray"
-    if ($Force -and $Subdomain) {
-        Write-LogLine "Using random URL because subdomain is stuck on loca.lt servers." "Yellow"
-        Write-LogLine "Update Vercel VITE_API_URL to: $Url" "Yellow"
-    }
-    return $true
-}
-
-function Process-LtOutputLine {
-    param(
-        [string]$Line,
-        [ref]$SavedUrl,
-        [switch]$AcceptRandom
-    )
-
-    if (-not $Line) { return $false }
-
-    Write-LogLine $Line
-
-    if ($Line -notmatch "(https://[\w-]+\.loca\.lt)") {
-        return $false
-    }
-
-    $url = $Matches[1]
-    if ($SavedUrl.Value) { return $false }
-
-    if (Test-SubdomainUrl -Url $url) {
-        if (Save-TunnelUrl -Url $url) {
-            $SavedUrl.Value = $true
-        }
-        return $false
-    }
-
-    if ($AcceptRandom) {
-        if (Save-TunnelUrl -Url $url -Force) {
-            $SavedUrl.Value = $true
-        }
-        return $false
-    }
-
-    if ($Subdomain) {
-        Write-LogLine ("Subdomain {0} busy - loca.lt gave: {1}" -f $Subdomain, $url) "Red"
-        Write-LogLine "Wait and restart, or use: -AllowRandomFallback" "Yellow"
-        return $true
-    }
-
-    if (Save-TunnelUrl -Url $url) {
-        $SavedUrl.Value = $true
-    }
-    return $false
-}
-
 function Start-LocalTunnelSession {
-    param(
-        [string]$LtJs,
-        [switch]$AcceptRandom
-    )
+    param([string]$LtJs)
 
-    $savedUrl = [ref]$false
-    $wrongSubdomain = [ref]$false
-    $runArgs = Build-LtRunArgs
+    Write-LogLine "Command: node `"$LtJs`" --port $Port --subdomain $Subdomain" "DarkGray"
+    Write-LogLine "Connecting to loca.lt (only $Subdomain allowed)..." "Yellow"
 
-    Write-LogLine ("Command: node lt.js {0}" -f ($runArgs -join " ")) "DarkGray"
-    Write-LogLine "Connecting to loca.lt server (10-30 sec)..." "Yellow"
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "node"
+    $psi.Arguments = "`"$LtJs`" --port $Port --subdomain $Subdomain"
+    $psi.WorkingDirectory = $PSScriptRoot
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
 
-    Set-Location $PSScriptRoot
-    & node $LtJs @runArgs 2>&1 | ForEach-Object {
-        if (Process-LtOutputLine -Line "$_" -SavedUrl $savedUrl -AcceptRandom:$AcceptRandom) {
-            $wrongSubdomain.Value = $true
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+
+    $savedUrl = $false
+    $wrongSubdomain = $false
+    $backendLost = $false
+    $readyAnnounced = $false
+
+    while (-not $proc.HasExited) {
+        if (-not (Test-Backend)) {
+            Write-LogLine "Backend offline - stopping tunnel until API is back..." "Yellow"
+            $backendLost = $true
+            break
         }
+
+        while ($proc.StandardOutput.Peek() -ge 0) {
+            $line = $proc.StandardOutput.ReadLine()
+            if (-not $line) { continue }
+            Write-LogLine $line
+
+            if ($line -match "(https://[\w-]+\.loca\.lt)") {
+                $url = $Matches[1]
+                if (Test-SubdomainUrl -Url $url) {
+                    $savedUrl = $true
+                    Save-TunnelUrl -Url $url
+                } elseif (-not $wrongSubdomain) {
+                    $wrongSubdomain = $true
+                    Write-LogLine "Subdomain $Subdomain is busy - loca.lt gave: $url" "Red"
+                    Write-LogLine "Wrong tunnel killed. Retrying $ExpectedUrl only..." "Yellow"
+                    break
+                }
+            }
+        }
+
+        while ($proc.StandardError.Peek() -ge 0) {
+            $line = $proc.StandardError.ReadLine()
+            if ($line) { Write-LogLine $line "DarkGray" }
+        }
+
+        if ($wrongSubdomain) {
+            break
+        }
+
+        if ($savedUrl -and -not $readyAnnounced) {
+            if (Test-TunnelPublicHealth -Url $ExpectedUrl) {
+                Write-SuccessBanner -Url $ExpectedUrl
+                $readyAnnounced = $true
+            }
+        }
+
+        Start-Sleep -Milliseconds 400
+    }
+
+    if (-not $proc.HasExited) {
+        try { $proc.Kill() } catch { }
+        $proc.WaitForExit(3000) | Out-Null
     }
 
     return @{
-        ExitCode = $LASTEXITCODE
-        WrongSubdomain = $wrongSubdomain.Value
-        SavedUrl = $savedUrl.Value
+        WrongSubdomain = $wrongSubdomain
+        BackendLost = $backendLost
+        ReadyAnnounced = $readyAnnounced
+        ExitCode = $proc.ExitCode
     }
 }
 
 Write-LogLine "=== Ghosteek localtunnel ===" "Cyan"
-Write-LogLine "Do not close this window. Cursor kills background npx when session ends." "DarkGray"
+Write-LogLine "Fixed subdomain: $Subdomain -> $ExpectedUrl" "Cyan"
 Write-LogLine "Log file: $LogFile" "DarkGray"
-
-if (-not (Test-Backend)) {
-    Write-LogLine "Backend not responding on :$Port. Start: cd `"$Root`"; python -m bot.main" "Red"
-    exit 1
-}
+Write-LogLine "Stopping all other localtunnel processes..." "Yellow"
 
 Stop-ExistingTunnels
 
 if (-not $SkipLocaLtCheck) {
     Write-LogLine "Checking loca.lt reachability..." "Cyan"
     if (-not (Test-LocaLt)) {
-        Write-LogLine "loca.lt is NOT reachable from this network (timeout)." "Red"
+        Write-LogLine "loca.lt is NOT reachable from this network." "Red"
         Write-LogLine "Try VPN or mobile hotspot, then run this script again." "Yellow"
         Write-LogLine "Or force start: .\start-tunnel.ps1 -SkipLocaLtCheck" "DarkGray"
         exit 4
@@ -202,55 +233,50 @@ if (-not $SkipLocaLtCheck) {
 }
 
 $LtJs = Ensure-LocalLt
+Wait-ForBackend
 
-if ($Subdomain) {
-    Write-LogLine "Requested subdomain: $Subdomain" "Cyan"
-    Write-LogLine ("Vercel VITE_API_URL=https://{0}.loca.lt (no redeploy on tunnel restart)" -f $Subdomain) "Cyan"
-}
+Write-LogLine "Supervisor started. Retries until $ExpectedUrl is active or you close this window." "Cyan"
 
-Write-LogLine "Backend OK. Auto-restart on loca.lt disconnect." "Green"
-
-$attempt = 0
+$session = 0
 $reclaimAttempt = 0
 
 while ($true) {
+    Wait-ForBackend
+
     if (-not (Test-Backend)) {
-        Write-LogLine "Backend offline, waiting 10 sec..." "Red"
-        Start-Sleep -Seconds 10
         continue
     }
 
-    $attempt++
-    Write-LogLine "Starting localtunnel (session $attempt)..." "Cyan"
+    Stop-ExistingTunnels
+    $session++
+    Write-LogLine "Starting localtunnel session #$session..." "Cyan"
 
-    Set-Location $PSScriptRoot
-    $session = Start-LocalTunnelSession -LtJs $LtJs -AcceptRandom:$AllowRandomFallback
+    $result = Start-LocalTunnelSession -LtJs $LtJs
 
-    if ($session.WrongSubdomain) {
+    if ($result.BackendLost) {
+        Write-LogLine "Waiting for backend to return..." "Yellow"
+        Stop-ExistingTunnels
+        continue
+    }
+
+    if ($result.WrongSubdomain) {
         $reclaimAttempt++
-        if ($reclaimAttempt -ge $MaxReclaimAttempts) {
-            Write-LogLine ("Subdomain {0} still busy after {1} attempt(s)." -f $Subdomain, $reclaimAttempt) "Red"
-            Write-LogLine "loca.lt keeps names globally; rebooting PC does not release them." "Yellow"
-            Write-LogLine "Try another name, e.g.: .\start-tunnel.ps1 -Subdomain ghosteekcr2" "Cyan"
-            Write-LogLine "Or accept random URL: .\start-tunnel.ps1 -AllowRandomFallback" "Cyan"
-            if ($AllowRandomFallback) {
-                Write-LogLine "Starting without fixed subdomain..." "Yellow"
-                $Subdomain = ""
-                $reclaimAttempt = 0
-                continue
-            }
-            exit 2
-        }
-        $waitSec = [Math]::Min(15 + ($reclaimAttempt * 10), 45)
-        Write-LogLine "Reclaim attempt $reclaimAttempt/$MaxReclaimAttempts failed. Waiting $waitSec sec..." "Yellow"
+        $waitSec = [Math]::Min(10 + ($reclaimAttempt * 5), 60)
+        Write-LogLine "Reclaim attempt $reclaimAttempt - waiting ${waitSec}s before retry..." "Yellow"
         Stop-ExistingTunnels
         Start-Sleep -Seconds $waitSec
         continue
     }
 
     $reclaimAttempt = 0
-    $restartDelay = if ($Subdomain) { 10 } else { 5 }
-    Write-LogLine "Tunnel exited (code $($session.ExitCode)). Restart in $restartDelay sec..." "Yellow"
+    $exitCode = $result.ExitCode
+
+    if ($result.ReadyAnnounced) {
+        Write-LogLine "Tunnel session ended (code $exitCode). Restarting in 5 sec..." "Yellow"
+    } else {
+        Write-LogLine "Tunnel exited before ready (code $exitCode). Restart in 5 sec..." "Yellow"
+    }
+
     Stop-ExistingTunnels
-    Start-Sleep -Seconds $restartDelay
+    Start-Sleep -Seconds 5
 }

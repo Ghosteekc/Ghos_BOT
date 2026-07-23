@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -426,10 +428,21 @@ class FavoritesResponse(BaseModel):
 
 
 class SettingsResponse(BaseModel):
-    theme: str = "dark"
-    language: str = "ru"
+    theme: Literal["dark", "light", "auto"] = "dark"
+    language: Literal["ru", "en"] = "ru"
     notifications: bool = True
     telegram_notifications: bool = True
+    haptic_enabled: bool = True
+
+
+class SettingsUpdateRequest(BaseModel):
+    theme: Literal["dark", "light", "auto"] | None = None
+    language: Literal["ru", "en"] | None = None
+    notifications: bool | None = None
+    telegram_notifications: bool | None = None
+    haptic_enabled: bool | None = None
+
+    model_config = {"extra": "forbid"}
 
 
 class HomeResponse(BaseModel):

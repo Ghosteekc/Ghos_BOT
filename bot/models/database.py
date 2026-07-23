@@ -31,6 +31,28 @@ class User(Base):
     )
     preferences: Mapped[list["CardPreference"]] = relationship(back_populates="user")
     favorite_decks: Mapped[list["FavoriteDeck"]] = relationship(back_populates="user")
+    app_settings: Mapped["UserSettings | None"] = relationship(
+        back_populates="user", uselist=False
+    )
+
+
+class UserSettings(Base):
+    __tablename__ = "user_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    theme: Mapped[str] = mapped_column(String(10), default="dark")
+    language: Mapped[str] = mapped_column(String(5), default="ru")
+    notifications: Mapped[bool] = mapped_column(Boolean, default=True)
+    telegram_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
+    haptic_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="app_settings")
 
 
 class Subscription(Base):
@@ -99,3 +121,12 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE users ADD COLUMN trophies INTEGER"))
             logger = logging.getLogger(__name__)
             logger.info("Added 'trophies' column to users table")
+
+        result = await conn.execute(
+            text("SELECT COUNT(*) FROM pragma_table_info('user_settings') WHERE name='haptic_enabled'")
+        )
+        if result.scalar_one_or_none() == 0:
+            await conn.execute(
+                text("ALTER TABLE user_settings ADD COLUMN haptic_enabled BOOLEAN DEFAULT 1 NOT NULL")
+            )
+            logger.info("Added 'haptic_enabled' column to user_settings table")

@@ -1,13 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.api.deps import get_current_user
-from bot.api.schemas import CardCatalogResponse, FavoriteDeckEntry, FavoritesResponse, SearchResult, SettingsResponse, SyncResponse
+from bot.api.deps import get_current_user, get_db
+from bot.api.schemas import (
+    CardCatalogResponse,
+    FavoriteDeckEntry,
+    FavoritesResponse,
+    SearchResult,
+    SettingsResponse,
+    SettingsUpdateRequest,
+    SyncResponse,
+)
 from bot.models.database import BattleCache, FavoriteDeck, User, async_session
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_cards_catalog
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag, validate_tag
 from bot.services.battle_service import load_and_persist
+from bot.services.user_settings import load_settings_response, update_user_settings
 from bot.user_errors import http_error, http_error_from_clash
 
 router = APIRouter(prefix="/api", tags=["misc"])
@@ -157,18 +167,20 @@ async def remove_favorite_deck(
 
 
 @router.get("/settings", response_model=SettingsResponse)
-async def get_settings(user: User = Depends(get_current_user)) -> SettingsResponse:
-    del user
-    return SettingsResponse()
+async def get_settings(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> SettingsResponse:
+    return await load_settings_response(session, user.id)
 
 
 @router.put("/settings", response_model=SettingsResponse)
 async def update_settings(
-    payload: SettingsResponse,
+    payload: SettingsUpdateRequest,
     user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
 ) -> SettingsResponse:
-    del user
-    return payload
+    return await update_user_settings(session, user.id, payload)
 
 
 @router.post("/cache/clear")
