@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -81,6 +81,9 @@ class CardPreference(Base):
 
 class BattleCache(Base):
     __tablename__ = "battle_cache"
+    __table_args__ = (
+        UniqueConstraint("player_tag", "battle_time", name="uq_battle_cache_player_time"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     player_tag: Mapped[str] = mapped_column(String(20), index=True)
@@ -130,3 +133,69 @@ async def init_db() -> None:
                 text("ALTER TABLE user_settings ADD COLUMN haptic_enabled BOOLEAN DEFAULT 1 NOT NULL")
             )
             logger.info("Added 'haptic_enabled' column to user_settings table")
+
+    await _migrate_battle_cache_dedup()
+
+
+async def _migrate_battle_cache_dedup() -> None:
+    """Normalize battle_time values and add unique index when DB has no duplicates."""
+    from bot.services.battle_time import normalize_battle_time
+
+    async with async_session() as session:
+        from sqlalchemy import select
+
+        from bot.models.database import BattleCache
+
+        result = await session.execute(select(BattleCache))
+        rows = result.scalars().all()
+        normalized = 0
+        for row in rows:
+            canon = normalize_battle_time(row.battle_time)
+            if canon and canon != row.battle_time:
+                row.battle_time = canon
+                normalized += 1
+        if normalized:
+            await session.commit()
+            logger.info("Normalized %d battle_cache.battle_time values", normalized)
+
+    async with engine.begin() as conn:
+        index_exists = await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM sqlite_master "
+                "WHERE type='index' AND name='uq_battle_cache_player_time'"
+            )
+        )
+        if index_exists.scalar_one():
+            return
+
+        dupes = await conn.execute(
+            text(
+                "SELECT player_tag, battle_time, COUNT(*) AS cnt "
+                "FROM battle_cache "
+                "GROUP BY player_tag, battle_time "
+                "HAVING cnt > 1"
+            )
+        )
+        dupe_rows = dupes.fetchall()
+        if dupe_rows:
+            logger.warning(
+                "battle_cache has %d duplicate (player_tag, battle_time) groups; "
+                "unique index not created — review manually before dedup cleanup",
+                len(dupe_rows),
+            )
+            for player_tag, battle_time, cnt in dupe_rows[:10]:
+                logger.warning(
+                    "  duplicate battle_cache: tag=%s time=%s count=%d",
+                    player_tag,
+                    battle_time,
+                    cnt,
+                )
+            return
+
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX uq_battle_cache_player_time "
+                "ON battle_cache (player_tag, battle_time)"
+            )
+        )
+        logger.info("Created unique index uq_battle_cache_player_time on battle_cache")

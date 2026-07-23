@@ -7,7 +7,7 @@ from bot.api.schemas import BattleDetailResponse, BattleListResponse, BattleSumm
 from bot.models.database import User
 from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 from bot.services.battle_session_cache import set_session_battles
-from bot.services.battle_time import format_battle_played_at
+from bot.services.battle_time import battle_time_from_record, battle_times_equal, format_battle_played_at
 from bot.services.battle_report import analyze_battle_enhanced
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_analyzer import analyze_deck, calculate_matchup_score
@@ -43,7 +43,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
     except Exception:
         top_reason = None
     opp_tag = opponent.get("tag", "") or ""
-    raw_time = str(battle.get("battleTime") or battle.get("warTime") or "")
+    raw_time = battle_time_from_record(battle) or ""
     return BattleSummary(
         index=index,
         opponent_name=opponent.get("name", "Соперник"),
@@ -81,7 +81,7 @@ async def list_battles(user: User = Depends(require_subscription)) -> BattleList
 
 
 def _battle_timestamp(battle: dict) -> str:
-    return str(battle.get("battleTime") or battle.get("warTime") or "")
+    return battle_time_from_record(battle) or ""
 
 
 async def _load_user_battles(user: User) -> list:
@@ -144,7 +144,7 @@ async def battle_detail_by_time(
     raw = unquote(battle_time)
     battles = await _load_user_battles(user)
     for i, battle in enumerate(battles):
-        if _battle_timestamp(battle) == raw:
+        if battle_times_equal(_battle_timestamp(battle), raw):
             return _build_battle_detail(i, battle)
     raise http_error("E004", status=404)
 

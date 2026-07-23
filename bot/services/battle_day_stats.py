@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from bot.services.battle_time import battle_day_key, today_key_msk
+from bot.services.battle_time import battle_day_key, battle_time_from_record, today_key_msk
 
 _LADDER_1V1_TYPES = frozenset({"pvp", "pathoflegend"})
 _EXCLUDED_BATTLE_TYPES = frozenset({
@@ -95,10 +95,7 @@ def _battle_won(battle: dict) -> bool:
 
 
 def _battle_time(battle: dict) -> str:
-    return str(battle.get("battleTime") or battle.get("warTime") or "")
-
-
-def _trophy_delta(team: dict, chronological: list[dict], index: int) -> int | None:
+    return battle_time_from_record(battle) or ""
     raw = team.get("trophyChange")
     if raw is not None:
         try:

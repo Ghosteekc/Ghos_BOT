@@ -3,16 +3,15 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 
 from bot.keyboards.menus import battle_select_keyboard
-from bot.models.database import User, async_session, BattleCache
-from bot.services.battle_service import filter_pvp_battles
+from bot.models.database import User
+from bot.services.battle_service import filter_pvp_battles, persist_battles
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates
 from bot.services.deck_analyzer import get_most_played_cards
 from bot.user_errors import log_error, user_message, user_message_plain
 from aiogram.filters import Command
 from sqlalchemy import select
-from bot.models.database import BattleCache
-from sqlalchemy import select
+from bot.models.database import BattleCache, async_session
 import json
 
 logger = logging.getLogger(__name__)
@@ -43,47 +42,9 @@ async def _load_battles(user: User, telegram_id: int) -> list | None:
     _battle_cache[telegram_id] = pvp
     logger.info(f"Loaded {len(pvp)} PvP battles for {user.player_tag}")
 
-    # Persist recent battles to BattleCache (avoid duplicates by player_tag + battle_time)
-    async with async_session() as session:
-        saved_count = 0
-        for b in pvp:
-            team = b.get("team", [{}])[0]
-            battle_time = b.get("battleTime") or b.get("warTime") or ""
-            q = await session.execute(
-                select(BattleCache).where(
-                    BattleCache.player_tag == normalize_tag(user.player_tag),
-                    BattleCache.battle_time == str(battle_time),
-                )
-            )
-            existing = q.scalar_one_or_none()
-            if existing:
-                continue
-
-            opponent = b.get("opponent", [{}])[0]
-            team_cards = [c.get("name") for c in team.get("cards", [])]
-            opp_cards = [c.get("name") for c in opponent.get("cards", [])]
-            result = "win" if team.get("crowns", 0) > opponent.get("crowns", 0) else "loss"
-
-            try:
-                analysis_obj = analyze_battle(team, opponent)
-                analysis_text = "\n".join(analysis_obj.reasons)
-            except Exception as e:
-                logger.debug(f"Failed to analyze battle for {user.player_tag}: {e}")
-                analysis_text = None
-
-            bc = BattleCache(
-                player_tag=normalize_tag(user.player_tag),
-                battle_time=str(battle_time),
-                result=result,
-                user_deck=",".join([c for c in team_cards if c]),
-                opponent_deck=",".join([c for c in opp_cards if c]),
-                analysis=analysis_text,
-            )
-            session.add(bc)
-            saved_count += 1
-        if saved_count:
-            await session.commit()
-            logger.info(f"Saved {saved_count} new battles for {user.player_tag}")
+    saved_count = await persist_battles(user, pvp)
+    if saved_count:
+        logger.info("Saved %d new battles for %s", saved_count, user.player_tag)
 
     return pvp
 

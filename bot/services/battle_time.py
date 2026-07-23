@@ -1,4 +1,4 @@
-"""Parse Clash Royale battleTime strings for UI."""
+"""Parse Clash Royale battleTime strings for UI and persistence."""
 
 from __future__ import annotations
 
@@ -13,6 +13,36 @@ try:
         _MSK = timezone(timedelta(hours=3))
 except ImportError:
     _MSK = timezone(timedelta(hours=3))
+
+
+def normalize_battle_time(raw: str | None) -> str | None:
+    """Canonical battleTime/warTime string for DB keys and lookups.
+
+    Clash Royale API returns timestamps like ``20250717T120000.000Z`` (UTC).
+    There is no separate battle UUID — this string is the per-player dedup key.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    if text.endswith("z"):
+        text = f"{text[:-1]}Z"
+    if len(text) >= 15 and "T" in text[:16]:
+        return text
+    return text
+
+
+def battle_time_from_record(battle: dict) -> str | None:
+    """Extract normalized battle time from a CR battlelog entry."""
+    raw = battle.get("battleTime") or battle.get("warTime")
+    return normalize_battle_time(raw if raw is not None else None)
+
+
+def battle_times_equal(left: str | None, right: str | None) -> bool:
+    left_norm = normalize_battle_time(left)
+    right_norm = normalize_battle_time(right)
+    return bool(left_norm and right_norm and left_norm == right_norm)
 
 
 def battle_day_key(raw: str | None) -> str:

@@ -1,3 +1,5 @@
+"""Sync user battle logs into BattleCache."""
+
 import asyncio
 import logging
 import time
@@ -6,10 +8,9 @@ from typing import Any
 from sqlalchemy import select
 
 from bot.config import settings
-from bot.models.database import async_session, BattleCache, User
-from bot.services.battle_service import filter_pvp_battles
+from bot.models.database import async_session, User
+from bot.services.battle_service import filter_pvp_battles, persist_battles
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
-from bot.services.deck_analyzer import analyze_battle
 
 logger = logging.getLogger(__name__)
 
@@ -53,49 +54,7 @@ async def sync_user_battles(user: User, *, client: ClashRoyaleClient | None = No
             await client.close()
 
     pvp = filter_pvp_battles(battles, user.player_tag)
-
-    new_count = 0
-    async with async_session() as session:
-        for b in pvp:
-            team = b.get("team", [{}])[0]
-            opponent = b.get("opponent", [{}])[0]
-            battle_time = b.get("battleTime") or b.get("warTime") or ""
-
-            q = await session.execute(
-                select(BattleCache).where(
-                    BattleCache.player_tag == normalize_tag(user.player_tag),
-                    BattleCache.battle_time == str(battle_time),
-                )
-            )
-            existing = q.scalar_one_or_none()
-            if existing:
-                continue
-
-            team_cards = [c.get("name") for c in team.get("cards", [])]
-            opp_cards = [c.get("name") for c in opponent.get("cards", [])]
-            result = "win" if team.get("crowns", 0) > opponent.get("crowns", 0) else "loss"
-
-            try:
-                analysis_obj = analyze_battle(team, opponent)
-                analysis_text = "\n".join(analysis_obj.reasons)
-            except Exception:
-                logger.debug("Battle analysis failed for %s", user.player_tag, exc_info=True)
-                analysis_text = None
-
-            bc = BattleCache(
-                player_tag=normalize_tag(user.player_tag),
-                battle_time=str(battle_time),
-                result=result,
-                user_deck=",".join([c for c in team_cards if c]),
-                opponent_deck=",".join([c for c in opp_cards if c]),
-                analysis=analysis_text,
-            )
-            session.add(bc)
-            new_count += 1
-        if new_count:
-            await session.commit()
-
-    return new_count
+    return await persist_battles(user, pvp)
 
 
 async def sync_all_once(*, stop_event: asyncio.Event | None = None) -> dict[str, int]:

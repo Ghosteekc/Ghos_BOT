@@ -1,16 +1,22 @@
+import asyncio
 import logging
 from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from bot.models.database import BattleCache, User, async_session
+from bot.models import database
+from bot.models.database import BattleCache, User
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
+from bot.services.battle_time import battle_time_from_record
 from bot.services.deck_analyzer import analyze_battle
 
 logger = logging.getLogger(__name__)
 
 # Clash Royale battle log API returns up to 25 recent battles.
 BATTLE_LOG_LIMIT = 25
+
+_persist_locks: dict[str, asyncio.Lock] = {}
 
 
 def battle_has_player(battle: dict, player_tag: str) -> bool:
@@ -105,46 +111,92 @@ async def load_pvp_battles(player_tag: str) -> list | None:
     return pvp
 
 
-async def persist_battles(user: User, battles: list) -> None:
-    logger.info(f"Persisting {len(battles)} battles for {user.player_tag}")
-    async with async_session() as session:
+def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
+    """Build insert payload for BattleCache or None if battle time is missing."""
+    battle_time = battle_time_from_record(battle)
+    if not battle_time:
+        logger.debug("Skipping battle without battleTime/warTime for %s", player_tag)
+        return None
+
+    team = battle.get("team", [{}])[0]
+    opponent = battle.get("opponent", [{}])[0]
+    team_cards = [c.get("name") for c in team.get("cards", [])]
+    opp_cards = [c.get("name") for c in opponent.get("cards", [])]
+    result = "win" if team.get("crowns", 0) > opponent.get("crowns", 0) else "loss"
+
+    try:
+        analysis_obj = analyze_battle(team, opponent)
+        analysis_text = "\n".join(analysis_obj.reasons)
+    except Exception as exc:
+        logger.debug("Battle analysis error for %s: %s", player_tag, exc)
+        analysis_text = None
+
+    return {
+        "player_tag": normalize_tag(player_tag),
+        "battle_time": battle_time,
+        "result": result,
+        "user_deck": ",".join(c for c in team_cards if c),
+        "opponent_deck": ",".join(c for c in opp_cards if c),
+        "analysis": analysis_text,
+    }
+
+
+async def _insert_battle_row(session, row: dict) -> bool:
+    """Insert battle row; return True when this call stored a new battle."""
+    existing = await session.execute(
+        select(BattleCache.id).where(
+            BattleCache.player_tag == row["player_tag"],
+            BattleCache.battle_time == row["battle_time"],
+        )
+    )
+    if existing.scalar_one_or_none():
+        return False
+
+    try:
+        await session.execute(
+            sqlite_insert(BattleCache)
+            .values(**row)
+            .on_conflict_do_nothing(index_elements=["player_tag", "battle_time"])
+        )
+        await session.flush()
+    except Exception:
+        session.add(BattleCache(**row))
+        await session.flush()
+        return True
+
+    created = await session.execute(
+        select(BattleCache.id).where(
+            BattleCache.player_tag == row["player_tag"],
+            BattleCache.battle_time == row["battle_time"],
+        )
+    )
+    return created.scalar_one_or_none() is not None
+
+
+async def persist_battles(user: User, battles: list) -> int:
+    """Persist PvP battles; skip duplicates and ignore concurrent double-inserts."""
+    if not user.player_tag or not battles:
+        return 0
+
+    tag = normalize_tag(user.player_tag)
+    lock = _persist_locks.setdefault(tag, asyncio.Lock())
+
+    async with lock:
+        logger.info("Persisting %d battles for %s", len(battles), tag)
         saved = 0
-        for b in battles:
-            team = b.get("team", [{}])[0]
-            battle_time = b.get("battleTime") or b.get("warTime") or ""
-            q = await session.execute(
-                select(BattleCache).where(
-                    BattleCache.player_tag == normalize_tag(user.player_tag),
-                    BattleCache.battle_time == str(battle_time),
-                )
-            )
-            if q.scalar_one_or_none():
-                continue
+        async with database.async_session() as session:
+            for battle in battles:
+                row = build_battle_cache_row(battle, tag)
+                if row is None:
+                    continue
+                if await _insert_battle_row(session, row):
+                    saved += 1
 
-            opponent = b.get("opponent", [{}])[0]
-            team_cards = [c.get("name") for c in team.get("cards", [])]
-            opp_cards = [c.get("name") for c in opponent.get("cards", [])]
-            result = "win" if team.get("crowns", 0) > opponent.get("crowns", 0) else "loss"
+            if saved:
+                await session.commit()
+                logger.info("Saved %d new battles for %s", saved, tag)
 
-            try:
-                analysis_obj = analyze_battle(team, opponent)
-                analysis_text = "\n".join(analysis_obj.reasons)
-            except Exception as e:
-                logger.debug(f"Battle analysis error for {user.player_tag}: {e}")
-                analysis_text = None
-
-            session.add(BattleCache(
-                player_tag=normalize_tag(user.player_tag),
-                battle_time=str(battle_time),
-                result=result,
-                user_deck=",".join(c for c in team_cards if c),
-                opponent_deck=",".join(c for c in opp_cards if c),
-                analysis=analysis_text,
-            ))
-            saved += 1
-        if saved:
-            await session.commit()
-            logger.info(f"Saved {saved} new battles for {user.player_tag}")
+        return saved
 
 
 @dataclass
@@ -160,7 +212,7 @@ class CachedStats:
 
 
 async def get_cached_stats(player_tag: str) -> CachedStats | None:
-    async with async_session() as session:
+    async with database.async_session() as session:
         res = await session.execute(
             select(BattleCache).where(BattleCache.player_tag == normalize_tag(player_tag))
         )
