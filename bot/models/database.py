@@ -15,6 +15,7 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("player_tag", name="uq_users_player_tag"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
@@ -135,6 +136,77 @@ async def init_db() -> None:
             logger.info("Added 'haptic_enabled' column to user_settings table")
 
     await _migrate_battle_cache_dedup()
+    await _migrate_users_player_tag_unique()
+
+
+async def _migrate_users_player_tag_unique() -> None:
+    """Normalize player_tag values and add unique index when no duplicates exist."""
+    from bot.services.clash_api import normalize_tag
+
+    async with async_session() as session:
+        from sqlalchemy import select
+
+        result = await session.execute(select(User).where(User.player_tag.is_not(None)))
+        rows = result.scalars().all()
+        normalized = 0
+        for row in rows:
+            if not row.player_tag:
+                continue
+            canon = normalize_tag(row.player_tag)
+            if canon != row.player_tag:
+                row.player_tag = canon
+                normalized += 1
+        if normalized:
+            await session.commit()
+            logger.info("Normalized %d users.player_tag values", normalized)
+
+    async with engine.begin() as conn:
+        index_exists = await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM sqlite_master "
+                "WHERE type='index' AND name='uq_users_player_tag'"
+            )
+        )
+        if index_exists.scalar_one():
+            return
+
+        dupes = await conn.execute(
+            text(
+                "SELECT player_tag, COUNT(*) AS cnt "
+                "FROM users "
+                "WHERE player_tag IS NOT NULL "
+                "GROUP BY player_tag "
+                "HAVING cnt > 1"
+            )
+        )
+        dupe_rows = dupes.fetchall()
+        if dupe_rows:
+            logger.warning(
+                "users has %d duplicate player_tag groups; "
+                "unique index not created — resolve manually before enforcing uniqueness",
+                len(dupe_rows),
+            )
+            for player_tag, cnt in dupe_rows[:10]:
+                ids = await conn.execute(
+                    text(
+                        "SELECT id, telegram_id FROM users "
+                        "WHERE player_tag = :tag ORDER BY id"
+                    ),
+                    {"tag": player_tag},
+                )
+                users = ids.fetchall()
+                logger.warning(
+                    "  duplicate player_tag=%s count=%d users=%s",
+                    player_tag,
+                    cnt,
+                    [(u[0], u[1]) for u in users],
+                )
+            return
+
+        await conn.execute(
+            text("CREATE UNIQUE INDEX uq_users_player_tag ON users (player_tag)")
+        )
+        logger.info("Created unique index uq_users_player_tag on users(player_tag)")
 
 
 async def _migrate_battle_cache_dedup() -> None:

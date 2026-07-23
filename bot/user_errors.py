@@ -41,6 +41,7 @@ MESSAGES: dict[str, str] = {
     # Профиль / привязка
     "E060": DEFAULT_UNAVAILABLE,
     "E061": DEFAULT_UNAVAILABLE,
+    "E062": "Этот аккаунт Clash Royale уже привязан к другому пользователю Telegram.",
     # Админ
     "E080": DEFAULT_UNAVAILABLE,
     # Авторизация Mini App

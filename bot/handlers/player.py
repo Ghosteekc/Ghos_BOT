@@ -15,6 +15,7 @@ from bot.services.battle_service import get_cached_stats
 from bot.services.clash_api import (
     ClashRoyaleAPIError,
     ClashRoyaleClient,
+    PlayerTagAlreadyLinkedError,
     SubscriptionService,
     normalize_tag,
     validate_tag,
@@ -102,6 +103,15 @@ async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
             f"🏟 Арена: {arena.get('name', '?')}\n\n"
             "Откройте приложение через Menu Button для анализа боёв и колод."
         )
+    except PlayerTagAlreadyLinkedError:
+        log_error(
+            logger,
+            "E062",
+            f"Player tag {tag} already linked to another user",
+            user_id=message.from_user.id,
+        )
+        _pending_link.discard(message.from_user.id)
+        await message.answer(user_message("E062"))
     except Exception as e:
         log_error(
             logger,

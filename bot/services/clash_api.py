@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 import aiohttp
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
@@ -46,6 +47,14 @@ def normalize_tag(tag: str) -> str:
     if not tag.startswith("#"):
         tag = f"#{tag}"
     return tag
+
+
+class PlayerTagAlreadyLinkedError(Exception):
+    """player_tag is already linked to a different Telegram user."""
+
+    def __init__(self, player_tag: str):
+        self.player_tag = normalize_tag(player_tag)
+        super().__init__(self.player_tag)
 
 
 def encode_tag(tag: str) -> str:
@@ -337,15 +346,57 @@ class SubscriptionService:
             sub.expires_at = None
             await self.session.commit()
 
+    async def find_user_by_player_tag(
+        self,
+        tag: str,
+        *,
+        exclude_user_id: int | None = None,
+    ) -> User | None:
+        normalized = normalize_tag(tag)
+        query = select(User).where(User.player_tag == normalized)
+        if exclude_user_id is not None:
+            query = query.where(User.id != exclude_user_id)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
     async def link_player(self, user: User, tag: str, player_data: dict) -> User:
         normalized = normalize_tag(tag)
+        if user.player_tag and normalize_tag(user.player_tag) == normalized:
+            user.player_name = player_data.get("name")
+            arena = player_data.get("arena", {})
+            user.arena_id = arena.get("id")
+            user.trophies = player_data.get("trophies")
+            await self.session.commit()
+            await self.session.refresh(user)
+            logger.info("Refreshed linked player %s for telegram_id=%s", normalized, user.telegram_id)
+            return user
+
+        owner = await self.find_user_by_player_tag(normalized, exclude_user_id=user.id)
+        if owner is not None:
+            logger.warning(
+                "Rejected link: player_tag=%s already linked to telegram_id=%s (requested by %s)",
+                normalized,
+                owner.telegram_id,
+                user.telegram_id,
+            )
+            raise PlayerTagAlreadyLinkedError(normalized)
+
         user.player_tag = normalized
         user.player_name = player_data.get("name")
         arena = player_data.get("arena", {})
         user.arena_id = arena.get("id")
         user.trophies = player_data.get("trophies")
-        await self.session.commit()
-        await self.session.refresh(user)
+        try:
+            await self.session.commit()
+            await self.session.refresh(user)
+        except IntegrityError as exc:
+            await self.session.rollback()
+            logger.warning(
+                "IntegrityError linking player_tag=%s to telegram_id=%s",
+                normalized,
+                user.telegram_id,
+            )
+            raise PlayerTagAlreadyLinkedError(normalized) from exc
         logger.info("Linked player %s to telegram_id=%s", normalized, user.telegram_id)
         return user
 
