@@ -6,7 +6,7 @@ import random
 
 from bot.services.card_data import CARD_META, get_card_elixir
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
-from bot.services.rofl_decks import ROFL_DECKS, RoflDeck
+from bot.services.rofl_decks import ROFL_DECKS, RoflDeck, pick_chaos_flavor
 
 MAX_ATTEMPTS = 400
 TARGET_AVG_MIN = 3.0
@@ -105,7 +105,38 @@ async def _valid_rofl_presets() -> list[tuple[RoflDeck, list[str]]]:
     return _valid_rofl_cache
 
 
+async def _generate_chaos_rofl() -> dict:
+    """Random 8-card meme soup from cards used in rofl presets."""
+    pool = await _playable_pool()
+    meme_cards = {card for preset in ROFL_DECKS for card in preset.cards}
+    chaos_pool = [name for name in pool if name in meme_cards]
+    if len(chaos_pool) < 8:
+        chaos_pool = pool
+
+    for _ in range(MAX_ATTEMPTS):
+        cards = random.sample(chaos_pool, 8)
+        if not _deck_rules_valid(cards):
+            continue
+        if build_deck_share_link(cards) is None:
+            continue
+        name, tagline = pick_chaos_flavor()
+        return _pack_deck(
+            cards,
+            rofl_name=name,
+            rofl_tagline=tagline,
+            rofl_key="chaos-mix",
+        )
+
+    raise ValueError("Не удалось собрать хаотичную рофл-колоду")
+
+
 async def generate_rofl_deck(*, exclude_key: str | None = None) -> dict:
+    if random.random() < 0.22 and exclude_key != "chaos-mix":
+        try:
+            return await _generate_chaos_rofl()
+        except ValueError:
+            pass
+
     valid = await _valid_rofl_presets()
     if not valid:
         raise ValueError("Не удалось собрать рофл-колоду")

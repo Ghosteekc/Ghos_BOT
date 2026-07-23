@@ -88,7 +88,85 @@ _COUNTER_DECK_BANNED = frozenset({
     "Skeleton Barrel", "Battle Ram", "Ram Rider", "Monk", "Ronin",
 })
 
-_MIN_COUNTER_SCORE = 2.0
+_MIN_COUNTER_SCORE = 1.5
+
+_STAPLE_FILLERS: tuple[str, ...] = (
+    "Knight",
+    "Archers",
+    "Skeletons",
+    "Goblins",
+    "Ice Spirit",
+    "Zap",
+    "The Log",
+    "Fireball",
+    "Arrows",
+    "Musketeer",
+    "Cannon",
+    "Tesla",
+    "Hog Rider",
+    "Valkyrie",
+    "Ice Golem",
+    "Mini P.E.K.K.A",
+    "Bats",
+    "Spear Goblins",
+)
+
+
+def _valid_card_name(name: str) -> bool:
+    return bool(name) and name in CARD_META
+
+
+def _sanitize_card_names(names: list[str] | None) -> list[str]:
+    if not names:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        if not _valid_card_name(name) or name in seen:
+            continue
+        out.append(name)
+        seen.add(name)
+    return out
+
+
+def _finalize_counter_deck(
+    deck: list[str],
+    ranked: list[tuple[float, str]],
+    pool: set[str],
+    opponent_deck: list[str],
+) -> list[str]:
+    """Always return 8 unique playable cards when the pool allows it."""
+    out = _sanitize_card_names(deck)
+    blocked = set(opponent_deck) | _COUNTER_DECK_BANNED
+
+    def try_add(card: str, *, relax_roles: bool = False) -> bool:
+        if not _valid_card_name(card) or card in blocked or card in out:
+            return False
+        if not relax_roles and not _can_add(card, out):
+            return False
+        out.append(card)
+        return True
+
+    ranked_cards = [card for _, card in ranked if _valid_card_name(card)]
+    filler_cards = [card for card in _STAPLE_FILLERS if card in pool]
+    pool_cards = sorted(pool)
+
+    for source in (ranked_cards, filler_cards, pool_cards):
+        for card in source:
+            if len(out) >= 8:
+                break
+            try_add(card)
+        if len(out) >= 8:
+            break
+
+    if len(out) < 8:
+        for source in (ranked_cards, filler_cards, pool_cards):
+            for card in source:
+                if len(out) >= 8:
+                    break
+                try_add(card, relax_roles=True)
+
+    return out[:8]
 
 
 def _card_ru(name: str) -> str:
@@ -103,8 +181,12 @@ def suggest_counter_deck(
     trophies: int | None = None,
 ) -> list[str]:
     """Собрать контр-колоду под угрозы соперника с учётом его заклинаний и структуры."""
-    preferred_cards = preferred_cards or []
+    preferred_cards = _sanitize_card_names(preferred_cards)
+    opponent_deck = _sanitize_card_names(opponent_deck)
+    user_deck = _sanitize_card_names(user_deck)
+
     pool = _get_arena_pool(arena_id, trophies)
+    pool = {card for card in pool if _valid_card_name(card)}
     pool.update(opponent_deck)
     pool.update(preferred_cards)
     pool.update(user_deck or [])
@@ -149,6 +231,7 @@ def suggest_counter_deck(
             if _can_add(card, deck):
                 deck.append(card)
 
+    deck = _finalize_counter_deck(deck, ranked, pool, opponent_deck)
     return deck[:8]
 
 
