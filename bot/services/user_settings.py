@@ -19,7 +19,12 @@ def settings_to_response(row: UserSettings) -> SettingsResponse:
     )
 
 
-async def get_or_create_user_settings(session: AsyncSession, user_id: int) -> UserSettings:
+async def get_or_create_user_settings(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    commit_on_create: bool = True,
+) -> UserSettings:
     result = await session.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     row = result.scalar_one_or_none()
     if row is not None:
@@ -27,8 +32,10 @@ async def get_or_create_user_settings(session: AsyncSession, user_id: int) -> Us
 
     row = UserSettings(user_id=user_id)
     session.add(row)
-    await session.commit()
-    await session.refresh(row)
+    await session.flush()
+    if commit_on_create:
+        await session.commit()
+        await session.refresh(row)
     return row
 
 
@@ -42,7 +49,7 @@ async def update_user_settings(
     user_id: int,
     payload: SettingsUpdateRequest,
 ) -> SettingsResponse:
-    row = await get_or_create_user_settings(session, user_id)
+    row = await get_or_create_user_settings(session, user_id, commit_on_create=False)
     data = payload.model_dump(exclude_unset=True)
     for key, value in data.items():
         setattr(row, key, value)
