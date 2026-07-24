@@ -123,16 +123,22 @@ def _trophy_delta(team: dict, chronological: list[dict], index: int) -> int | No
 
 
 def build_last_results(battles: list, *, limit: int = 14) -> list[dict]:
-    """Recent ladder 1v1 battles oldest-first with trophy delta and opponent/time labels."""
+    """Recent ladder 1v1 battles oldest-first with trophy delta and opponent/time labels.
+
+    Clash battle log is newest-first. We take the newest battles with a known
+    trophy delta, then reverse so the chart reads left→right in time.
+    """
     from bot.services.battle_time import format_battle_played_at, format_battle_played_date
 
+    # Newest-first (API order), ladder-only.
     ladder = [b for b in battles if is_ladder_1v1(b)]
     chronological = list(reversed(ladder))
-    rows: list[dict] = []
+    if not chronological:
+        return []
 
-    for i, battle in enumerate(chronological):
-        if len(rows) >= limit:
-            break
+    rows_newest_first: list[dict] = []
+    for i in range(len(chronological) - 1, -1, -1):
+        battle = chronological[i]
         team = battle.get("team", [{}])[0]
         opponent = battle.get("opponent", [{}])[0]
         delta = _trophy_delta(team, chronological, i)
@@ -140,15 +146,17 @@ def build_last_results(battles: list, *, limit: int = 14) -> list[dict]:
             continue
         won = _battle_won(battle)
         raw = _battle_time(battle)
-        rows.append({
+        rows_newest_first.append({
             "won": won,
             "trophy_change": delta,
             "opponent_name": opponent.get("name") or "Соперник",
             "played_date": format_battle_played_date(raw),
             "played_time": format_battle_played_at(raw),
         })
+        if len(rows_newest_first) >= limit:
+            break
 
-    return rows
+    return list(reversed(rows_newest_first))
 
 
 def compute_daily_trophy_change(battles: list) -> int | None:
