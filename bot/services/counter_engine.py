@@ -173,6 +173,101 @@ def _card_ru(name: str) -> str:
     return card_name_ru(name, short=True) or name
 
 
+def _is_primary_attack(card: str) -> bool:
+    """Main tower-push win-condition — never strip from the player's deck."""
+    return card in WIN_CONDITIONS
+
+
+def _locked_attack_cards(deck: list[str]) -> set[str]:
+    locked = {c for c in deck if _is_primary_attack(c)}
+    if locked:
+        return locked
+    # No Hog/Giant-style card: keep one soft win-condition as the attack core.
+    soft = [c for c in deck if get_card_role(c) == "win_condition"]
+    return {soft[0]} if soft else set()
+
+
+def _can_swap_in(card: str, deck_without_drop: list[str], drop: str) -> bool:
+    """Allow same-role swaps even at role caps; otherwise use normal limits."""
+    if card in deck_without_drop:
+        return False
+    if get_card_role(card) == get_card_role(drop):
+        return True
+    return _can_add(card, deck_without_drop)
+
+
+def _adapt_user_deck_vs_opponent(
+    user_deck: list[str],
+    opponent_deck: list[str],
+    pool: set[str],
+    preferred: list[str],
+    ranked: list[tuple[float, str]],
+) -> list[str]:
+    """Keep the player's attack card; only swap cards that lose to this opponent."""
+    threats = _key_threats(opponent_deck)
+    deck = list(user_deck)
+    locked = _locked_attack_cards(deck)
+
+    ranked_candidates = [
+        card for score, card in ranked
+        if card not in deck
+        and card not in opponent_deck
+        and card in pool
+        and score >= _MIN_COUNTER_SCORE
+    ]
+
+    replaceable = [c for c in deck if c not in locked]
+    replaceable.sort(key=lambda c: _card_score_in_context(c, opponent_deck, threats))
+
+    max_swaps = 4
+    swaps = 0
+    for weak in replaceable:
+        if swaps >= max_swaps:
+            break
+        weak_score = _card_score_in_context(weak, opponent_deck, threats)
+        # Keep cards that already answer this opponent decently.
+        if weak_score >= _MIN_COUNTER_SCORE:
+            continue
+
+        trial_base = [c for c in deck if c != weak]
+        best_card: str | None = None
+        best_score = weak_score
+        for cand in ranked_candidates:
+            if cand in deck:
+                continue
+            # Never introduce a second primary attack if one is already locked.
+            if _is_primary_attack(cand) and locked:
+                continue
+            if cand in _COUNTER_DECK_BANNED and not _is_primary_attack(cand):
+                continue
+            if not _can_swap_in(cand, trial_base, weak):
+                continue
+            new_score = _score_counter_card(cand, opponent_deck, threats, preferred)
+            if new_score > best_score + 1.0:
+                best_score = new_score
+                best_card = cand
+
+        if best_card is None:
+            continue
+        deck[deck.index(weak)] = best_card
+        ranked_candidates = [c for c in ranked_candidates if c != best_card]
+        swaps += 1
+
+    # If the user's deck somehow lost its attack card, restore from the original.
+    if not any(_is_primary_attack(c) for c in deck) and not any(
+        get_card_role(c) == "win_condition" for c in deck
+    ):
+        original_attack = next((c for c in user_deck if _is_primary_attack(c)), None)
+        if original_attack and original_attack not in deck:
+            deck = _replace_weakest(
+                deck, original_attack, opponent_deck, threats, skip_win=False,
+            )
+        else:
+            deck = _ensure_win_condition(deck, pool, preferred, opponent_deck, threats)
+
+    return deck[:8]
+
+
 def suggest_counter_deck(
     opponent_deck: list[str],
     arena_id: int | None = None,
@@ -180,7 +275,7 @@ def suggest_counter_deck(
     user_deck: list[str] | None = None,
     trophies: int | None = None,
 ) -> list[str]:
-    """Собрать контр-колоду под угрозы соперника с учётом его заклинаний и структуры."""
+    """Adapt the player's deck to counter this opponent — keep the main attack card."""
     preferred_cards = _sanitize_card_names(preferred_cards)
     opponent_deck = _sanitize_card_names(opponent_deck)
     user_deck = _sanitize_card_names(user_deck)
@@ -198,24 +293,34 @@ def suggest_counter_deck(
     for card in pool:
         if card in opponent_deck:
             continue
-        if card in _COUNTER_DECK_BANNED:
+        # Allow primary attack cards into ranked for ensure/restore paths.
+        if card in _COUNTER_DECK_BANNED and not _is_primary_attack(card):
             continue
         if not opp_has_air and _skip_without_opponent_air(card):
             continue
         score = _score_counter_card(card, opponent_deck, threats, preferred_cards)
-        if score >= _MIN_COUNTER_SCORE:
+        if score >= _MIN_COUNTER_SCORE or _is_primary_attack(card):
             ranked.append((score, card))
     ranked.sort(key=lambda x: (-x[0], x[1]))
 
+    # Preferred path: tweak the deck the player actually used vs this opponent.
+    if len(user_deck) == 8:
+        return _adapt_user_deck_vs_opponent(
+            user_deck, opponent_deck, pool, preferred_cards, ranked,
+        )
+
+    # Fallback when user_deck is missing: build counters, then force an attack card.
     deck: list[str] = []
     for _, card in ranked:
         if len(deck) >= 8:
             break
+        if card in _COUNTER_DECK_BANNED and not _is_primary_attack(card):
+            continue
         if _can_add(card, deck):
             deck.append(card)
 
     deck = _ensure_spell(deck, pool, opponent_deck, threats)
-    deck = _ensure_win_condition(deck, pool, preferred_cards)
+    deck = _ensure_win_condition(deck, pool, preferred_cards, opponent_deck, threats)
     deck = _ensure_building(deck, pool, opponent_deck)
     deck = _trim_excess(deck, opponent_deck, threats, preferred_cards)
     deck = _fill_counter_gaps(deck, ranked, pool, opponent_deck)
@@ -228,10 +333,13 @@ def suggest_counter_deck(
                 break
             if card in deck or card in opponent_deck:
                 continue
+            if card in _COUNTER_DECK_BANNED and not _is_primary_attack(card):
+                continue
             if _can_add(card, deck):
                 deck.append(card)
 
     deck = _finalize_counter_deck(deck, ranked, pool, opponent_deck)
+    deck = _ensure_win_condition(deck, pool, preferred_cards, opponent_deck, threats)
     return deck[:8]
 
 
@@ -288,7 +396,7 @@ def _swarm_hard_countered(card: str, opponent_deck: list[str]) -> bool:
 
 def _deck_role_counts(deck: list[str]) -> dict[str, int]:
     return {
-        "win": sum(1 for c in deck if c in WIN_CONDITIONS or get_card_role(c) == "win_condition"),
+        "win": sum(1 for c in deck if _is_primary_attack(c)),
         "spell": sum(1 for c in deck if get_card_role(c) == "spell"),
         "building": sum(1 for c in deck if get_card_role(c) == "building"),
     }
@@ -299,7 +407,7 @@ def _can_add(card: str, deck: list[str]) -> bool:
         return False
     counts = _deck_role_counts(deck)
     role = get_card_role(card)
-    if card in WIN_CONDITIONS or role == "win_condition":
+    if _is_primary_attack(card):
         return counts["win"] < _MAX_WIN_CONDITIONS
     if role == "spell":
         return counts["spell"] < _MAX_SPELLS
@@ -385,8 +493,10 @@ def _score_counter_card(
     if card in preferred[:3]:
         score += 1.0
 
-    if card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
-        score -= 4.0
+    # Soft penalty only for newly introducing a second-style attack pick in scratch builds.
+    # Primary attacks from the player's own deck are locked separately and not scored here.
+    if _is_primary_attack(card):
+        score -= 1.0
 
     return score
 
@@ -407,7 +517,7 @@ def _replace_weakest(
         return deck
     candidates = []
     for i, card in enumerate(deck):
-        if skip_win and (card in WIN_CONDITIONS or get_card_role(card) == "win_condition"):
+        if skip_win and (_is_primary_attack(card) or get_card_role(card) == "win_condition"):
             continue
         candidates.append((i, _card_score_in_context(card, opponent_deck, threats)))
     if not candidates:
@@ -440,15 +550,30 @@ def _ensure_spell(
     return deck
 
 
-def _ensure_win_condition(deck: list[str], pool: set[str], preferred: list[str]) -> list[str]:
-    if any(c in WIN_CONDITIONS or get_card_role(c) == "win_condition" for c in deck):
+def _ensure_win_condition(
+    deck: list[str],
+    pool: set[str],
+    preferred: list[str],
+    opponent_deck: list[str] | None = None,
+    threats: list[str] | None = None,
+) -> list[str]:
+    if any(_is_primary_attack(c) for c in deck):
         return deck
-    for wc in list(preferred) + ["Hog Rider", "Royal Giant", "Miner", "Balloon"]:
-        if wc not in pool or wc not in WIN_CONDITIONS:
-            continue
+    opponent_deck = opponent_deck or []
+    threats = threats if threats is not None else _key_threats(opponent_deck)
+    candidates = [
+        w for w in list(preferred) + [
+            "Hog Rider", "Miner", "Battle Ram", "Royal Giant", "Balloon",
+            "Goblin Barrel", "Wall Breakers", "Ram Rider",
+        ]
+        if w in pool and _is_primary_attack(w) and w not in deck
+    ]
+    for wc in candidates:
         if len(deck) < 8 and _can_add(wc, deck):
             deck.append(wc)
             return deck
+        if len(deck) >= 8:
+            return _replace_weakest(deck, wc, opponent_deck, threats, skip_win=True)
     return deck
 
 
@@ -510,10 +635,15 @@ def _trim_weak_cards(
     for _ in range(8):
         if not candidates:
             break
+        unlocked = [
+            c for c in out
+            if not _is_primary_attack(c) and get_card_role(c) != "win_condition"
+        ]
+        if not unlocked:
+            break
         weakest = min(
-            out,
+            unlocked,
             key=lambda c: (
-                1 if c in WIN_CONDITIONS or get_card_role(c) == "win_condition" else 0,
                 1 if get_card_role(c) == "spell" and _deck_role_counts(out)["spell"] <= 1 else 0,
                 _card_score_in_context(c, opponent_deck, threats),
             ),
@@ -524,22 +654,17 @@ def _trim_weak_cards(
 
         replaced = False
         for card in candidates:
-            if not _can_add(card, out) and card not in out:
+            if card in out:
+                continue
+            if _is_primary_attack(card) and any(_is_primary_attack(c) for c in out):
+                continue
+            trial = [c for c in out if c != weakest]
+            if not _can_swap_in(card, trial, weakest):
                 continue
             new_score = ranked_map.get(card, _card_score_in_context(card, opponent_deck, threats))
             if new_score <= weak_score + 1.0:
                 continue
-            if card in out:
-                continue
-            idx = out.index(weakest)
-            if get_card_role(card) == "spell" and get_card_role(weakest) == "spell":
-                out[idx] = card
-            elif card in WIN_CONDITIONS and weakest in WIN_CONDITIONS:
-                out[idx] = card
-            elif card not in WIN_CONDITIONS and weakest not in WIN_CONDITIONS:
-                out[idx] = card
-            else:
-                continue
+            out[out.index(weakest)] = card
             candidates.remove(card)
             replaced = True
             break
@@ -563,7 +688,12 @@ def _trim_excess(
         out.remove(drop)
 
     while _deck_role_counts(out)["win"] > _MAX_WIN_CONDITIONS:
-        wins = [c for c in out if c in WIN_CONDITIONS or get_card_role(c) == "win_condition"]
+        wins = [c for c in out if _is_primary_attack(c)]
+        if not wins:
+            break
+        # Prefer dropping non-preferred extras; never empty the deck of attack.
+        if len(wins) <= 1:
+            break
         drop = min(
             wins,
             key=lambda c: (
