@@ -111,8 +111,13 @@ def is_spell(db: DeckDatabase, name: str) -> bool:
     return "spell" in roles or ROLE_SMALL_SPELL in roles or ROLE_BIG_SPELL in roles
 
 
+def is_attack_win(name: str) -> bool:
+    """Primary tower-push win condition (Hog, Giant, Ram…) — not Bandit/support push."""
+    return name in WIN_CONDITIONS
+
+
 def is_win(db: DeckDatabase, name: str) -> bool:
-    return name in WIN_CONDITIONS or ROLE_WIN in _card_roles(db, name)
+    return is_attack_win(name) or ROLE_WIN in _card_roles(db, name)
 
 
 def count_spells(deck: list[str], db: DeckDatabase) -> int:
@@ -120,7 +125,8 @@ def count_spells(deck: list[str], db: DeckDatabase) -> int:
 
 
 def count_wins(deck: list[str], db: DeckDatabase) -> int:
-    return sum(1 for c in deck if is_win(db, c))
+    """Count primary attacking win-conditions only (for MAX_WINS / ensure)."""
+    return sum(1 for c in deck if is_attack_win(c))
 
 
 def count_role(deck: list[str], db: DeckDatabase, role: str) -> int:
@@ -161,7 +167,7 @@ def hard_constraint_issues(
         issues.append("duplicate_cards")
     if core and not all(c in deck for c in core):
         issues.append("missing_core")
-    if not any(is_win(db, c) for c in deck):
+    if not any(is_attack_win(c) for c in deck):
         issues.append("win_condition")
     if count_wins(deck, db) > MAX_WINS:
         issues.append("too_many_wins")
@@ -222,7 +228,7 @@ def _axis_synergy(deck: list[str], core: list[str], pair_synergy: PairSynergyFn)
 
 def _axis_offense(deck: list[str], db: DeckDatabase) -> float:
     score = 0.0
-    if any(is_win(db, c) for c in deck):
+    if any(is_attack_win(c) for c in deck):
         score += 40.0
     if has_role(deck, db, ROLE_DPS):
         score += 20.0
@@ -423,7 +429,7 @@ def _pick_best_filler(
         c for c in pool
         if c not in deck
         and (allow_spells or not is_spell(db, c))
-        and (allow_wins or not is_win(db, c))
+        and (allow_wins or not is_attack_win(c))
     ]
     if not candidates:
         return None
@@ -431,7 +437,7 @@ def _pick_best_filler(
     def rank(card: str) -> float:
         if is_spell(db, card) and count_spells(deck, db) >= MAX_SPELLS:
             return float("-inf")
-        if is_win(db, card) and count_wins(deck, db) >= MAX_WINS:
+        if is_attack_win(card) and count_wins(deck, db) >= MAX_WINS:
             return float("-inf")
         return _filler_candidate_score(card, deck, core, db, archetype, missing, pair_synergy)
 
@@ -446,7 +452,10 @@ def _replace_weakest_filler(
     pair_synergy: PairSynergyFn,
 ) -> list[str]:
     core_set = set(core)
-    fillers = [c for c in deck if c not in core_set]
+    # Prefer dropping a non-attack filler so we never remove an existing push card.
+    fillers = [c for c in deck if c not in core_set and not is_attack_win(c)]
+    if not fillers:
+        fillers = [c for c in deck if c not in core_set]
     if not fillers or replacement in deck:
         return deck
     worst = min(
@@ -482,7 +491,7 @@ def _trim_excess_wins(
     core_set = set(core)
     out = list(deck)
     while count_wins(out, db) > MAX_WINS:
-        extra = [c for c in out if is_win(db, c) and c not in core_set]
+        extra = [c for c in out if is_attack_win(c) and c not in core_set]
         if not extra:
             break
         out.remove(extra[0])
@@ -497,17 +506,35 @@ def _ensure_win_condition(
     archetype: str,
     pair_synergy: PairSynergyFn,
 ) -> list[str]:
-    if any(is_win(db, c) for c in deck):
+    """Guarantee at least one primary attacking card, preferred by core synergy."""
+    if any(is_attack_win(c) for c in deck):
         return deck
-    preferred = ARCHETYPE_PRIMARY_WIN.get(archetype, [])
+
+    preferred = [
+        w for w in ARCHETYPE_PRIMARY_WIN.get(archetype, [])
+        if is_attack_win(w)
+    ]
     win_pick = next((w for w in preferred if w in pool and w not in deck), None)
     if not win_pick:
-        candidates = [c for c in pool if c not in deck and c in WIN_CONDITIONS and not is_spell(db, c)]
-        win_pick = max(
-            candidates,
-            key=lambda c: sum(pair_synergy(c, x) for x in deck),
-            default=None,
-        )
+        candidates = [
+            c for c in pool
+            if c not in deck and is_attack_win(c) and not is_spell(db, c)
+        ]
+        if candidates:
+            # Prefer synergy with the player's selected core cards.
+            win_pick = max(
+                candidates,
+                key=lambda c: (
+                    sum(pair_synergy(c, x) for x in core) * 3
+                    + sum(pair_synergy(c, x) for x in deck)
+                ),
+            )
+    if not win_pick:
+        # Last resort: any known attack win even outside arena pool.
+        fallback = preferred or [
+            "Hog Rider", "Miner", "Battle Ram", "Royal Giant", "Goblin Barrel", "Wall Breakers",
+        ]
+        win_pick = next((w for w in fallback if w not in deck), None)
     if not win_pick:
         return deck
     if len(deck) >= 8:
@@ -539,9 +566,13 @@ def finalize_deck(
 
     out = _trim_excess_spells(out, core, db, pair_synergy)
     out = _trim_excess_wins(out, core, db)
+    # Re-ensure after trims — Bandit-like soft wins must not leave the deck without a push card.
+    out = _ensure_win_condition(out, core, db, pool, archetype, pair_synergy)
 
     while len(out) > 8:
-        droppable = [c for c in out if c not in core_set]
+        droppable = [c for c in out if c not in core_set and not is_attack_win(c)]
+        if not droppable:
+            droppable = [c for c in out if c not in core_set]
         if not droppable:
             break
         out.remove(min(droppable, key=lambda c: sum(pair_synergy(c, x) for x in out if x != c)))
@@ -565,4 +596,5 @@ def finalize_deck(
         else:
             out.append(pick)
 
+    out = _ensure_win_condition(out[:8], core, db, pool, archetype, pair_synergy)
     return out[:8]

@@ -119,14 +119,14 @@ MAX_SPELLS = 3
 MAX_WINS = 1
 
 ARCHETYPE_PRIMARY_WIN: dict[str, list[str]] = {
-    "Cycle": ["Hog Rider", "Mortar", "Miner"],
+    "Cycle": ["Hog Rider", "Mortar", "Miner", "Wall Breakers"],
     "Log Bait": ["Goblin Barrel"],
-    "Beatdown": ["Golem", "Giant", "Electro Giant", "P.E.K.K.A"],
+    "Beatdown": ["Golem", "Giant", "Electro Giant", "P.E.K.K.A", "Goblin Giant"],
     "Lava": ["Lava Hound", "Balloon"],
     "Royal Giant": ["Royal Giant"],
-    "Bridge Spam": ["P.E.K.K.A", "Battle Ram", "Royal Ghost", "Bandit"],
+    "Bridge Spam": ["Battle Ram", "Ram Rider", "P.E.K.K.A", "Elite Barbarians"],
     "Siege": ["X-Bow", "Mortar"],
-    "Control": ["Miner", "X-Bow", "Graveyard"],
+    "Control": ["Miner", "X-Bow", "Graveyard", "Goblin Drill"],
     "Graveyard": ["Graveyard"],
-    "Meta": [],
+    "Meta": ["Hog Rider", "Miner", "Battle Ram", "Royal Giant", "Goblin Barrel"],
 }

@@ -8,6 +8,7 @@ from bot.services.card_registry import build_deck_share_link, get_card_info
 from bot.services.counter_engine import _get_arena_pool
 from bot.services.deck_analyzer import analyze_deck
 from bot.services.deck_builder import build_multiple_decks
+from bot.services.deck_builder.balance import is_attack_win
 from bot.services.meta_analyzer import _guess_category
 
 _SLOT_EVO = {0, 2}
@@ -162,6 +163,8 @@ def build_constructor_decks(
     deck_id = 7000
 
     for result in built:
+        if not any(is_attack_win(c) for c in result.deck):
+            continue
         synergy_score, synergy_notes = calculate_deck_synergy(result.deck)
         entry = _build_deck_entry(
             core_parsed,

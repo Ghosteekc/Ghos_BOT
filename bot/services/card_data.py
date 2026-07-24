@@ -221,8 +221,9 @@ ARENA_CARD_POOL: dict[str, list[str]] = {
 WIN_CONDITIONS = {
     "Hog Rider", "Balloon", "Golem", "Graveyard", "X-Bow", "Mortar", "Royal Giant",
     "Goblin Barrel", "Lava Hound", "Miner", "Giant", "P.E.K.K.A", "Battle Ram",
-    "Wall Breakers", "Royal Hogs", "Goblin Giant", "Elixir Giant", "Electro Giant",
+    "Wall Breakers", "Royal Hogs", "Goblin Giant", "Elixir Golem", "Electro Giant",
     "Skeleton Barrel", "Sparky", "Three Musketeers", "Elite Barbarians", "Goblin Drill",
+    "Ram Rider", "Mighty Miner", "Goblin Machine", "Boss Bandit", "Rune Giant",
 }
 
 # Спам-толпы (не путать со Стражами — те танкуют точечный урон)
