@@ -97,11 +97,16 @@ def filter_pvp_battles(battles: list, player_tag: str) -> list:
     return result
 
 
-async def load_pvp_battles(player_tag: str, *, client: ClashRoyaleClient | None = None) -> list | None:
+async def load_pvp_battles(
+    player_tag: str,
+    *,
+    client: ClashRoyaleClient | None = None,
+    bypass_ttl: bool = False,
+) -> list | None:
     from bot.services.battle_session_cache import is_fresh
 
     tag = normalize_tag(player_tag)
-    if is_fresh(tag):
+    if not bypass_ttl and is_fresh(tag):
         logger.debug("Skipping CR battlelog for %s (fetched within TTL)", tag)
         return None
 
@@ -301,6 +306,17 @@ async def get_cached_stats(player_tag: str) -> CachedStats | None:
     )
 
 
+def _is_live_battlelog(battles: list) -> bool:
+    """DB cache stubs use type=cached and zero trophyChange — not usable for trophy charts."""
+    if not battles:
+        return False
+    for battle in battles:
+        battle_type = (battle.get("type") or "").strip().lower().replace(" ", "")
+        if battle_type and battle_type != "cached":
+            return True
+    return False
+
+
 async def load_and_persist(user: User, *, force_refresh: bool = False) -> list | None:
     if not user.player_tag:
         return None
@@ -316,20 +332,20 @@ async def load_and_persist(user: User, *, force_refresh: bool = False) -> list |
 
     if not force_refresh:
         session_battles = get_session_battles(user.telegram_id)
-        if session_battles is not None and is_fresh(tag):
+        if (
+            session_battles is not None
+            and is_fresh(tag)
+            and _is_live_battlelog(session_battles)
+        ):
             return session_battles
 
-        cached = await get_battles_from_cache(user.player_tag)
-        if cached:
-            set_session_battles(user.telegram_id, tag, cached)
-            if is_fresh(tag):
-                return cached
-
-    battles = await load_pvp_battles(user.player_tag)
+    # Always hit CR when session is stale/missing — never treat DB stubs as a fresh log.
+    battles = await load_pvp_battles(user.player_tag, bypass_ttl=True)
     if battles is None:
+        session_battles = get_session_battles(user.telegram_id)
+        if session_battles is not None and _is_live_battlelog(session_battles):
+            return session_battles
         cached = await get_battles_from_cache(user.player_tag)
-        if cached:
-            set_session_battles(user.telegram_id, tag, cached)
         return cached or None
 
     if battles:
@@ -337,9 +353,10 @@ async def load_and_persist(user: User, *, force_refresh: bool = False) -> list |
         set_session_battles(user.telegram_id, tag, battles)
         return battles
 
+    session_battles = get_session_battles(user.telegram_id)
+    if session_battles is not None and _is_live_battlelog(session_battles):
+        return session_battles
     cached = await get_battles_from_cache(user.player_tag)
-    if cached:
-        set_session_battles(user.telegram_id, tag, cached)
     return cached or []
 
 

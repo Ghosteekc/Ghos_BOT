@@ -37,8 +37,7 @@ from bot.models.database import User
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 
-from bot.services.battle_cache_reader import get_battles_for_winrate_chart, get_battles_from_cache
-from bot.services.battle_session_cache import get_session_battles, is_fresh
+from bot.services.battle_cache_reader import get_battles_for_winrate_chart
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.card_data import get_card_elixir
@@ -657,22 +656,10 @@ async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyRes
 
 @router.get("/stats", response_model=StatsOverviewResponse)
 async def extended_stats(user: User = Depends(require_subscription)) -> StatsOverviewResponse:
-    tag = normalize_tag(user.player_tag or "")
-    battles: list | None = None
-
-    session_battles = get_session_battles(user.telegram_id) if user.telegram_id else None
-    if session_battles is not None and tag and is_fresh(tag):
-        battles = session_battles
-
-    if not battles and user.player_tag:
-        cached_battles = await get_battles_from_cache(user.player_tag)
-        if cached_battles:
-            battles = cached_battles
-
-    if battles is None:
-        battles = await _get_battles(user)
+    battles = await load_and_persist(user)
     if battles is None:
         raise http_error("E020", status=502)
+
     stats = await get_cached_stats(user.player_tag)
     if stats is None and battles:
         stats = _stats_from_battles(battles, user.player_tag or "")
