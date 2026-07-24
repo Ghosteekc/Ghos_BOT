@@ -55,9 +55,14 @@ def is_ladder_1v1(battle: dict) -> bool:
         return False
 
     trophy_change = team[0].get("trophyChange")
-    if trophy_change is None:
-        return False
-    return int(trophy_change) != 0
+    if trophy_change is not None:
+        try:
+            return int(trophy_change) != 0
+        except (TypeError, ValueError):
+            return False
+
+    # Older/partial payloads: still count as ladder if trophies are present.
+    return team[0].get("startingTrophies") is not None
 
 
 def _is_casual_game_mode(battle: dict) -> bool:
@@ -96,6 +101,10 @@ def _battle_won(battle: dict) -> bool:
 
 def _battle_time(battle: dict) -> str:
     return battle_time_from_record(battle) or ""
+
+
+def _trophy_delta(team: dict, chronological: list[dict], index: int) -> int | None:
+    """Trophy delta from API field, or from consecutive startingTrophies."""
     raw = team.get("trophyChange")
     if raw is not None:
         try:
