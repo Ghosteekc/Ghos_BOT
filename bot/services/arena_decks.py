@@ -14,9 +14,8 @@ from bot.services.card_data import get_card_elixir
 from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed, normalize_deck_upgrades
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
-from bot.services.deck_analyzer import analyze_deck, extract_deck
+from bot.services.deck_analyzer import extract_deck
 from bot.services.meta_analyzer import _guess_deck_name, _guess_category, _is_competitive_battle
-from bot.services.meta_decks import META_DECKS
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +37,10 @@ class _ArenaCacheEntry:
 _arena_cache: dict[str, _ArenaCacheEntry] = {}
 
 
-def _arena_cache_key(player_tag: str, trophies: int) -> str:
+def _arena_cache_key(player_tag: str, trophies: int, arena_id: int | None) -> str:
     bucket = max(0, trophies // 250) * 250
-    return f"{normalize_tag(player_tag)}:{bucket}"
+    arena_part = str(arena_id) if arena_id is not None else "na"
+    return f"{normalize_tag(player_tag)}:{arena_part}:{bucket}"
 
 
 def _trophy_window(trophies: int) -> int:
@@ -77,23 +77,6 @@ def _cards_to_infos(cards: list[str], parsed: list[dict] | None = None) -> tuple
             })
     avg = round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0
     return card_infos, avg
-
-
-def _meta_entry(meta, entry_id: int, description: str) -> dict:
-    cards = list(meta.cards)
-    card_infos, avg = _cards_to_infos(cards)
-    return {
-        "id": entry_id,
-        "name": meta.name,
-        "cards": card_infos,
-        "winrate": 0.0,
-        "total_games": 0,
-        "avg_elixir": avg,
-        "type": "arena",
-        "category": meta.category,
-        "deck_link": build_deck_share_link(cards),
-        "description": description,
-    }
 
 
 def _decks_from_user_battles(
@@ -135,36 +118,73 @@ def _decks_from_user_battles(
     return deck_stats
 
 
+async def _filter_tags_by_arena(
+    client: ClashRoyaleClient,
+    tags: list[str],
+    arena_id: int | None,
+    *,
+    max_players: int = 25,
+) -> list[str]:
+    if arena_id is None or not tags:
+        return tags[:max_players]
+
+    sem = asyncio.Semaphore(_SCAN_CONCURRENCY)
+    matched: list[str] = []
+
+    async def check(tag: str) -> str | None:
+        async with sem:
+            try:
+                player = await client.get_player(tag)
+            except ClashRoyaleAPIError:
+                return None
+            player_arena = (player.get("arena") or {}).get("id")
+            if player_arena == arena_id:
+                return tag.upper()
+            return None
+
+    results = await asyncio.gather(*[check(tag) for tag in tags[:80]], return_exceptions=True)
+    for result in results:
+        if isinstance(result, str) and result not in matched:
+            matched.append(result)
+        if len(matched) >= max_players:
+            break
+    return matched
+
+
 async def _fetch_bracket_player_tags(
     client: ClashRoyaleClient,
     trophies: int,
     battles: list,
     player_tag: str,
+    arena_id: int | None,
     *,
     max_players: int = 25,
 ) -> list[str]:
-    """Players near the user's trophy count from global rankings + recent opponents."""
+    """Top players near the user's trophies; prefer the same arena id."""
     window = _trophy_window(trophies)
-    tags: list[str] = []
+    candidates: list[str] = []
     seen: set[str] = set()
 
-    try:
-        data = await client._request(f"/locations/global/rankings/players?limit=200")
-        items = data.get("items", []) if isinstance(data, dict) else []
-        bracket = [
-            item for item in items
-            if abs(int(item.get("trophies") or 0) - trophies) <= window
-        ]
-        bracket.sort(key=lambda x: abs(int(x.get("trophies") or 0) - trophies))
-        for item in bracket:
-            tag = (item.get("tag") or "").upper()
-            if tag and tag not in seen:
-                seen.add(tag)
-                tags.append(tag)
-            if len(tags) >= max_players:
-                break
-    except ClashRoyaleAPIError as e:
-        logger.debug("Global rankings for arena bracket: %s", e)
+    ranking_paths = ["/locations/global/rankings/players?limit=200"]
+    if trophies >= 9000:
+        ranking_paths.insert(0, "/locations/global/pathoflegend/rankings/players?limit=200")
+
+    for path in ranking_paths:
+        try:
+            data = await client._request(path)
+            items = data.get("items", []) if isinstance(data, dict) else []
+            bracket = [
+                item for item in items
+                if abs(int(item.get("trophies") or 0) - trophies) <= window
+            ]
+            bracket.sort(key=lambda x: abs(int(x.get("trophies") or 0) - trophies))
+            for item in bracket:
+                tag = (item.get("tag") or "").upper()
+                if tag and tag not in seen:
+                    seen.add(tag)
+                    candidates.append(tag)
+        except ClashRoyaleAPIError as e:
+            logger.debug("Rankings fetch for arena decks %s: %s", path, e)
 
     tag_norm = normalize_tag(player_tag)
     for battle in battles[:40]:
@@ -176,11 +196,16 @@ async def _fetch_bracket_player_tags(
         if trophies > 0 and opp_trophies > 0 and abs(opp_trophies - trophies) > window:
             continue
         seen.add(tag)
-        tags.append(tag)
-        if len(tags) >= max_players:
-            break
+        candidates.append(tag)
 
-    return tags
+    if arena_id is not None:
+        arena_tags = await _filter_tags_by_arena(client, candidates, arena_id, max_players=max_players)
+        if len(arena_tags) >= 3:
+            return arena_tags
+        if arena_tags:
+            return arena_tags
+
+    return candidates[:max_players]
 
 
 async def _scan_player_deck_stats(client: ClashRoyaleClient, tag: str) -> dict[str, dict]:
@@ -247,7 +272,7 @@ def _stats_to_entries(deck_stats: dict[str, dict], *, id_base: int, min_games: i
             "type": "arena",
             "category": _guess_category(cards),
             "deck_link": build_deck_share_link(cards),
-            "description": f"Винрейт {wr:.0f}% · {total} боёв на вашем диапазоне кубков",
+            "description": f"Винрейт {wr:.0f}% · {total} боёв на вашей арене",
         })
     return entries
 
@@ -260,7 +285,7 @@ async def get_arena_popular_decks(
     *,
     arena_name: str | None = None,
 ) -> dict:
-    cache_key = _arena_cache_key(player_tag, trophies)
+    cache_key = _arena_cache_key(player_tag, trophies, arena_id)
     cached = _arena_cache.get(cache_key)
     if cached and not cached.expired():
         return cached.data
@@ -298,7 +323,13 @@ async def _build_arena_popular_decks(
     client = ClashRoyaleClient()
     scanned = 0
     try:
-        tags = await _fetch_bracket_player_tags(client, trophies, battles, player_tag)
+        tags = await _fetch_bracket_player_tags(
+            client,
+            trophies,
+            battles,
+            player_tag,
+            arena_id,
+        )
         sem = asyncio.Semaphore(_SCAN_CONCURRENCY)
 
         async def guarded(tag: str) -> dict[str, dict]:
@@ -313,39 +344,17 @@ async def _build_arena_popular_decks(
     finally:
         await client.close()
 
-    entries = _stats_to_entries(combined_stats, id_base=4000, min_games=2)
-    seen_keys: set[str] = set()
-    for entry in entries:
-        names = [c["name"] for c in entry.get("cards", [])]
-        if len(names) == 8:
-            seen_keys.add("|".join(sorted(names)))
-
-    curated_id = 5000
-    use_all_meta = trophies >= 5000
-    for meta in META_DECKS:
-        if len(entries) >= 12:
-            break
-        if not use_all_meta:
-            stats = analyze_deck(list(meta.cards))
-            if stats.avg_elixir > 4.5 and trophies < 6000:
-                continue
-        key = "|".join(sorted(meta.cards))
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        entries.append(_meta_entry(
-            meta,
-            curated_id,
-            f"Метовая колода для {trophies} кубков · {meta.description}",
-        ))
-        curated_id += 1
-
+    entries = _stats_to_entries(combined_stats, id_base=4000, min_games=3)
+    entries = [e for e in entries if e.get("total_games", 0) > 0]
     entries.sort(key=lambda e: (-e.get("winrate", 0), -e.get("total_games", 0)))
 
-    has_live = any(e["total_games"] > 0 for e in entries)
-    source = "rankings" if scanned > 0 and has_live else "battles" if has_live else "mixed"
-    if scanned > 0 and has_live and any(e["total_games"] == 0 for e in entries):
-        source = "mixed"
+    has_live = bool(entries)
+    if scanned > 0 and has_live:
+        source = "arena_rankings"
+    elif has_live:
+        source = "battles"
+    else:
+        source = "empty"
 
     if arena_name:
         display_arena = arena_name

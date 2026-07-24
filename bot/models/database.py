@@ -92,6 +92,8 @@ class BattleCache(Base):
     result: Mapped[str] = mapped_column(String(10))
     user_deck: Mapped[str] = mapped_column(Text)
     opponent_deck: Mapped[str] = mapped_column(Text)
+    opponent_name: Mapped[str] = mapped_column(String(100), default="", server_default="")
+    opponent_tag: Mapped[str] = mapped_column(String(20), default="", server_default="")
     analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -145,7 +147,22 @@ async def init_db() -> None:
             logger.info("Added 'haptic_enabled' column to user_settings table")
 
     await _migrate_battle_cache_dedup()
+    await _migrate_battle_cache_opponent()
     await _migrate_users_player_tag_unique()
+
+
+async def _migrate_battle_cache_opponent() -> None:
+    async with engine.begin() as conn:
+        for column, ddl in (
+            ("opponent_name", "ALTER TABLE battle_cache ADD COLUMN opponent_name VARCHAR(100) DEFAULT ''"),
+            ("opponent_tag", "ALTER TABLE battle_cache ADD COLUMN opponent_tag VARCHAR(20) DEFAULT ''"),
+        ):
+            result = await conn.execute(
+                text(f"SELECT COUNT(*) FROM pragma_table_info('battle_cache') WHERE name='{column}'")
+            )
+            if result.scalar_one_or_none() == 0:
+                await conn.execute(text(ddl))
+                logging.getLogger(__name__).info("Added '%s' column to battle_cache", column)
 
 
 async def _migrate_users_player_tag_unique() -> None:

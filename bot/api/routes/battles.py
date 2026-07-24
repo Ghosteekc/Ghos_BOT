@@ -3,6 +3,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Depends, HTTPException
 
 from bot.api.deps import require_linked_player, require_subscription
+from bot.services.battle_opponent import resolve_opponent_fields
 from bot.api.schemas import (
     BattleDetailResponse,
     BattleHistoryClearResponse,
@@ -61,12 +62,12 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         top_reason = analysis.outcome_summary or (analysis.reasons[0] if analysis.reasons else None)
     except Exception:
         top_reason = None
-    opp_tag = opponent.get("tag", "") or ""
+    opp_name, opp_tag = resolve_opponent_fields(opponent)
     raw_time = battle_time_from_record(battle) or ""
     return BattleSummary(
         index=index,
-        opponent_name=opponent.get("name", "Соперник"),
-        opponent_tag=opp_tag.replace("#", ""),
+        opponent_name=opp_name,
+        opponent_tag=opp_tag,
         opponent_trophies=opponent.get("startingTrophies") or opponent.get("trophyChange") or 0,
         won=won,
         trophy_change=int(team.get("trophyChange") or 0),

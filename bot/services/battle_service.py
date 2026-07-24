@@ -9,6 +9,7 @@ from bot.models import database
 from bot.models.database import BattleCache, User
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.battle_time import battle_time_from_record
+from bot.services.battle_opponent import resolve_opponent_fields
 from bot.services.deck_analyzer import analyze_battle
 
 logger = logging.getLogger(__name__)
@@ -140,12 +141,16 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
         logger.debug("Battle analysis error for %s: %s", player_tag, exc)
         analysis_text = None
 
+    opp_name, opp_tag = resolve_opponent_fields(opponent)
+
     return {
         "player_tag": normalize_tag(player_tag),
         "battle_time": battle_time,
         "result": result,
         "user_deck": ",".join(c for c in team_cards if c),
         "opponent_deck": ",".join(c for c in opp_cards if c),
+        "opponent_name": opp_name,
+        "opponent_tag": opp_tag,
         "analysis": analysis_text,
     }
 
@@ -153,12 +158,22 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
 async def _insert_battle_row(session, row: dict) -> bool:
     """Insert battle row; return True when this call stored a new battle."""
     existing = await session.execute(
-        select(BattleCache.id).where(
+        select(BattleCache).where(
             BattleCache.player_tag == row["player_tag"],
             BattleCache.battle_time == row["battle_time"],
         )
     )
-    if existing.scalar_one_or_none():
+    battle_row = existing.scalar_one_or_none()
+    if battle_row is not None:
+        updated = False
+        if row.get("opponent_name") and not (battle_row.opponent_name or "").strip():
+            battle_row.opponent_name = row["opponent_name"]
+            updated = True
+        if row.get("opponent_tag") and not (battle_row.opponent_tag or "").strip():
+            battle_row.opponent_tag = row["opponent_tag"]
+            updated = True
+        if updated:
+            await session.flush()
         return False
 
     try:
@@ -201,9 +216,10 @@ async def persist_battles(user: User, battles: list) -> int:
                 if await _insert_battle_row(session, row):
                     saved += 1
 
-            if saved:
+            if saved or session.dirty:
                 await session.commit()
-                logger.info("Saved %d new battles for %s", saved, tag)
+                if saved:
+                    logger.info("Saved %d new battles for %s", saved, tag)
 
         return saved
 

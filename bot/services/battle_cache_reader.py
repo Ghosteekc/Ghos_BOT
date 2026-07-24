@@ -25,6 +25,8 @@ def row_to_battle_dict(row: BattleCache, player_tag: str) -> dict:
     opp_cards = [{"name": c} for c in (row.opponent_deck or "").split(",") if c]
     won = row.result == "win"
     tag = normalize_tag(player_tag)
+    opp_name = (row.opponent_name or "").strip() or "Соперник"
+    opp_tag = normalize_tag(row.opponent_tag or "")
     return {
         "type": "cached",
         "battleTime": row.battle_time,
@@ -37,8 +39,8 @@ def row_to_battle_dict(row: BattleCache, player_tag: str) -> dict:
             "cards": user_cards,
         }],
         "opponent": [{
-            "tag": "",
-            "name": "Соперник",
+            "tag": opp_tag,
+            "name": opp_name,
             "crowns": 1 if won else 3,
             "cards": opp_cards,
         }],
