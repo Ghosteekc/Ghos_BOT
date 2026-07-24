@@ -170,12 +170,45 @@ class CounterDeckResponse(BaseModel):
     preferred_cards: list[str]
 
 
+class CustomizeCardInfo(BaseModel):
+    id: str
+    name: str
+    name_ru: str = ""
+    icon: str = ""
+    cost: int = 0
+    level: int | None = None
+    recommended_level: int = 0
+    needs_upgrade: bool = False
+    deficit: int = 0
+    slot: int = 0
+
+
+class CustomizeUpgradePriority(BaseModel):
+    name: str
+    name_ru: str = ""
+    level: int | None = None
+    recommended_level: int = 0
+    deficit: int = 0
+    icon: str = ""
+
+
 class CustomizeResponse(BaseModel):
     original: list[str]
     customized: list[str]
     issues: list[str]
     avg_elixir: float
     deck_link: str | None = None
+    recommended_level: int = 0
+    original_cards: list[CustomizeCardInfo] = []
+    customized_cards: list[CustomizeCardInfo] = []
+    upgrade_priority: list[CustomizeUpgradePriority] = []
+    level_alt_deck: list[str] = []
+    level_alt_cards: list[CustomizeCardInfo] = []
+    level_alt_needed: bool = False
+    level_alt_avg_elixir: float = 0.0
+    level_alt_deck_link: str | None = None
+    synergy_needed: bool = False
+    balanced: bool = False
 
 
 class SynergyResponse(BaseModel):

@@ -599,15 +599,21 @@ async def counter_deck(index: int, user: User = Depends(require_subscription)) -
 
 @router.get("/customize", response_model=CustomizeResponse)
 async def customize_deck(user: User = Depends(require_subscription)) -> CustomizeResponse:
+    from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
+    from bot.services.deck_level_advisor import enrich_customize_result
+    from bot.services.counter_engine import _get_arena_pool
+
     battles = await _get_battles(user)
     tag = normalize_tag(user.player_tag)
     preferred = [c for c, _ in get_most_played_cards(battles, tag)]
 
     current_deck: list[str] = []
+    battle_cards: list[dict] = []
     for battle in battles:
         team = battle.get("team", [{}])[0]
         if normalize_tag(team.get("tag") or "") == tag:
-            current_deck = [c["name"] for c in team.get("cards", [])]
+            battle_cards = list(team.get("cards") or [])
+            current_deck = [c["name"] for c in battle_cards if c.get("name")]
             break
 
     if not current_deck:
@@ -615,12 +621,44 @@ async def customize_deck(user: User = Depends(require_subscription)) -> Customiz
 
     result = customize_deck_for_arena(current_deck, user.arena_id, preferred, user.trophies)
     await ensure_cards_loaded()
+
+    player: dict = {}
+    client = ClashRoyaleClient()
+    try:
+        player = await client.get_player(user.player_tag or tag)
+    except ClashRoyaleAPIError:
+        player = {}
+    finally:
+        await client.close()
+
+    enriched = enrich_customize_result(
+        {**result, "needed": result.get("needed", result["original"] != result["customized"])},
+        player=player,
+        trophies=user.trophies,
+        arena_id=user.arena_id,
+        pool=_get_arena_pool(user.arena_id, user.trophies),
+        battle_cards=battle_cards,
+    )
+
     return CustomizeResponse(
-        original=result["original"],
-        customized=result["customized"],
-        issues=result["issues"],
-        avg_elixir=result["avg_elixir"],
-        deck_link=build_deck_share_link(result["customized"]),
+        original=enriched["original"],
+        customized=enriched["customized"],
+        issues=enriched["issues"],
+        avg_elixir=enriched["avg_elixir"],
+        deck_link=build_deck_share_link(enriched["customized"]),
+        recommended_level=enriched["recommended_level"],
+        original_cards=enriched["original_cards"],
+        customized_cards=enriched["customized_cards"],
+        upgrade_priority=enriched["upgrade_priority"],
+        level_alt_deck=enriched["level_alt_deck"],
+        level_alt_cards=enriched["level_alt_cards"],
+        level_alt_needed=enriched["level_alt_needed"],
+        level_alt_avg_elixir=enriched["level_alt_avg_elixir"],
+        level_alt_deck_link=build_deck_share_link(enriched["level_alt_deck"])
+        if enriched["level_alt_needed"]
+        else None,
+        synergy_needed=enriched["synergy_needed"],
+        balanced=enriched["balanced"],
     )
 
 
