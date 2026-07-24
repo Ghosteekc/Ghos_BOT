@@ -220,7 +220,13 @@ class ClashRoyaleClient:
         started = time.monotonic()
 
         try:
-            async with session.get(url) as resp:
+            timeout_sec = (
+                settings.cr_api_battlelog_timeout_sec
+                if "/battlelog" in path
+                else settings.cr_api_timeout_sec
+            )
+            req_timeout = aiohttp.ClientTimeout(total=timeout_sec)
+            async with session.get(url, timeout=req_timeout) as resp:
                 response_text = await resp.text()
                 duration_ms = int((time.monotonic() - started) * 1000)
                 logger.info(
@@ -315,13 +321,18 @@ class ClashRoyaleClient:
         logger.info("CR API player fetched tag=%s name=%s", normalized, data.get("name", "?"))
         return data
 
-    async def get_battlelog(self, tag: str) -> list:
+    async def fetch_battlelog_raw(self, tag: str) -> list:
         normalized = normalize_tag(tag)
         data = await self._request(f"/players/{encode_tag(tag)}/battlelog")
         if not isinstance(data, list):
             raise ClashRoyaleAPIError("Некорректный ответ журнала боёв.", 500)
         logger.info("CR API battlelog fetched tag=%s battles=%s", normalized, len(data))
         return data
+
+    async def get_battlelog(self, tag: str) -> list:
+        from bot.services.battle_log_fetch import coalesced_battlelog
+
+        return await coalesced_battlelog(self, tag)
 
     async def get_cards(self) -> dict:
         data = await self._request("/cards")

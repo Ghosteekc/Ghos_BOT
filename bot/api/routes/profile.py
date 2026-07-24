@@ -10,7 +10,14 @@ from bot.api.routes.decks import _build_stats_overview, _stats_from_battles
 from bot.api.routes.battles import _build_battle_summary
 from bot.services.battle_day_stats import compute_daily_trophy_change
 from bot.services.battle_cache_reader import get_battles_for_winrate_chart
-from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist, load_pvp_battles
+from bot.services.battle_service import (
+    BATTLE_LOG_LIMIT,
+    filter_pvp_battles,
+    get_cached_stats,
+    load_and_persist,
+    load_pvp_battles,
+)
+from bot.services.battle_session_cache import get_session_battles, is_fresh
 from bot.services.player_collection import build_player_collection, build_collection_stats_from_player
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
 from bot.user_errors import http_error_from_clash
@@ -144,7 +151,15 @@ async def get_profile(
 async def _daily_trophy_for_user(user: User) -> int | None:
     if not user.player_tag:
         return None
-    battles = await load_pvp_battles(user.player_tag)
+    tag = user.player_tag
+    session_battles = get_session_battles(user.telegram_id)
+    if session_battles and is_fresh(tag):
+        pvp = filter_pvp_battles(session_battles, tag)
+        if pvp:
+            return compute_daily_trophy_change(pvp)
+    if is_fresh(tag):
+        return None
+    battles = await load_pvp_battles(tag)
     if not battles:
         return None
     return compute_daily_trophy_change(battles)

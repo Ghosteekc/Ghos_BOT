@@ -15,9 +15,12 @@ class Settings(BaseSettings):
     trial_days: int = 30
     subscription_price_stars: int = 250
     sync_interval_minutes: int = 60
-    sync_cr_api_timeout_sec: int = 20
+    sync_startup_delay_sec: int = 45
+    sync_battlelog_min_interval_sec: int = 300
+    sync_cr_api_timeout_sec: int = 55
     sync_shutdown_timeout_sec: int = 30
     cr_api_timeout_sec: int = 15
+    cr_api_battlelog_timeout_sec: int = 28
     cr_api_retry_max: int = 3
     cr_api_retry_base_delay_sec: float = 1.0
     admin_telegram_id: int | None = None

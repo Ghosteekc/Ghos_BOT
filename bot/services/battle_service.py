@@ -96,16 +96,25 @@ def filter_pvp_battles(battles: list, player_tag: str) -> list:
     return result
 
 
-async def load_pvp_battles(player_tag: str) -> list | None:
+async def load_pvp_battles(player_tag: str, *, client: ClashRoyaleClient | None = None) -> list | None:
+    from bot.services.battle_session_cache import is_fresh
+
+    tag = normalize_tag(player_tag)
+    if is_fresh(tag):
+        logger.debug("Skipping CR battlelog for %s (fetched within TTL)", tag)
+        return None
+
     logger.debug(f"Loading PvP battles for {player_tag}")
-    client = ClashRoyaleClient()
+    owns_client = client is None
+    client = client or ClashRoyaleClient()
     try:
         battles = await client.get_battlelog(player_tag)
     except ClashRoyaleAPIError:
         logger.warning(f"Failed to load battles for {player_tag}: API error")
         return None
     finally:
-        await client.close()
+        if owns_client:
+            await client.close()
     pvp = filter_pvp_battles(battles, player_tag)
     logger.info(f"Loaded {len(pvp)} PvP battles for {player_tag} from API")
     return pvp
@@ -295,9 +304,10 @@ async def load_and_persist(user: User, *, force_refresh: bool = False) -> list |
             return session_battles
 
         cached = await get_battles_from_cache(user.player_tag)
-        if cached and is_fresh(tag):
+        if cached:
             set_session_battles(user.telegram_id, tag, cached)
-            return cached
+            if is_fresh(tag):
+                return cached
 
     battles = await load_pvp_battles(user.player_tag)
     if battles is None:

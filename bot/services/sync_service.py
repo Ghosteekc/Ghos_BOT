@@ -10,6 +10,7 @@ from sqlalchemy import select
 from bot.config import settings
 from bot.models.database import async_session, User
 from bot.services.battle_service import filter_pvp_battles, persist_battles
+from bot.services.battle_session_cache import is_fresh
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ _cycle_counter = 0
 
 
 async def _fetch_battlelog(client: ClashRoyaleClient, player_tag: str) -> list:
-    timeout = max(5, settings.sync_cr_api_timeout_sec)
+    timeout = max(15, settings.sync_cr_api_timeout_sec)
     try:
         return await asyncio.wait_for(client.get_battlelog(player_tag), timeout=timeout)
     except asyncio.TimeoutError as exc:
@@ -31,12 +32,18 @@ async def _fetch_battlelog(client: ClashRoyaleClient, player_tag: str) -> list:
         raise ClashRoyaleAPIError(
             f"Battlelog request timed out after {timeout}s",
             0,
+            retryable=False,
         ) from exc
 
 
 async def sync_user_battles(user: User, *, client: ClashRoyaleClient | None = None) -> int:
     """Fetch user's battlelog and persist new PvP battles. Returns number of new saved battles."""
     if not user.player_tag:
+        return 0
+
+    tag = normalize_tag(user.player_tag)
+    if is_fresh(tag):
+        logger.debug("Battle sync skipped for %s: battlelog fetched recently", tag)
         return 0
 
     owns_client = client is None
@@ -158,6 +165,14 @@ async def run_periodic(stop_event: asyncio.Event) -> None:
     global _cycle_counter
     interval = max(1, settings.sync_interval_minutes) * 60
     logger.info("Battle sync loop started (interval %d seconds)", interval)
+
+    startup_delay = max(0, settings.sync_startup_delay_sec)
+    if startup_delay and not stop_event.is_set():
+        logger.info("Battle sync: waiting %ds after startup before first cycle", startup_delay)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=startup_delay)
+        except asyncio.TimeoutError:
+            pass
 
     try:
         while not stop_event.is_set():
