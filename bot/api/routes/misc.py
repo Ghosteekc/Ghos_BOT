@@ -17,6 +17,7 @@ from bot.models.database import FavoriteDeck, User, async_session
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_cards_catalog
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag, validate_tag
 from bot.services.battle_service import load_and_persist
+from bot.services.player_preview import build_player_preview
 from bot.services.user_settings import load_settings_response, update_user_settings
 from bot.user_errors import http_error, http_error_from_clash
 
@@ -81,25 +82,12 @@ async def get_player_preview(
     if not validate_tag(normalized):
         raise http_error("E001", status=400, message="Некорректный тег игрока")
 
-    client = ClashRoyaleClient()
     try:
-        player = await client.get_player(normalized)
+        data = await build_player_preview(normalized)
     except ClashRoyaleAPIError as e:
         raise http_error_from_clash(e) from e
-    finally:
-        await client.close()
 
-    arena = player.get("arena", {})
-    clan = player.get("clan") or {}
-    return SearchResult(
-        player_tag=normalized.replace("#", ""),
-        player_name=player.get("name", "Игрок"),
-        trophies=player.get("trophies", 0),
-        arena=arena.get("name", "—"),
-        max_trophies=player.get("bestTrophies"),
-        clan_name=clan.get("name") if isinstance(clan, dict) else None,
-        exp_level=player.get("expLevel"),
-    )
+    return SearchResult(**data)
 
 
 @router.get("/favorites", response_model=FavoritesResponse)

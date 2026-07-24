@@ -397,6 +397,20 @@ class SearchResult(BaseModel):
     max_trophies: int | None = None
     clan_name: str | None = None
     exp_level: int | None = None
+    arena_icon: str | None = None
+    winrate: float | None = None
+    total_wins: int | None = None
+    total_losses: int | None = None
+    recent_winrate: float | None = None
+    recent_games: int = 0
+    favorite_card: str | None = None
+    favorite_card_icon: str | None = None
+    avatar_url: str | None = None
+    cards: list[DeckCardInfo] = []
+    avg_elixir: float = 0.0
+    deck_link: str | None = None
+    deck_winrate: float | None = None
+    deck_games: int = 0
 
 
 class CardCatalogEntry(BaseModel):

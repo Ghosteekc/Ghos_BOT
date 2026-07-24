@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import random
 
 from bot.services.card_data import CARD_META, get_card_elixir
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
-from bot.services.rofl_decks import ROFL_DECKS, RoflDeck, pick_chaos_flavor
+from bot.services.rofl_decks import ROFL_DECKS, RoflDeck, validate_rofl_deck_shapes
+
+logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 400
 TARGET_AVG_MIN = 3.0
@@ -78,14 +81,20 @@ def _deck_rules_valid(cards: list[str]) -> bool:
 
 
 async def _rofl_cards_valid(cards: tuple[str, ...]) -> list[str] | None:
+    """Return resolved 8 unique playable cards, or None if the preset is invalid."""
     await ensure_cards_loaded()
-    resolved: list[str] = []
-    for card in cards:
-        info = get_card_info(card)
-        if info and info.get("id") is not None and card in CARD_META:
-            resolved.append(card)
-    if len(resolved) != 8:
+    if len(cards) != 8 or len(set(cards)) != 8:
         return None
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for card in cards:
+        if not card or card in seen:
+            return None
+        info = get_card_info(card)
+        if not info or info.get("id") is None or card not in CARD_META:
+            return None
+        seen.add(card)
+        resolved.append(card)
     if not _deck_rules_valid(resolved):
         return None
     if build_deck_share_link(resolved) is None:
@@ -96,53 +105,28 @@ async def _rofl_cards_valid(cards: tuple[str, ...]) -> list[str] | None:
 async def _valid_rofl_presets() -> list[tuple[RoflDeck, list[str]]]:
     global _valid_rofl_cache
     if _valid_rofl_cache is None:
+        shape_errors = validate_rofl_deck_shapes()
+        if shape_errors:
+            logger.warning("Rofl deck shape issues: %s", "; ".join(shape_errors[:8]))
         presets: list[tuple[RoflDeck, list[str]]] = []
         for preset in ROFL_DECKS:
             cards = await _rofl_cards_valid(preset.cards)
             if cards:
                 presets.append((preset, cards))
+            else:
+                logger.warning("Skipping invalid rofl preset %s", preset.key)
         _valid_rofl_cache = presets
     return _valid_rofl_cache
 
 
-async def _generate_chaos_rofl() -> dict:
-    """Random 8-card meme soup from cards used in rofl presets."""
-    pool = await _playable_pool()
-    meme_cards = {card for preset in ROFL_DECKS for card in preset.cards}
-    chaos_pool = [name for name in pool if name in meme_cards]
-    if len(chaos_pool) < 8:
-        chaos_pool = pool
-
-    for _ in range(MAX_ATTEMPTS):
-        cards = random.sample(chaos_pool, 8)
-        if not _deck_rules_valid(cards):
-            continue
-        if build_deck_share_link(cards) is None:
-            continue
-        name, tagline = pick_chaos_flavor()
-        return _pack_deck(
-            cards,
-            rofl_name=name,
-            rofl_tagline=tagline,
-            rofl_key="chaos-mix",
-        )
-
-    raise ValueError("Не удалось собрать хаотичную рофл-колоду")
-
-
 async def generate_rofl_deck(*, exclude_key: str | None = None) -> dict:
-    if random.random() < 0.22 and exclude_key != "chaos-mix":
-        try:
-            return await _generate_chaos_rofl()
-        except ValueError:
-            pass
-
+    """Pick a ready-made rofl template. Does not use competitive random rules."""
     valid = await _valid_rofl_presets()
     if not valid:
         raise ValueError("Не удалось собрать рофл-колоду")
 
     pool = [(preset, cards) for preset, cards in valid if preset.key != exclude_key]
-    if len(pool) < 2:
+    if not pool:
         pool = valid
 
     preset, cards = random.choice(pool)
