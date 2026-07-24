@@ -2,7 +2,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bot.models import database
@@ -315,3 +315,30 @@ async def load_and_persist(user: User, *, force_refresh: bool = False) -> list |
     if cached:
         set_session_battles(user.telegram_id, tag, cached)
     return cached or []
+
+
+async def delete_persisted_battles_for_user(user: User) -> int:
+    """Delete battle_cache rows for the linked player tag only."""
+    if not user.player_tag:
+        return 0
+
+    tag = normalize_tag(user.player_tag)
+    if not tag:
+        return 0
+
+    async with database.async_session() as session:
+        count_res = await session.execute(
+            select(func.count())
+            .select_from(BattleCache)
+            .where(BattleCache.player_tag == tag)
+        )
+        to_delete = int(count_res.scalar_one() or 0)
+        if to_delete:
+            await session.execute(delete(BattleCache).where(BattleCache.player_tag == tag))
+            await session.commit()
+            logger.info("Deleted %d battle_cache rows for %s (user_id=%s)", to_delete, tag, user.id)
+
+    from bot.services.battle_session_cache import clear_user
+
+    clear_user(user.telegram_id, tag)
+    return to_delete

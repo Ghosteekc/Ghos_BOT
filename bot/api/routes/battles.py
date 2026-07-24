@@ -2,10 +2,22 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from bot.api.deps import require_subscription
-from bot.api.schemas import BattleDetailResponse, BattleListResponse, BattleSummary, DeckStatsResponse, KeyCardEntry
+from bot.api.deps import require_linked_player, require_subscription
+from bot.api.schemas import (
+    BattleDetailResponse,
+    BattleHistoryClearResponse,
+    BattleListResponse,
+    BattleSummary,
+    DeckStatsResponse,
+    KeyCardEntry,
+)
 from bot.models.database import User
-from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
+from bot.services.battle_service import (
+    BATTLE_LOG_LIMIT,
+    delete_persisted_battles_for_user,
+    get_cached_stats,
+    load_and_persist,
+)
 from bot.services.battle_session_cache import set_session_battles
 from bot.services.battle_time import battle_time_from_record, battle_times_equal, format_battle_played_at
 from bot.services.battle_report import analyze_battle_enhanced
@@ -14,6 +26,13 @@ from bot.services.deck_analyzer import analyze_deck, calculate_matchup_score
 from bot.user_errors import http_error
 
 router = APIRouter(prefix="/api/battles", tags=["battles"])
+
+
+@router.delete("", response_model=BattleHistoryClearResponse)
+async def clear_battle_history(user: User = Depends(require_linked_player)) -> BattleHistoryClearResponse:
+    """Remove persisted battle history for the authenticated user's linked tag only."""
+    deleted_count = await delete_persisted_battles_for_user(user)
+    return BattleHistoryClearResponse(ok=True, deleted_count=deleted_count)
 
 
 def _get_battle_cache(user: User) -> list | None:

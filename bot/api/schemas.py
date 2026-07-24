@@ -501,3 +501,8 @@ class InsightsResponse(BaseModel):
 class SyncResponse(BaseModel):
     ok: bool = True
     battles_loaded: int = 0
+
+
+class BattleHistoryClearResponse(BaseModel):
+    ok: bool = True
+    deleted_count: int = 0
