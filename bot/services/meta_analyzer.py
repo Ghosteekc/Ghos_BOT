@@ -173,6 +173,7 @@ async def _collect_player_tags(client: ClashRoyaleClient) -> tuple[list[dict], s
                 tags.extend(items)
                 source = path.split("?")[0]
                 logger.info("Meta source: %s (%d players)", source, len(items))
+                break
         except ClashRoyaleAPIError as e:
             logger.debug("Meta rankings unavailable at %s: %s", path, e)
 
@@ -319,8 +320,14 @@ async def get_live_meta_decks(*, force: bool = False) -> MetaCache:
 
 
 async def refresh_meta_background() -> None:
+    """Refresh live meta only when in-memory TTL expired (see meta_refresh_hours)."""
     try:
-        await get_live_meta_decks(force=True)
-        logger.info("Meta cache refreshed (%d decks, source=%s)", len(_cache.decks), _cache.source)
+        cache = await get_live_meta_decks(force=False)
+        logger.info(
+            "Meta cache ready (%d decks, source=%s, fresh=%s)",
+            len(cache.decks),
+            cache.source,
+            not cache.expired(),
+        )
     except Exception:
         logger.exception("Background meta refresh failed")

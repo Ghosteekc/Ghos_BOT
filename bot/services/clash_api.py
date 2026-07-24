@@ -21,6 +21,7 @@ from bot.models.database import Subscription, User
 logger = logging.getLogger(__name__)
 
 _CONFIG_ERROR_STATUSES = frozenset({401, 403})
+_RETRYABLE_SERVER_STATUSES = frozenset({500, 502, 503, 504})
 
 
 class ClashRoyaleAPIError(Exception):
@@ -69,16 +70,28 @@ def _utc_aware(dt: datetime | None) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
+def _parse_retry_after_header(response: aiohttp.ClientResponse | None) -> float | None:
+    if response is None:
+        return None
+    retry_after = response.headers.get("Retry-After")
+    if not retry_after:
+        return None
+    try:
+        return max(0.5, float(retry_after))
+    except ValueError:
+        return None
+
+
 def _retry_delay_seconds(response: aiohttp.ClientResponse | None, attempt: int) -> float:
-    if response is not None:
-        retry_after = response.headers.get("Retry-After")
-        if retry_after:
-            try:
-                return max(0.5, float(retry_after))
-            except ValueError:
-                pass
+    from_header = _parse_retry_after_header(response)
+    if from_header is not None:
+        return from_header
     base = max(0.5, settings.cr_api_retry_base_delay_sec)
     return min(base * (2 ** (attempt - 1)), 30.0)
+
+
+def _is_retryable_http_status(status: int) -> bool:
+    return status == 429 or status in _RETRYABLE_SERVER_STATUSES
 
 
 def _parse_error_body(response_text: str) -> tuple[str | None, str | None]:
@@ -244,12 +257,22 @@ class ClashRoyaleClient:
                         retry_after=_retry_delay_seconds(resp, attempt),
                     )
 
+                if resp.status in _RETRYABLE_SERVER_STATUSES:
+                    raise ClashRoyaleAPIError(
+                        "Сервис данных игры временно недоступен. Попробуйте позже.",
+                        resp.status,
+                        details=response_text,
+                        retryable=True,
+                        retry_after=_retry_delay_seconds(resp, attempt),
+                    )
+
                 if resp.status != 200:
                     logger.error("CR API unexpected status=%s path=%s", resp.status, path)
                     raise ClashRoyaleAPIError(
                         f"Ошибка загрузки данных игры ({resp.status}).",
                         resp.status,
                         details=response_text,
+                        retryable=False,
                     )
 
                 if not response_text:
