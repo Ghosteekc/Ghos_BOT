@@ -17,6 +17,12 @@ from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, encod
 from bot.services.deck_analyzer import extract_deck
 from bot.services.meta_analyzer import _guess_deck_name, _guess_category, _is_competitive_battle
 from bot.services.meta_decks import META_DECKS
+from bot.services.top_players import (
+    _cards_from_current_deck,
+    _deck_key,
+    _deck_winrate,
+    _latest_deck_from_battlelog,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +35,7 @@ _arena_refresh_lock = asyncio.Lock()
 class _ArenaCacheEntry:
     data: dict
     updated_at: float
-    version: int = 2
+    version: int = 3
 
     def expired(self) -> bool:
         ttl = max(300, settings.meta_refresh_hours * 3600)
@@ -198,7 +204,7 @@ async def _filter_tags_by_arena(
                 return tag.upper()
             return None
 
-    results = await asyncio.gather(*[check(tag) for tag in tags[:80]], return_exceptions=True)
+    results = await asyncio.gather(*[check(tag) for tag in tags[:120]], return_exceptions=True)
     for result in results:
         if isinstance(result, str) and result not in matched:
             matched.append(result)
@@ -237,9 +243,28 @@ async def _discover_arena_player_tags(
             candidates.append(tag)
 
     if arena_id is not None and candidates:
-        arena_matched = await _filter_tags_by_arena(client, candidates, arena_id, max_players=max_players)
-        if len(arena_matched) >= 5:
+        arena_matched = await _filter_tags_by_arena(
+            client,
+            candidates,
+            arena_id,
+            max_players=max_players,
+        )
+        if arena_matched:
             return arena_matched
+
+        extra: list[str] = []
+        wide_low = max(0, trophy_low - 400)
+        wide_high = trophy_high + 400
+        for tag in await _tags_from_rankings(client, wide_low, wide_high, max_tags=160):
+            if tag not in seen:
+                seen.add(tag)
+                extra.append(tag)
+        arena_matched = await _filter_tags_by_arena(
+            client,
+            extra,
+            arena_id,
+            max_players=max_players,
+        )
         if arena_matched:
             return arena_matched
 
@@ -254,6 +279,37 @@ async def _discover_arena_player_tags(
             seen.add(tag)
             candidates.append(tag)
     return candidates[:max_players]
+
+
+async def _scan_player_tv_royale_deck(client: ClashRoyaleClient, tag: str) -> dict[str, dict]:
+    """Current / latest deck of a player with ladder winrate on that deck."""
+    try:
+        player, battles = await asyncio.gather(
+            client.get_player(tag),
+            client.get_battlelog(tag),
+        )
+    except ClashRoyaleAPIError:
+        return {}
+
+    parsed = _cards_from_current_deck(player)
+    if not parsed:
+        parsed = _latest_deck_from_battlelog(tag, battles)
+    if len(parsed) != 8:
+        return {}
+
+    cards = [c["name"] for c in parsed]
+    key = "|".join(sorted(cards))
+    wins, losses = _deck_winrate(tag, battles, _deck_key(parsed))
+    total = wins + losses
+    return {
+        key: {
+            "wins": wins,
+            "total": total,
+            "cards": cards,
+            "variants": [parsed],
+            "players": 1,
+        },
+    }
 
 
 async def _scan_player_deck_stats(client: ClashRoyaleClient, tag: str) -> dict[str, dict]:
@@ -294,22 +350,29 @@ def _merge_deck_stats(target: dict[str, dict], source: dict[str, dict]) -> None:
         bucket["total"] += data["total"]
         bucket["cards"] = data["cards"] or bucket["cards"]
         bucket["variants"].extend(data.get("variants") or [])
+        bucket["players"] = int(bucket.get("players") or 0) + int(data.get("players") or 0)
 
 
 def _stats_to_entries(deck_stats: dict[str, dict], *, id_base: int, min_games: int) -> list[dict]:
     ranked = []
     for data in deck_stats.values():
-        if data["total"] < min_games:
+        total = int(data["total"])
+        players = int(data.get("players") or 0)
+        if total < min_games and players < 1:
             continue
-        wr = round(data["wins"] / data["total"] * 100, 1)
-        ranked.append((wr, data["total"], data))
+        wr = round(data["wins"] / total * 100, 1) if total else 0.0
+        ranked.append((wr, total, players, data))
 
-    ranked.sort(key=lambda x: (-x[0], -x[1]))
+    ranked.sort(key=lambda x: (-x[0], -x[1], -x[2]))
     entries: list[dict] = []
-    for i, (wr, total, data) in enumerate(ranked[:12]):
+    for i, (wr, total, players, data) in enumerate(ranked[:12]):
         cards = data["cards"]
         variant = data["variants"][0] if data.get("variants") else None
         card_infos, avg = _cards_to_infos(cards, variant)
+        if total:
+            desc = f"TV Royale · {players} игрок(ов) · {wr:.0f}% · {total} боёв"
+        else:
+            desc = f"TV Royale · {players} игрок(ов) · текущая колода"
         entries.append({
             "id": id_base + i,
             "name": _guess_deck_name(cards),
@@ -320,7 +383,7 @@ def _stats_to_entries(deck_stats: dict[str, dict], *, id_base: int, min_games: i
             "type": "arena",
             "category": _guess_category(cards),
             "deck_link": build_deck_share_link(cards),
-            "description": f"Сводка по арене · винрейт {wr:.0f}% · {total} боёв",
+            "description": desc,
         })
     return entries
 
@@ -364,7 +427,7 @@ async def _build_arena_popular_decks(
     await ensure_cards_loaded()
 
     combined_stats: dict[str, dict] = defaultdict(
-        lambda: {"wins": 0, "total": 0, "cards": [], "variants": []},
+        lambda: {"wins": 0, "total": 0, "cards": [], "variants": [], "players": 0},
     )
 
     client = ClashRoyaleClient()
@@ -380,7 +443,7 @@ async def _build_arena_popular_decks(
 
         async def guarded(tag: str) -> dict[str, dict]:
             async with sem:
-                return await _scan_player_deck_stats(client, tag)
+                return await _scan_player_tv_royale_deck(client, tag)
 
         results = await asyncio.gather(*[guarded(tag) for tag in tags], return_exceptions=True)
         for result in results:
@@ -390,15 +453,19 @@ async def _build_arena_popular_decks(
     finally:
         await client.close()
 
-    entries = _stats_to_entries(combined_stats, id_base=4000, min_games=2)
-    entries = [e for e in entries if e.get("total_games", 0) > 0]
-    entries.sort(key=lambda e: (-e.get("winrate", 0), -e.get("total_games", 0)))
+    entries = _stats_to_entries(combined_stats, id_base=4000, min_games=1)
+    entries.sort(
+        key=lambda e: (
+            -(e.get("total_games") or 0),
+            -(e.get("winrate") or 0),
+        ),
+    )
 
     has_live = bool(entries)
     if scanned > 0 and has_live:
-        source = "arena_rankings"
+        source = "tv_royale_arena"
     elif has_live:
-        source = "arena_pool"
+        source = "tv_royale"
     else:
         source = "empty"
 
