@@ -108,6 +108,15 @@ class FavoriteDeck(Base):
     user: Mapped["User"] = relationship(back_populates="favorite_decks")
 
 
+class FsmStorageRecord(Base):
+    """Persistent aiogram FSM key-value records."""
+
+    __tablename__ = "fsm_storage"
+
+    record_key: Mapped[str] = mapped_column(String(512), primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 engine = create_async_engine(settings.database_url, echo=False)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

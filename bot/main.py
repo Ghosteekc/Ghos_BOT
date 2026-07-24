@@ -8,6 +8,7 @@ import uvicorn
 
 from bot.api.app import create_app
 from bot.config import settings
+from bot.fsm.sqlite_storage import SqliteStorage
 from bot.handlers import admin, player, start, support
 from bot.middleware.subscription import SubscriptionMiddleware
 from bot.models.database import init_db
@@ -56,7 +57,8 @@ async def main() -> None:
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    dp = Dispatcher()
+    storage = SqliteStorage()
+    dp = Dispatcher(storage=storage)
 
     dp.message.middleware(SubscriptionMiddleware())
     dp.callback_query.middleware(SubscriptionMiddleware())
@@ -106,6 +108,7 @@ async def main() -> None:
             await api_task
         except asyncio.CancelledError:
             pass
+        await storage.close()
         logger.info("Bot stopped")
 
 

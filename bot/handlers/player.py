@@ -1,7 +1,9 @@
 import logging
+import re
 
-from aiogram import Router, F
-from aiogram.filters import Command, BaseFilter
+from aiogram import F, Router
+from aiogram.filters import BaseFilter, Command, StateFilter
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from bot.keyboards.menus import (
@@ -20,35 +22,58 @@ from bot.services.clash_api import (
     normalize_tag,
     validate_tag,
 )
+from bot.states.link import LinkStates
 from bot.user_errors import code_from_clash_api, log_error, user_message
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
-_pending_link: set[int] = set()
-
 LINK_PROMPT = (
     "Отправьте <b>только тег</b> игрока Clash Royale.\n\n"
     "Пример: <code>#ABC123XYZ</code>\n\n"
-    "Тег указан в профиле игры под вашим именем."
+    "Тег указан в профиле игры под вашим именем.\n"
+    "Отмена: /cancel"
 )
 
+TAG_WITHOUT_LINK = (
+    "Сначала нажмите /link и начните привязку аккаунта.\n\n"
+    "Пример: <code>/link #ABC123XYZ</code>"
+)
 
-class PendingLinkFilter(BaseFilter):
+LINK_CANCELLED = "Привязка отменена. Когда будете готовы — отправьте /link."
+
+
+class TagWithoutLinkFilter(BaseFilter):
     async def __call__(self, message: Message) -> bool:
-        return message.from_user.id in _pending_link
+        text = (message.text or "").strip()
+        if not text or text in MENU_BUTTONS:
+            return False
+        return _looks_like_player_tag(text)
 
 
-async def _prompt_link_tag(message: Message) -> None:
-    _pending_link.add(message.from_user.id)
+def _looks_like_player_tag(text: str) -> bool:
+    raw = text.strip()
+    if not raw or raw.startswith("/"):
+        return False
+    if validate_tag(normalize_tag(raw)):
+        return True
+    return bool(re.match(r"^#?[0289PYLQGRJCUV]{3,15}$", raw.upper()))
+
+
+async def _prompt_link_tag(message: Message, state: FSMContext) -> None:
+    await state.set_state(LinkStates.waiting_tag)
     await message.answer(LINK_PROMPT)
 
 
-async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
+async def _clear_link_state(state: FSMContext) -> None:
+    await state.clear()
+
+
+async def _link_player_by_tag(message: Message, state: FSMContext, raw_tag: str) -> None:
     tag = normalize_tag(raw_tag)
     if not validate_tag(tag):
-        _pending_link.add(message.from_user.id)
+        await state.set_state(LinkStates.waiting_tag)
         await message.answer(
             user_message("E001")
             + "\n\nПример: <code>#ABC123</code>\n\nОтправьте тег ещё раз."
@@ -68,7 +93,7 @@ async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
             user_id=message.from_user.id,
             status=e.status,
         )
-        _pending_link.add(message.from_user.id)
+        await state.set_state(LinkStates.waiting_tag)
         await message.answer(user_message(code))
         return
     except Exception:
@@ -79,7 +104,7 @@ async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
             user_id=message.from_user.id,
         )
         logger.exception("Unexpected error linking player %s", tag)
-        _pending_link.add(message.from_user.id)
+        await state.set_state(LinkStates.waiting_tag)
         await message.answer(user_message("E061"))
         return
     finally:
@@ -93,8 +118,8 @@ async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
 
         arena = player.get("arena", {})
         trophies = player.get("trophies", 0)
-        logger.info(f"Successfully linked player {tag} to user {message.from_user.id}")
-        _pending_link.discard(message.from_user.id)
+        logger.info("Successfully linked player %s to user %s", tag, message.from_user.id)
+        await _clear_link_state(state)
         await message.answer(
             f"✅ Аккаунт привязан!\n\n"
             f"👤 <b>{player.get('name')}</b>\n"
@@ -110,7 +135,7 @@ async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
             f"Player tag {tag} already linked to another user",
             user_id=message.from_user.id,
         )
-        _pending_link.discard(message.from_user.id)
+        await _clear_link_state(state)
         await message.answer(user_message("E062"))
     except Exception as e:
         log_error(
@@ -120,35 +145,45 @@ async def _link_player_by_tag(message: Message, raw_tag: str) -> None:
             exc=e,
             user_id=message.from_user.id,
         )
-        _pending_link.add(message.from_user.id)
+        await state.set_state(LinkStates.waiting_tag)
         await message.answer(user_message("E030"))
 
 
 @router.message(Command("link"))
-async def cmd_link(message: Message) -> None:
+async def cmd_link(message: Message, state: FSMContext) -> None:
     args = message.text.split(maxsplit=1) if message.text else []
     if len(args) < 2:
-        await _prompt_link_tag(message)
+        await _prompt_link_tag(message, state)
         return
 
-    _pending_link.discard(message.from_user.id)
-    await _link_player_by_tag(message, args[1])
+    await _clear_link_state(state)
+    await _link_player_by_tag(message, state, args[1])
+
+
+@router.message(Command("cancel"), StateFilter(LinkStates.waiting_tag))
+async def cmd_cancel_link(message: Message, state: FSMContext) -> None:
+    await _clear_link_state(state)
+    await message.answer(LINK_CANCELLED)
 
 
 @router.message(F.text.in_({REGISTRATION_BUTTON, LEGACY_SUBSCRIPTION_BUTTON}))
-async def btn_registration(message: Message) -> None:
-    await _prompt_link_tag(message)
+async def btn_registration(message: Message, state: FSMContext) -> None:
+    await _prompt_link_tag(message, state)
 
 
-@router.message(F.text, ~F.text.in_(MENU_BUTTONS), PendingLinkFilter())
-async def handle_pending_tag(message: Message) -> None:
+@router.message(F.text, ~F.text.in_(MENU_BUTTONS), StateFilter(LinkStates.waiting_tag))
+async def handle_pending_tag(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text or text.startswith("/"):
-        await _prompt_link_tag(message)
+        await _prompt_link_tag(message, state)
         return
 
-    _pending_link.discard(message.from_user.id)
-    await _link_player_by_tag(message, text)
+    await _link_player_by_tag(message, state, text)
+
+
+@router.message(TagWithoutLinkFilter(), ~StateFilter(LinkStates.waiting_tag))
+async def tag_without_active_link(message: Message) -> None:
+    await message.answer(TAG_WITHOUT_LINK)
 
 
 @router.message(Command("profile"))
