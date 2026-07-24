@@ -10,29 +10,164 @@ from bot.services.card_registry import get_card_info, resolve_card_icon
 from bot.services.deck_analyzer import analyze_deck
 from bot.services.deck_builder.loader import get_database
 
+# Trophy Road arenas 1–32 — keep in sync with webapp arenaRecommendations.ts
+_ARENA_MIN_TROPHIES: list[tuple[int, int]] = [
+    (0, 1),
+    (300, 2),
+    (600, 3),
+    (1000, 4),
+    (1300, 5),
+    (1600, 6),
+    (2000, 7),
+    (2300, 8),
+    (2600, 9),
+    (3000, 10),
+    (3400, 11),
+    (3800, 12),
+    (4200, 13),
+    (4600, 14),
+    (5000, 15),
+    (5500, 16),
+    (6000, 17),
+    (6500, 18),
+    (7000, 19),
+    (7500, 20),
+    (8000, 21),
+    (8500, 22),
+    (9000, 23),
+    (9500, 24),
+    (10000, 25),
+    (10500, 26),
+    (11000, 27),
+    (11500, 28),
+    (12000, 29),
+    (12500, 30),
+    (13000, 31),
+    (13500, 32),
+]
 
-def recommended_display_level(*, trophies: int | None, arena_id: int | None) -> int:
-    """Target in-game card level for the player's ladder bracket."""
+_ARENA_NAME_ALIASES: dict[str, int] = {
+    "goblin stadium": 1,
+    "goblin": 1,
+    "bone pit": 2,
+    "barbarian bowl": 3,
+    "barbarian": 3,
+    "spell valley": 4,
+    "charm valley": 4,
+    "builder": 5,
+    "p.e.k.k.a": 6,
+    "pekka": 6,
+    "playhouse": 6,
+    "royal arena": 7,
+    "frozen peak": 8,
+    "jungle": 9,
+    "hog mountain": 10,
+    "electro valley": 11,
+    "electro": 11,
+    "spooky town": 12,
+    "rascal": 13,
+    "serenity peak": 14,
+    "miner": 15,
+    "executioner": 16,
+    "royal crypt": 17,
+    "silent sanctuary": 18,
+    "dragon spa": 19,
+    "boot camp": 20,
+    "training camp": 20,
+    "clash fest": 21,
+    "фестиваль clash": 21,
+    "pancake": 22,
+    "блин": 22,
+    "valkalla": 23,
+    "вальхалла": 23,
+    "legendary arena": 24,
+    "legendary": 24,
+    "легендарная": 24,
+    "lumberlove": 25,
+    "лесоруб": 25,
+    "royal road": 26,
+    "королевская дорога": 26,
+    "musketeer street": 27,
+    "мушкет": 27,
+    "summit of heroes": 28,
+    "вершина героев": 28,
+    "magic academy": 29,
+    "академия магии": 29,
+    "ultimate clash pit": 30,
+    "решающего clash": 30,
+    "little prince": 31,
+    "маленького принца": 31,
+    "spirit square": 32,
+    "площадь духов": 32,
+}
+
+
+def resolve_arena_by_trophies(trophies: int | None) -> int:
     t = int(trophies or 0)
-    if t >= 10_000:
-        return 15
-    if arena_id is not None and arena_id >= 54_000_000:
-        return 14
-    if t >= 9_000:
-        return 14
-    if t >= 7_500:
-        return 13
-    if t >= 6_000:
-        return 12
-    if t >= 4_600:
-        return 11
-    if t >= 3_000:
-        return 10
-    if t >= 2_000:
-        return 9
-    if t >= 1_000:
+    resolved = 1
+    for min_trophies, arena in _ARENA_MIN_TROPHIES:
+        if t >= min_trophies:
+            resolved = arena
+    return resolved
+
+
+def resolve_arena_by_name(arena_name: str | None) -> int | None:
+    if not arena_name:
+        return None
+    normalized = arena_name.lower()
+    for key, arena in _ARENA_NAME_ALIASES.items():
+        if key in normalized:
+            return arena
+    return None
+
+
+def get_recommended_level_for_arena(arena: int) -> int:
+    """Same thresholds as webapp getRecommendedLevelForArena."""
+    if arena <= 4:
+        return 6
+    if arena <= 8:
         return 8
-    return 7
+    if arena <= 12:
+        return 10
+    if arena <= 16:
+        return 12
+    if arena <= 20:
+        return 13
+    if arena <= 28:
+        return 14
+    if arena <= 30:
+        return 15
+    return 16
+
+
+def resolve_player_arena_number(
+    *,
+    trophies: int | None,
+    arena_id: int | None,
+    arena_name: str | None = None,
+) -> int:
+    by_name = resolve_arena_by_name(arena_name)
+    if by_name is not None:
+        return by_name
+    # Path of Legends / missing name → trophy road bracket (same as Recommendations UI)
+    if arena_id is not None and arena_id >= 54_000_000:
+        return resolve_arena_by_trophies(trophies)
+    return resolve_arena_by_trophies(trophies)
+
+
+def recommended_display_level(
+    *,
+    trophies: int | None,
+    arena_id: int | None,
+    arena_name: str | None = None,
+) -> int:
+    """Target card level from Recommendations (arenaRecommendations), not a separate ladder heuristic."""
+    arena = resolve_player_arena_number(
+        trophies=trophies,
+        arena_id=arena_id,
+        arena_name=arena_name,
+    )
+    return get_recommended_level_for_arena(arena)
 
 
 def _normalize(name: str) -> str:
@@ -252,10 +387,15 @@ def enrich_customize_result(
     player: dict,
     trophies: int | None,
     arena_id: int | None,
+    arena_name: str | None = None,
     pool: set[str] | None = None,
     battle_cards: list[dict] | None = None,
 ) -> dict:
-    recommended = recommended_display_level(trophies=trophies, arena_id=arena_id)
+    recommended = recommended_display_level(
+        trophies=trophies,
+        arena_id=arena_id,
+        arena_name=arena_name,
+    )
     owned = merge_deck_levels_from_battle(build_owned_level_map(player), battle_cards)
 
     original = list(base.get("original") or [])
@@ -285,7 +425,7 @@ def enrich_customize_result(
             f"{u['name_ru']} (ур. {u['level']} < {u['recommended_level']})"
             for u in upgrades[:4]
         )
-        issues.append(f"Сначала прокачайте: {names}")
+        issues.append(f"Ниже рекомендуемого уровня ({recommended}): {names}")
     issues.extend(alt_notes)
 
     return {

@@ -634,8 +634,9 @@ async def customize_deck(user: User = Depends(require_subscription)) -> Customiz
     enriched = enrich_customize_result(
         {**result, "needed": result.get("needed", result["original"] != result["customized"])},
         player=player,
-        trophies=user.trophies,
-        arena_id=user.arena_id,
+        trophies=int(player.get("trophies") or user.trophies or 0),
+        arena_id=(player.get("arena") or {}).get("id") or user.arena_id,
+        arena_name=(player.get("arena") or {}).get("name"),
         pool=_get_arena_pool(user.arena_id, user.trophies),
         battle_cards=battle_cards,
     )
