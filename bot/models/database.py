@@ -146,8 +146,8 @@ async def init_db() -> None:
             )
             logger.info("Added 'haptic_enabled' column to user_settings table")
 
-    await _migrate_battle_cache_dedup()
     await _migrate_battle_cache_opponent()
+    await _migrate_battle_cache_dedup()
     await _migrate_users_player_tag_unique()
 
 
