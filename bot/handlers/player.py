@@ -160,6 +160,29 @@ async def cmd_link(message: Message, state: FSMContext) -> None:
     await _link_player_by_tag(message, state, args[1])
 
 
+@router.message(Command("unlink"))
+async def cmd_unlink(message: Message, state: FSMContext) -> None:
+    await _clear_link_state(state)
+    async with async_session() as session:
+        sub_service = SubscriptionService(session)
+        user = await sub_service.get_or_create_user(message.from_user.id)
+        previous = await sub_service.unlink_player(user)
+
+    if not previous:
+        await message.answer(
+            "Аккаунт Clash Royale уже не привязан к этому Telegram.\n\n"
+            "Чтобы снова войти в профиль, отправьте /link #ВАШТЕГ"
+        )
+        return
+
+    await message.answer(
+        f"🔓 Аккаунт Clash Royale <code>{previous}</code> отвязан от этого Telegram.\n\n"
+        "Вы вышли из профиля и в боте, и в Mini App.\n"
+        "Чтобы снова пользоваться профилем, зарегистрируйтесь заново: "
+        "<code>/link #ВАШТЕГ</code>"
+    )
+
+
 @router.message(Command("cancel"), StateFilter(LinkStates.waiting_tag))
 async def cmd_cancel_link(message: Message, state: FSMContext) -> None:
     await _clear_link_state(state)

@@ -434,6 +434,35 @@ class SubscriptionService:
         logger.info("Linked player %s to telegram_id=%s", normalized, user.telegram_id)
         return user
 
+    async def unlink_player(self, user: User) -> str | None:
+        """Detach Clash Royale tag from this Telegram user.
+
+        Battle history stays keyed by player_tag so it reappears after re-link.
+        Returns the previous tag (or None if already unlinked).
+        """
+        previous = user.player_tag
+        if not previous:
+            return None
+
+        from bot.services.battle_session_cache import clear_user
+
+        tag = normalize_tag(previous)
+        clear_user(user.telegram_id, tag)
+
+        user.player_tag = None
+        user.player_name = None
+        user.arena_id = None
+        user.trophies = None
+        await self.session.commit()
+        await self.session.refresh(user)
+        logger.info(
+            "Unlinked player %s from telegram_id=%s (user_id=%s)",
+            tag,
+            user.telegram_id,
+            user.id,
+        )
+        return tag
+
     async def has_active_subscription(self, user: User) -> bool:
         return True
 

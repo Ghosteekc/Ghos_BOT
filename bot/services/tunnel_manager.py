@@ -18,9 +18,18 @@ TUNNEL_SCRIPT = TUNNEL_DIR / "start-tunnel.ps1"
 DEFAULT_SUBDOMAIN = "ghosteekcr"
 
 
-def _run_powershell(command: str) -> None:
-    subprocess.run(
-        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+def _run_powershell_file(*script_args: str) -> subprocess.CompletedProcess[str]:
+    cmd = [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(TUNNEL_SCRIPT),
+        *script_args,
+    ]
+    return subprocess.run(
+        cmd,
         cwd=str(TUNNEL_DIR),
         check=False,
         capture_output=True,
@@ -29,25 +38,23 @@ def _run_powershell(command: str) -> None:
 
 
 def stop_existing_tunnels() -> None:
-    """Остановить все процессы localtunnel (освободить subdomain)."""
+    """Остановить все процессы localtunnel (tree-kill + verify через start-tunnel.ps1)."""
     if sys.platform != "win32":
         return
 
-    logger.info("Stopping existing localtunnel processes...")
-    _run_powershell(
-        r"""
-        Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -match 'localtunnel|lt\.js' } |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-        Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -match 'localtunnel|lt\.js' } |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-        Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -match 'start-tunnel\.ps1' } |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-        """
-    )
-    time.sleep(2)
+    if not TUNNEL_SCRIPT.exists():
+        logger.warning("Tunnel script not found for cleanup: %s", TUNNEL_SCRIPT)
+        return
+
+    logger.info("Stopping existing localtunnel processes (KillOnly)...")
+    result = _run_powershell_file("-KillOnly")
+    if result.returncode not in (0, None):
+        logger.warning(
+            "Tunnel KillOnly exited with code %s: %s",
+            result.returncode,
+            (result.stderr or result.stdout or "").strip()[-500:],
+        )
+    time.sleep(1)
 
 
 def wait_for_backend(port: int, *, timeout_sec: float = 45.0) -> bool:
@@ -86,6 +93,8 @@ def start_tunnel(
             port,
         )
 
+    # KillOnly inside start-tunnel.ps1 also runs on startup; call once here
+    # so we free ghosteekcr before the new console window appears.
     stop_existing_tunnels()
 
     args = [
@@ -122,9 +131,17 @@ def stop_tunnel_process(proc: subprocess.Popen[str] | None) -> None:
     if proc is None:
         return
     if proc.poll() is None:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        # Tree-kill the PowerShell console so child node cannot become orphan
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill.exe", "/PID", str(proc.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+            )
+        else:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
     stop_existing_tunnels()

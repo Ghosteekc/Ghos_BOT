@@ -203,3 +203,22 @@ async def sync_player_data(user: User = Depends(get_current_user)) -> SyncRespon
         set_session_battles(user.telegram_id, tag, battles)
 
     return SyncResponse(ok=True, battles_loaded=len(battles or []))
+
+
+class UnlinkAccountResponse(BaseModel):
+    ok: bool = True
+    unlinked_tag: str | None = None
+
+
+@router.post("/account/unlink", response_model=UnlinkAccountResponse)
+async def unlink_clash_account(user: User = Depends(get_current_user)) -> UnlinkAccountResponse:
+    """Unlink Clash Royale tag from the current Telegram user (bot + Mini App)."""
+    from bot.services.clash_api import SubscriptionService
+
+    async with async_session() as session:
+        sub_service = SubscriptionService(session)
+        # Reload user inside this session
+        db_user = await sub_service.get_or_create_user(user.telegram_id)
+        previous = await sub_service.unlink_player(db_user)
+
+    return UnlinkAccountResponse(ok=True, unlinked_tag=previous)
