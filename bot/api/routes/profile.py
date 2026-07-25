@@ -27,7 +27,7 @@ from bot.services.battle_service import (
 from bot.services.battle_session_cache import get_session_battles, is_fresh
 from bot.services.player_collection import build_player_collection, build_collection_stats_from_player
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
-from bot.services.league_info import build_league_info, ranked_unlock_trophies
+from bot.services.league_info import build_league_info
 from bot.user_errors import http_error_from_clash
 
 logger = logging.getLogger(__name__)
@@ -154,7 +154,7 @@ async def get_profile(
         arena_name=arena_name,
         winrate=winrate,
         daily_trophy_change=daily_trophy_change,
-        league=LeagueInfo(unlocked=False, unlock_trophies=ranked_unlock_trophies()),
+        league=LeagueInfo(**build_league_info({"trophies": user.trophies or 0})),
         subscription=SubscriptionInfo(**sub_info),
     )
 

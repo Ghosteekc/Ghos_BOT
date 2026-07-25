@@ -20,6 +20,8 @@ _LEAGUE_NAMES_RU: dict[int, str] = {
 }
 
 ABSOLUTE_CHAMPION_LEAGUE = 10
+# Ranked entry after Challenger removal — classic API numbering.
+ENTRY_LEAGUE_NUMBER = 4
 
 
 def ranked_unlock_trophies(now: date | None = None) -> int:
@@ -72,27 +74,57 @@ def _season_league(result: object) -> tuple[int | None, int | None]:
     return league_number, trophies
 
 
+def _player_trophies(player: dict) -> int:
+    try:
+        return int(player.get("trophies") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def build_league_info(player: dict, *, now: date | None = None) -> dict:
-    """Build league banner payload from Clash Royale player JSON."""
+    """Build league banner payload from Clash Royale player JSON.
+
+    Display rules:
+    - trophies < unlock threshold AND no Ranked season result → «opens at N cups»
+    - otherwise show league (best/current, or Absolute Champion cups)
+    """
     unlock_trophies = ranked_unlock_trophies(now)
+    trophies = _player_trophies(player)
+
     current_num, current_cups = _season_league(player.get("currentPathOfLegendSeasonResult"))
     best_num, _ = _season_league(player.get("bestPathOfLegendSeasonResult"))
 
-    # Unlocked if CR already returned a Ranked season result (trophy threshold
-    # or previous-season Champion ticket). Trophy count alone is not enough —
-    # a player can sit above the threshold without entering Ranked yet.
-    unlocked = current_num is not None or best_num is not None
+    # Also accept renamed / alternate payloads if Supercell adds them.
+    if current_num is None:
+        current_num, current_cups = _season_league(player.get("currentRankedSeasonResult"))
+    if best_num is None:
+        best_num, _ = _season_league(player.get("bestRankedSeasonResult"))
+
+    has_league = current_num is not None or best_num is not None
+    # Cups gate OR prior-season ticket / any Ranked progress.
+    unlocked = trophies >= unlock_trophies or has_league
+
+    if unlocked and not has_league:
+        # Qualified by trophies but no season payload yet — Ranked starts at Master I.
+        current_num = ENTRY_LEAGUE_NUMBER
+        best_num = ENTRY_LEAGUE_NUMBER
+
+    if best_num is None and current_num is not None:
+        best_num = current_num
+    if current_num is None and best_num is not None:
+        current_num = best_num
+
     is_absolute = current_num == ABSOLUTE_CHAMPION_LEAGUE
 
     return {
         "unlocked": unlocked,
         "unlock_trophies": unlock_trophies,
-        "current_league_number": current_num,
-        "current_league_name": league_name_ru(current_num),
-        "current_league_icon": league_icon_url(current_num),
-        "best_league_number": best_num,
-        "best_league_name": league_name_ru(best_num),
-        "best_league_icon": league_icon_url(best_num),
-        "is_absolute_champion": is_absolute,
-        "absolute_trophies": current_cups if is_absolute else None,
+        "current_league_number": current_num if unlocked else None,
+        "current_league_name": league_name_ru(current_num) if unlocked else None,
+        "current_league_icon": league_icon_url(current_num) if unlocked else None,
+        "best_league_number": best_num if unlocked else None,
+        "best_league_name": league_name_ru(best_num) if unlocked else None,
+        "best_league_icon": league_icon_url(best_num) if unlocked else None,
+        "is_absolute_champion": bool(unlocked and is_absolute),
+        "absolute_trophies": current_cups if unlocked and is_absolute else None,
     }

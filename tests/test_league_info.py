@@ -11,16 +11,26 @@ def test_ranked_unlock_schedule():
     assert ranked_unlock_trophies(date(2026, 11, 1)) == 14_000
 
 
-def test_league_locked_shows_current_threshold():
-    info = build_league_info({}, now=date(2026, 7, 26))
+def test_league_locked_below_threshold():
+    info = build_league_info({"trophies": 12_000}, now=date(2026, 7, 26))
     assert info["unlocked"] is False
     assert info["unlock_trophies"] == 13_000
+    assert info["is_absolute_champion"] is False
+    assert info["current_league_name"] is None
+
+
+def test_league_unlocked_by_trophies_without_season_payload():
+    info = build_league_info({"trophies": 14_000}, now=date(2026, 7, 26))
+    assert info["unlocked"] is True
+    assert info["current_league_name"] == "Мастер I"
+    assert info["best_league_name"] == "Мастер I"
     assert info["is_absolute_champion"] is False
 
 
 def test_league_unlocked_not_absolute():
     info = build_league_info(
         {
+            "trophies": 9_000,
             "currentPathOfLegendSeasonResult": {"leagueNumber": 6, "trophies": 0},
             "bestPathOfLegendSeasonResult": {"leagueNumber": 8, "trophies": 0},
         },
@@ -38,6 +48,7 @@ def test_league_unlocked_not_absolute():
 def test_absolute_champion():
     info = build_league_info(
         {
+            "trophies": 15_000,
             "currentPathOfLegendSeasonResult": {"leagueNumber": 10, "trophies": 2145},
             "bestPathOfLegendSeasonResult": {"leagueNumber": 10, "trophies": 3000},
         },
