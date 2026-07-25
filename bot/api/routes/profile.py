@@ -4,7 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.api.deps import get_current_user, get_db, get_subscription_info, require_linked_player
-from bot.api.schemas import HomeResponse, PlayerCollectionResponse, ProfileResponse, StatsOverviewResponse, SubscriptionInfo
+from bot.api.schemas import (
+    HomeResponse,
+    LeagueInfo,
+    PlayerCollectionResponse,
+    ProfileResponse,
+    StatsOverviewResponse,
+    SubscriptionInfo,
+)
 from bot.models.database import User
 from bot.api.routes.decks import _build_stats_overview, _stats_from_battles
 from bot.api.routes.battles import _build_battle_summary
@@ -20,6 +27,7 @@ from bot.services.battle_service import (
 from bot.services.battle_session_cache import get_session_battles, is_fresh
 from bot.services.player_collection import build_player_collection, build_collection_stats_from_player
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
+from bot.services.league_info import build_league_info
 from bot.user_errors import http_error_from_clash
 
 logger = logging.getLogger(__name__)
@@ -64,6 +72,7 @@ def _profile_from_player(
     fav_name = fav.get("name") if isinstance(fav, dict) else None
     avatar_url, favorite_card_icon = _player_avatar_url(player)
     collection_stats = build_collection_stats_from_player(player)
+    league = LeagueInfo(**build_league_info(player))
 
     return ProfileResponse(
         player_tag=user.player_tag,
@@ -84,6 +93,7 @@ def _profile_from_player(
         three_crown_wins=player.get("threeCrownWins"),
         collection_level=collection_stats["collection_level"],
         cards_by_level=collection_stats["cards_by_level"],
+        league=league,
         subscription=SubscriptionInfo(**sub_info),
     )
 

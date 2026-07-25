@@ -14,6 +14,19 @@ class CardLevelCount(BaseModel):
     count: int
 
 
+class LeagueInfo(BaseModel):
+    unlocked: bool = False
+    unlock_trophies: int = 15_000
+    current_league_number: int | None = None
+    current_league_name: str | None = None
+    current_league_icon: str | None = None
+    best_league_number: int | None = None
+    best_league_name: str | None = None
+    best_league_icon: str | None = None
+    is_absolute_champion: bool = False
+    absolute_trophies: int | None = None
+
+
 class ProfileResponse(BaseModel):
     player_tag: str | None
     player_name: str | None
@@ -34,6 +47,7 @@ class ProfileResponse(BaseModel):
     three_crown_wins: int | None = None
     collection_level: int | None = None
     cards_by_level: list[CardLevelCount] = []
+    league: LeagueInfo | None = None
     subscription: SubscriptionInfo
 
 
