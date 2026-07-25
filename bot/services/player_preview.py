@@ -7,6 +7,7 @@ import logging
 from bot.services.card_icons import deck_card_info_from_parsed
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
+from bot.services.league_info import build_league_info
 from bot.services.top_players import (
     _SKIP_BATTLE_TYPES,
     _LADDER_BATTLE_TYPES,
@@ -147,4 +148,5 @@ async def build_player_preview(tag: str) -> dict:
         "deck_link": deck_link,
         "deck_winrate": deck_winrate,
         "deck_games": deck_games,
+        "league": build_league_info(player),
     }

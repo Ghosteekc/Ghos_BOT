@@ -464,6 +464,7 @@ class SearchResult(BaseModel):
     deck_link: str | None = None
     deck_winrate: float | None = None
     deck_games: int = 0
+    league: LeagueInfo | None = None
 
 
 class CardCatalogEntry(BaseModel):
