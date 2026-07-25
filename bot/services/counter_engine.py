@@ -818,6 +818,8 @@ def _find_replacement(card: str, pool: set[str], current: list[str]) -> str | No
 
 def analyze_opponent_deck_from_battles(battles: list[dict], player_tag: str) -> list[dict]:
     """Список последних колод соперников."""
+    from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed
+
     opponents = []
     seen = set()
 
@@ -827,7 +829,23 @@ def analyze_opponent_deck_from_battles(battles: list[dict], player_tag: str) -> 
             continue
 
         opponent = battle.get("opponent", [{}])[0]
-        deck = extract_deck(opponent)
+        parsed = cards_from_team(opponent)
+        if len(parsed) != 8:
+            deck = extract_deck(opponent)
+            if len(deck) != 8:
+                continue
+            parsed = [
+                {
+                    "name": name,
+                    "icon": "",
+                    "evolution_level": 0,
+                    "is_hero": False,
+                    "cost": 0,
+                    "slot": i,
+                }
+                for i, name in enumerate(deck)
+            ]
+        deck = [c["name"] for c in parsed]
         deck_key = "|".join(sorted(deck))
 
         if deck_key in seen:
@@ -840,6 +858,7 @@ def analyze_opponent_deck_from_battles(battles: list[dict], player_tag: str) -> 
             "name": opponent.get("name", "?"),
             "tag": opponent.get("tag", ""),
             "deck": deck,
+            "deck_cards": [deck_card_info_from_parsed(c, slot=i) for i, c in enumerate(parsed)],
             "user_deck": user_deck,
             "threats": find_opponent_threats(deck),
             "avg_elixir": stats.avg_elixir,

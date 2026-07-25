@@ -101,6 +101,8 @@ class BattleSummary(BaseModel):
     avg_elixir: float = 0.0
     user_deck: list[str] = []
     opponent_deck: list[str] = []
+    user_deck_cards: list["DeckCardInfo"] = []
+    opponent_deck_cards: list["DeckCardInfo"] = []
     top_reason: str | None = None
     timestamp: str = ""
     played_at: str = ""
@@ -136,6 +138,8 @@ class BattleDetailResponse(BaseModel):
     outcome_summary: str = ""
     user_deck: list[str]
     opponent_deck: list[str]
+    user_deck_cards: list["DeckCardInfo"] = []
+    opponent_deck_cards: list["DeckCardInfo"] = []
     user_stats: DeckStatsResponse
     opponent_stats: DeckStatsResponse
     reasons: list[str]
@@ -149,6 +153,7 @@ class OpponentEntry(BaseModel):
     index: int
     name: str
     deck: list[str]
+    deck_cards: list["DeckCardInfo"] = []
     threats: list[str]
     avg_elixir: float
     won_against: bool

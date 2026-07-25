@@ -9,6 +9,7 @@ from bot.api.schemas import (
     BattleHistoryClearResponse,
     BattleListResponse,
     BattleSummary,
+    DeckCardInfo,
     DeckStatsResponse,
     KeyCardEntry,
 )
@@ -22,6 +23,7 @@ from bot.services.battle_service import (
 from bot.services.battle_session_cache import set_session_battles
 from bot.services.battle_time import battle_time_from_record, battle_times_equal, format_battle_played_at
 from bot.services.battle_report import analyze_battle_enhanced
+from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_analyzer import analyze_deck, calculate_matchup_score
 from bot.user_errors import http_error
@@ -48,11 +50,32 @@ def _set_battle_cache(user: User, battles: list) -> None:
     set_session_battles(user.telegram_id, normalize_tag(user.player_tag or ""), battles)
 
 
+def _team_deck_cards(team: dict) -> list[DeckCardInfo]:
+    parsed = cards_from_team(team)
+    if parsed:
+        return [DeckCardInfo(**deck_card_info_from_parsed(card, slot=i)) for i, card in enumerate(parsed)]
+    infos: list[DeckCardInfo] = []
+    for i, raw in enumerate(team.get("cards", [])):
+        name = raw.get("name") if isinstance(raw, dict) else None
+        if not name:
+            continue
+        infos.append(
+            DeckCardInfo(
+                id=f"{name.lower().replace(' ', '-')}-{i}",
+                name=name,
+                slot=i,
+            )
+        )
+    return infos
+
+
 def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
     team = battle.get("team", [{}])[0]
     opponent = battle.get("opponent", [{}])[0]
-    user_deck = [c["name"] for c in team.get("cards", [])]
-    opp_deck = [c["name"] for c in opponent.get("cards", [])]
+    user_cards = _team_deck_cards(team)
+    opp_cards = _team_deck_cards(opponent)
+    user_deck = [c.name for c in user_cards]
+    opp_deck = [c.name for c in opp_cards]
     won = team.get("crowns", 0) > opponent.get("crowns", 0)
     user_stats = analyze_deck(user_deck)
     duration = int(battle.get("gameDuration") or 0)
@@ -76,6 +99,8 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         avg_elixir=user_stats.avg_elixir,
         user_deck=user_deck,
         opponent_deck=opp_deck,
+        user_deck_cards=user_cards,
+        opponent_deck_cards=opp_cards,
         top_reason=top_reason,
         timestamp=raw_time,
         played_at=format_battle_played_at(raw_time),
@@ -121,6 +146,8 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
     analysis = analyze_battle_enhanced(team, opponent, duration=duration)
     user_stats = analyze_deck(analysis.user_deck)
     opp_stats = analyze_deck(analysis.opponent_deck)
+    user_cards = _team_deck_cards(team)
+    opp_cards = _team_deck_cards(opponent)
 
     def _stats(s) -> DeckStatsResponse:
         return DeckStatsResponse(
@@ -144,6 +171,8 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
         outcome_summary=analysis.outcome_summary,
         user_deck=analysis.user_deck,
         opponent_deck=analysis.opponent_deck,
+        user_deck_cards=user_cards,
+        opponent_deck_cards=opp_cards,
         user_stats=_stats(user_stats),
         opponent_stats=_stats(opp_stats),
         reasons=analysis.reasons,

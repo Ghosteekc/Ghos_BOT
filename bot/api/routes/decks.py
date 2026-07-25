@@ -360,6 +360,19 @@ async def get_mine_deck_stats(
         raise HTTPException(status_code=400, detail=data["error"])
 
     card_infos = await _cards_to_deck_infos(data["cards"])
+    # Prefer order + evo/hero from a matching recent battle.
+    want = set(data["cards"])
+    tag_norm = normalize_tag(user.player_tag or "")
+    for battle in battles:
+        team = battle.get("team", [{}])[0]
+        if team.get("tag") and normalize_tag(team.get("tag", "")) != tag_norm:
+            continue
+        from bot.services.card_icons import cards_from_team
+
+        parsed = cards_from_team(team)
+        if len(parsed) == 8 and {c["name"] for c in parsed} == want:
+            card_infos = _parsed_to_deck_card_infos(parsed)
+            break
     return MineDeckStatsResponse(
         name=data["name"],
         cards=card_infos,
@@ -478,19 +491,36 @@ async def compare_user_deck(
         raise HTTPException(status_code=400, detail="Нужно ровно 8 карт для сравнения")
 
     battles = await _get_battles(user)
-    user_cards = _user_current_deck(battles, user.player_tag or "")
-    if len(user_cards) != 8:
-        raise HTTPException(
-            status_code=404,
-            detail="Не найдена ваша текущая колода в последних боях",
-        )
+    profile_deck = await _fetch_profile_current_deck(user.player_tag or "")
+    if len(profile_deck) == 8:
+        user_cards = [c["name"] for c in profile_deck]
+        user_infos = _parsed_to_deck_card_infos(profile_deck)
+    else:
+        user_cards = _user_current_deck(battles, user.player_tag or "")
+        if len(user_cards) != 8:
+            raise HTTPException(
+                status_code=404,
+                detail="Не найдена ваша текущая колода в последних боях",
+            )
+        # Prefer evo/hero from the matching battle team payload.
+        user_infos = await _cards_to_deck_infos(user_cards)
+        tag_norm = normalize_tag(user.player_tag or "")
+        for battle in battles:
+            team = battle.get("team", [{}])[0]
+            if team.get("tag") and normalize_tag(team.get("tag", "")) == tag_norm:
+                from bot.services.card_icons import cards_from_team
+
+                parsed = cards_from_team(team)
+                if len(parsed) == 8 and [c["name"] for c in parsed] == user_cards:
+                    user_infos = _parsed_to_deck_card_infos(parsed)
+                    break
 
     result = compare_decks(user_cards, ref_cards)
     from bot.services.meta_analyzer import _guess_deck_name
 
     return DeckCompareResponse(
         reference_name=_guess_deck_name(ref_cards),
-        user_deck=await _cards_to_deck_infos(user_cards),
+        user_deck=user_infos,
         reference_deck=await _cards_to_deck_infos(ref_cards),
         user_better=result["user_better"],
         user_worse=result["user_worse"],
@@ -616,6 +646,7 @@ async def list_opponents(user: User = Depends(require_subscription)) -> list[Opp
             index=i,
             name=opp["name"],
             deck=opp["deck"],
+            deck_cards=[DeckCardInfo(**c) for c in opp.get("deck_cards", [])],
             threats=opp["threats"],
             avg_elixir=opp["avg_elixir"],
             won_against=opp["won_against"],
