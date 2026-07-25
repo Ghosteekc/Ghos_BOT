@@ -124,11 +124,11 @@ def _trophy_delta(team: dict, chronological: list[dict], index: int) -> int | No
     return None
 
 
-def build_last_results(battles: list, *, limit: int = 14) -> list[dict]:
+def build_last_results(battles: list, *, limit: int = 40) -> list[dict]:
     """Recent ladder 1v1 battles oldest-first with trophy delta and opponent/time labels.
 
-    Clash battle log is newest-first. We take the newest battles with a known
-    trophy delta, then reverse so the chart reads left→right in time.
+    Clash battle log is newest-first (~25). We also use persisted cache battles that
+    store trophy_change so the chart covers more than one API window.
     """
     from bot.services.battle_time import format_battle_played_at, format_battle_played_date
 

@@ -33,6 +33,29 @@ AIR_CARDS = {
     "Electro Dragon",
 }
 
+# Keep in sync with deck_analyzer.analyze_deck splash set.
+SPLASH_CARDS = {
+    "Wizard", "Baby Dragon", "Valkyrie", "Bowler", "Executioner", "Bomber",
+    "Fireball", "Arrows", "Poison", "Earthquake", "Electro Dragon",
+    "Goblin Demolisher", "Magic Archer", "Witch", "Electro Wizard", "Ice Wizard",
+    "Skeleton Dragons", "Mega Knight", "Dark Prince", "Firecracker", "Skeleton King",
+    "Mother Witch", "Royal Delivery",
+}
+
+SWARM_CLEAR_SPELLS = {
+    "The Log", "Zap", "Arrows", "Barbarian Barrel", "Giant Snowball",
+    "Royal Delivery", "Poison", "Fireball", "Tornado",
+}
+
+# Swarm / spawn pressure — not only pure SWARM_CARDS (e.g. Skeleton King ability).
+SWARM_PRESSURE_CARDS = {
+    "Goblin Gang", "Skeleton Army", "Royal Recruits", "Goblins", "Spear Goblins",
+    "Barbarians", "Skeletons", "Bats", "Minion Horde", "Guards",
+    "Skeleton King", "Skeleton Barrel", "Goblin Barrel", "Graveyard",
+    "Goblin Hut", "Barbarian Hut", "Furnace", "Witch", "Night Witch", "Tombstone",
+    "Goblin Curse",
+}
+
 
 @dataclass
 class KeyCardInsight:
@@ -54,8 +77,10 @@ def _generic_counters(threat: str) -> list[str]:
     role = get_card_role(threat)
     if threat in AIR_CARDS or role == "air":
         return ["Inferno Tower", "Musketeer", "Inferno Dragon", "Wizard"]
-    if is_spam_card(threat):
-        return ["Wizard", "Baby Dragon", "Valkyrie", "Arrows", "The Log"]
+    if is_spam_card(threat) or threat in {
+        "Skeleton King", "Skeleton Barrel", "Royal Recruits", "Goblin Hut", "Furnace",
+    }:
+        return ["Wizard", "Baby Dragon", "Valkyrie", "Executioner", "Arrows", "The Log", "Bowler"]
     if is_point_target_threat(threat):
         return list(POINT_TARGET_COUNTERS) + ["Inferno Tower", "Tesla"]
     if role == "building" or threat in CHIP_CARDS:
@@ -127,14 +152,20 @@ def _relevant_user_cards(user_deck: list[str], opp_deck: list[str], threats: lis
     for threat in threats:
         relevant.update(c for c in _counter_list(threat) if c in user_deck)
 
+    # Direct counters to every opponent card (not only win-conditions).
+    for opp_card in opp_deck:
+        relevant.update(c for c in _counter_list(opp_card) if c in user_deck)
+
     if _air_in_deck(opp_deck) and user_stats.air_coverage:
         relevant.update(c for c in user_deck if c in {
-            "Musketeer", "Wizard", "Inferno Dragon", "Mini P.E.K.K.A", "Inferno Tower",
-            "Tesla", "Archers", "Baby Dragon",
+            "Musketeer", "Wizard", "Inferno Dragon", "Inferno Tower",
+            "Tesla", "Archers", "Baby Dragon", "Executioner", "Electro Wizard",
+            "Hunter", "Mega Minion", "Minions", "Magic Archer", "Dart Goblin",
         })
 
-    if _swarm_in_deck(opp_deck) and user_stats.splash_coverage:
-        relevant.update(c for c in user_deck if get_card_role(c) in ("splash", "spell"))
+    if _swarm_in_deck(opp_deck):
+        # Role tag in CARD_META is often "tank"/"support" — use splash set, not get_card_role.
+        relevant.update(c for c in user_deck if c in SPLASH_CARDS or c in SWARM_CLEAR_SPELLS)
 
     if _point_target_in_deck(opp_deck) and user_stats.point_target_coverage:
         relevant.update(c for c in user_deck if c in POINT_TARGET_COUNTERS)
@@ -150,7 +181,7 @@ def _air_in_deck(deck: list[str]) -> list[str]:
 
 
 def _swarm_in_deck(deck: list[str]) -> list[str]:
-    return [c for c in deck if is_spam_card(c)]
+    return [c for c in deck if c in SWARM_PRESSURE_CARDS or is_spam_card(c)]
 
 
 def _point_target_in_deck(deck: list[str]) -> list[str]:

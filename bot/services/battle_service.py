@@ -147,6 +147,12 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
         analysis_text = None
 
     opp_name, opp_tag = resolve_opponent_fields(opponent)
+    trophy_raw = team.get("trophyChange")
+    trophy_change: int | None
+    try:
+        trophy_change = int(trophy_raw) if trophy_raw is not None else None
+    except (TypeError, ValueError):
+        trophy_change = None
 
     return {
         "player_tag": normalize_tag(player_tag),
@@ -156,6 +162,7 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
         "opponent_deck": ",".join(c for c in opp_cards if c),
         "opponent_name": opp_name,
         "opponent_tag": opp_tag,
+        "trophy_change": trophy_change,
         "analysis": analysis_text,
     }
 
@@ -176,6 +183,10 @@ async def _insert_battle_row(session, row: dict) -> bool:
             updated = True
         if row.get("opponent_tag") and not (battle_row.opponent_tag or "").strip():
             battle_row.opponent_tag = row["opponent_tag"]
+            updated = True
+        new_trophy = row.get("trophy_change")
+        if new_trophy is not None and battle_row.trophy_change != int(new_trophy):
+            battle_row.trophy_change = int(new_trophy)
             updated = True
         if updated:
             await session.flush()

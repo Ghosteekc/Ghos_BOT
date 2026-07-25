@@ -37,7 +37,7 @@ from bot.models.database import User
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 
-from bot.services.battle_cache_reader import get_battles_for_winrate_chart
+from bot.services.battle_cache_reader import get_battles_for_trophy_chart, get_battles_for_winrate_chart
 from bot.services.card_icons import deck_card_info_from_parsed
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
@@ -281,6 +281,7 @@ def _build_stats_overview(
     max_trophies: int = 0,
     *,
     chart_battles: list | None = None,
+    trophy_battles: list | None = None,
 ) -> StatsOverviewResponse:
     elixirs: list[float] = []
     durations: list[int] = []
@@ -294,7 +295,7 @@ def _build_stats_overview(
         durations.append(int(battle.get("gameDuration") or 180))
 
     winrate_by_day = build_winrate_by_day(chart_battles if chart_battles is not None else battles)
-    last_results = build_last_results(battles)
+    last_results = build_last_results(trophy_battles if trophy_battles is not None else battles)
 
     most_used = build_most_used_cards(battles, player_tag, limit=6) if player_tag else []
     archetypes = [
@@ -767,6 +768,7 @@ async def extended_stats(user: User = Depends(require_subscription)) -> StatsOve
 
     max_trophies = user.trophies or 0
     chart_battles = await get_battles_for_winrate_chart(user.player_tag or "", days=14)
+    trophy_battles = await get_battles_for_trophy_chart(user.player_tag or "", battles)
 
     return _build_stats_overview(
         stats,
@@ -774,6 +776,7 @@ async def extended_stats(user: User = Depends(require_subscription)) -> StatsOve
         user.player_tag or "",
         max_trophies,
         chart_battles=chart_battles or battles,
+        trophy_battles=trophy_battles or battles,
     )
 
 

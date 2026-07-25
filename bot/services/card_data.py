@@ -144,7 +144,9 @@ COUNTERS: dict[str, list[str]] = {
     "Electro Giant": ["Inferno Tower", "Inferno Dragon", "P.E.K.K.A", "Mini P.E.K.K.A"],
     "Wall Breakers": ["The Log", "Barbarian Barrel", "Skeleton Army", "Goblin Gang"],
     "Battle Ram": ["Cannon", "Tesla", "Tornado", "Skeleton Army"],
-    "Skeleton Barrel": ["Arrows", "Zap", "The Log", "Princess", "Musketeer"],
+    "Skeleton Barrel": [
+        "Arrows", "Zap", "The Log", "Princess", "Musketeer", "Valkyrie", "Wizard", "Executioner",
+    ],
     "Elite Barbarians": ["Skeleton Army", "Valkyrie", "Mini P.E.K.K.A", "Knight"],
     "Three Musketeers": ["Fireball", "Lightning", "Rocket", "Valkyrie"],
     "Sparky": ["Zap", "Rocket", "Lightning", "Goblin Barrel", "Miner"],
@@ -166,12 +168,19 @@ COUNTERS: dict[str, list[str]] = {
     "Firecracker": ["The Log", "Arrows", "Fireball", "Zap", "Barbarian Barrel"],
     "Ice Spirit": ["The Log", "Zap", "Giant Snowball", "Barbarian Barrel"],
     "Goblins": ["The Log", "Zap", "Arrows", "Barbarian Barrel", "Wizard", "Valkyrie"],
+    "Goblin Gang": ["The Log", "Zap", "Arrows", "Barbarian Barrel", "Valkyrie", "Wizard", "Executioner"],
+    "Royal Recruits": [
+        "Valkyrie", "Fireball", "Poison", "Wizard", "Executioner", "Bowler", "Mega Knight",
+    ],
     "Skeletons": ["The Log", "Zap", "Barbarian Barrel", "Giant Snowball", "Arrows"],
     "Cannon": ["Hog Rider", "Battle Ram", "Giant", "Goblin Drill"],
     "Tesla": ["Hog Rider", "Battle Ram", "Balloon", "Lava Hound", "Miner"],
     "Golden Knight": ["Skeleton Army", "Guards", "Mini P.E.K.K.A", "P.E.K.K.A", "Inferno Tower"],
     "Archer Queen": ["Fireball", "Lightning", "Rocket", "Mini P.E.K.K.A", "Skeleton Army"],
-    "Skeleton King": ["Mini P.E.K.K.A", "Inferno Tower", "P.E.K.K.A", "Poison"],
+    "Skeleton King": [
+        "Valkyrie", "Executioner", "Wizard", "Mini P.E.K.K.A", "Inferno Tower",
+        "P.E.K.K.A", "Poison", "Bowler",
+    ],
     "Mighty Miner": ["Tesla", "Cannon", "Skeleton Army", "Knight"],
     "Monk": ["Skeleton Army", "Mini P.E.K.K.A", "Inferno Tower", "Knight"],
     "Little Prince": [

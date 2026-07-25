@@ -9,7 +9,7 @@ from bot.services.clash_api import normalize_tag
 from bot.services.deck_analyzer import analyze_deck
 
 
-async def get_cached_battle_rows(player_tag: str, limit: int = 25) -> list[BattleCache]:
+async def get_cached_battle_rows(player_tag: str, limit: int = 100) -> list[BattleCache]:
     async with async_session() as session:
         res = await session.execute(
             select(BattleCache)
@@ -27,15 +27,19 @@ def row_to_battle_dict(row: BattleCache, player_tag: str) -> dict:
     tag = normalize_tag(player_tag)
     opp_name = (row.opponent_name or "").strip() or "Соперник"
     opp_tag = normalize_tag(row.opponent_tag or "")
+    trophy_change = row.trophy_change
+    has_trophy = trophy_change is not None and int(trophy_change) != 0
     return {
-        "type": "cached",
+        # Cached stubs without trophies stay excluded from ladder charts.
+        "type": "PvP" if has_trophy else "cached",
+        "gameMode": {"name": "Ladder"} if has_trophy else {},
         "battleTime": row.battle_time,
         "gameDuration": 180,
         "team": [{
             "tag": tag,
             "name": "Вы",
             "crowns": 3 if won else 1,
-            "trophyChange": 0,
+            "trophyChange": int(trophy_change) if trophy_change is not None else 0,
             "cards": user_cards,
         }],
         "opponent": [{
@@ -69,3 +73,23 @@ async def get_battles_for_winrate_chart(player_tag: str, *, days: int = 14) -> l
         rows = list(res.scalars().all())
 
     return [row_to_battle_dict(r, player_tag) for r in rows]
+
+
+async def get_battles_for_trophy_chart(player_tag: str, live_battles: list[dict] | None = None) -> list[dict]:
+    """Merge live battlelog with persisted battles that have trophy deltas.
+
+    Clash API only returns ~25 recent fights; cache keeps older ladder games once
+    trophy_change has been stored.
+    """
+    from bot.services.battle_time import battle_time_from_record
+
+    by_time: dict[str, dict] = {}
+    for battle in await get_battles_from_cache(player_tag):
+        key = battle_time_from_record(battle) or ""
+        if key:
+            by_time[key] = battle
+    for battle in live_battles or []:
+        key = battle_time_from_record(battle) or ""
+        if key:
+            by_time[key] = battle
+    return sorted(by_time.values(), key=lambda b: battle_time_from_record(b) or "", reverse=True)

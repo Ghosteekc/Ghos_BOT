@@ -9,7 +9,7 @@ from bot.models.database import User
 from bot.api.routes.decks import _build_stats_overview, _stats_from_battles
 from bot.api.routes.battles import _build_battle_summary
 from bot.services.battle_day_stats import compute_daily_trophy_change
-from bot.services.battle_cache_reader import get_battles_for_winrate_chart
+from bot.services.battle_cache_reader import get_battles_for_trophy_chart, get_battles_for_winrate_chart
 from bot.services.battle_service import (
     BATTLE_LOG_LIMIT,
     filter_pvp_battles,
@@ -213,12 +213,14 @@ async def home_dashboard(
                 cached = _stats_from_battles(loaded, user.player_tag)
             if cached and cached.total > 0:
                 chart_battles = await get_battles_for_winrate_chart(user.player_tag, days=14)
+                trophy_battles = await get_battles_for_trophy_chart(user.player_tag, loaded)
                 stats = _build_stats_overview(
                     cached,
                     loaded,
                     user.player_tag or "",
                     user.trophies or profile.max_trophies or 0,
                     chart_battles=chart_battles or loaded,
+                    trophy_battles=trophy_battles or loaded,
                 )
 
     summaries = [_build_battle_summary(i, b) for i, b in enumerate(battles[:BATTLE_LOG_LIMIT])]

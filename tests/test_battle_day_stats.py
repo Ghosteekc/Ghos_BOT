@@ -70,7 +70,16 @@ def test_build_last_results_skips_missing_delta_and_fills_from_older():
         },
         _ladder("WithDelta", -29, crowns=0, opp_crowns=1, when="20260724T170000.000Z"),
     ]
-    rows = build_last_results(battles, limit=14)
+    rows = build_last_results(battles, limit=40)
     names = {r["opponent_name"] for r in rows}
     assert "WithDelta" in names
     assert any(r["opponent_name"] == "WithDelta" and r["trophy_change"] == -29 for r in rows)
+
+
+def test_build_last_results_default_limit_covers_full_api_window():
+    battles = [
+        _ladder(f"Opp{i}", 30 if i % 2 == 0 else -28, when=f"20260724T{10 + i // 10}{i % 10}0000.000Z")
+        for i in range(25)
+    ]
+    rows = build_last_results(battles)
+    assert len(rows) == 25
