@@ -13,11 +13,15 @@ from bot.services.card_data import CARD_META, WIN_CONDITIONS, get_card_elixir  #
 from bot.services.meta_decks import META_DECKS  # noqa: E402
 
 DATA_DIR = ROOT / "bot" / "data"
-WEBAPP_DATA = ROOT.parent / "webapp" / "src" / "data"
+WEBAPP_DATA_PATHS = [
+    ROOT.parent / "webapp" / "src" / "data",
+    Path(r"G:/webapp/src/data"),
+]
 
 MINI_TANKS = {
     "Knight", "Ice Golem", "Guards", "Dark Prince", "Valkyrie", "Mini P.E.K.K.A",
-    "Bandit", "Lumberjack", "Battle Healer",
+    "Bandit", "Lumberjack", "Battle Healer", "Mighty Miner", "Golden Knight",
+    "Berserker", "Royal Ghost",
 }
 TANKS = {
     "Giant", "Golem", "P.E.K.K.A", "Mega Knight", "Giant Skeleton", "Electro Giant",
@@ -26,35 +30,51 @@ TANKS = {
 }
 SMALL_SPELLS = {
     "Zap", "The Log", "Giant Snowball", "Barbarian Barrel", "Arrows", "Rage",
+    "Tornado", "Royal Delivery", "Goblin Curse", "Vines", "Void", "Clone",
 }
 BIG_SPELLS = {
     "Fireball", "Rocket", "Lightning", "Poison", "Freeze", "Earthquake",
 }
+# Troops/buildings that can attack air (not air-hitting spells).
 AIR_DEFENSE = {
-    "Musketeer", "Mega Minion", "Wizard", "Archers", "Inferno Dragon", "Electro Wizard",
-    "Hunter", "Magic Archer", "Flying Machine", "Minions", "Bats", "Skeleton Dragons",
-    "Ice Wizard", "Princess", "Firecracker", "Mother Witch", "Phoenix",
+    "Archers", "Musketeer", "Three Musketeers", "Wizard", "Baby Dragon", "Electro Dragon",
+    "Executioner", "Electro Wizard", "Ice Wizard", "Inferno Dragon", "Magic Archer",
+    "Flying Machine", "Minions", "Minion Horde", "Mega Minion", "Bats", "Skeleton Dragons",
+    "Firecracker", "Mother Witch", "Phoenix", "Princess", "Hunter", "Dart Goblin",
+    "Witch", "Spear Goblins", "Zappies", "Rascals", "Archer Queen", "Little Prince",
+    "Night Witch", "Tesla", "Inferno Tower",
+}
+SPLASH = {
+    "Baby Dragon", "Wizard", "Executioner", "Bowler", "Valkyrie", "Bomber",
+    "Electro Dragon", "Goblin Demolisher", "Witch", "Electro Wizard", "Ice Wizard",
+    "Skeleton Dragons", "Mega Knight", "Dark Prince", "Firecracker", "Skeleton King",
+    "Magic Archer", "Mother Witch", "Royal Delivery",
 }
 ANTI_TANK = {
     "Inferno Tower", "Inferno Dragon", "P.E.K.K.A", "Mini P.E.K.K.A", "Hunter",
-    "Guards", "Knight", "Cannon", "Tesla", "Tombstone",
+    "Guards", "Knight", "Cannon", "Tesla", "Tombstone", "Mighty Miner", "Sparky",
 }
 DEFENSIVE = {
     "Knight", "Valkyrie", "Guards", "Ice Golem", "Cannon", "Tesla", "Tombstone",
-    "Inferno Tower", "Bomb Tower", "Inferno Dragon", "Mega Knight",
+    "Inferno Tower", "Bomb Tower", "Inferno Dragon", "Mega Knight", "Bowler",
+    "Executioner", "Dark Prince",
 }
 ANTI_SWARM = {
     "Valkyrie", "Wizard", "Baby Dragon", "Executioner", "Bowler", "Bomber",
     "The Log", "Zap", "Arrows", "Barbarian Barrel", "Giant Snowball", "Fireball",
-    "Poison", "Tornado", "Earthquake",
+    "Poison", "Tornado", "Earthquake", "Mega Knight", "Dark Prince", "Witch",
+    "Electro Wizard", "Ice Wizard", "Firecracker", "Royal Delivery", "Skeleton Dragons",
 }
 COUNTERPUSH = {
     "Bandit", "Dark Prince", "Prince", "Battle Ram", "Royal Ghost", "Miner",
-    "Hog Rider", "Wall Breakers", "Ram Rider", "Elite Barbarians",
+    "Hog Rider", "Wall Breakers", "Ram Rider", "Elite Barbarians", "Golden Knight",
+    "Mighty Miner",
 }
 DPS = {
     "Musketeer", "Wizard", "Electro Wizard", "Hunter", "Magic Archer", "Mini P.E.K.K.A",
     "Inferno Dragon", "Lumberjack", "Prince", "Dark Prince", "Bandit",
+    "Archer Queen", "Dart Goblin", "Three Musketeers", "Executioner", "Sparky",
+    "Mighty Miner", "Little Prince", "P.E.K.K.A",
 }
 
 ARCHETYPE_MAP = {
@@ -86,21 +106,24 @@ def _roles_for(name: str, meta: dict) -> list[str]:
     base = meta.get("role", "support")
     ctype = meta.get("type", "troop")
     elixir = int(meta.get("elixir", 4))
+    is_win = name in WIN_CONDITIONS or base == "win_condition"
 
-    if name in WIN_CONDITIONS or base == "win_condition":
+    if is_win:
         roles.append("win_condition")
     if name in TANKS:
         roles.append("tank")
     if name in MINI_TANKS:
         roles.append("mini_tank")
-    if base == "splash" or name in {"Baby Dragon", "Wizard", "Executioner", "Bowler", "Valkyrie"}:
+    if base == "splash" or name in SPLASH:
         roles.append("splash")
     if ctype == "spell":
         roles.append("spell")
-        if name in SMALL_SPELLS or elixir <= 2:
-            roles.append("small_spell")
-        if name in BIG_SPELLS or elixir >= 4:
-            roles.append("big_spell")
+        # Win-condition spells (Graveyard, Goblin Barrel) are not big/small spells.
+        if not is_win:
+            if name in SMALL_SPELLS or elixir <= 2:
+                roles.append("small_spell")
+            if name in BIG_SPELLS or (elixir >= 4 and name not in SMALL_SPELLS):
+                roles.append("big_spell")
     if ctype == "building" or base == "building":
         roles.append("building")
     if name in AIR_DEFENSE or base == "air":
@@ -190,11 +213,19 @@ def main() -> None:
     decks = build_decks_json()
     write_json(DATA_DIR / "cards.json", cards)
     write_json(DATA_DIR / "decks.json", decks)
-    if WEBAPP_DATA.parent.exists():
-        write_json(WEBAPP_DATA / "cards.json", cards)
-        write_json(WEBAPP_DATA / "decks.json", decks)
-    else:
-        print(f"Skip webapp sync: {WEBAPP_DATA.parent} not found")
+    synced = False
+    seen: set[Path] = set()
+    for web_data in WEBAPP_DATA_PATHS:
+        resolved = web_data.resolve() if web_data.exists() else web_data
+        if resolved in seen:
+            continue
+        if web_data.parent.exists():
+            seen.add(resolved)
+            write_json(web_data / "cards.json", cards)
+            write_json(web_data / "decks.json", decks)
+            synced = True
+    if not synced:
+        print("Skip webapp sync: no webapp data dirs found")
 
 
 if __name__ == "__main__":

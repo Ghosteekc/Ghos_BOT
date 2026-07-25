@@ -145,14 +145,6 @@ class BattleDetailResponse(BaseModel):
     low_impact_cards: list[KeyCardEntry] = []
 
 
-class WinrateEntry(BaseModel):
-    cards: list[str]
-    wins: int
-    losses: int
-    total: int
-    winrate: float
-
-
 class OpponentEntry(BaseModel):
     index: int
     name: str
@@ -309,6 +301,15 @@ class DeckCardInfo(BaseModel):
     evolution_level: int = 0
     is_hero: bool = False
     slot: int = 0
+
+
+class WinrateEntry(BaseModel):
+    cards: list[str]
+    deck_cards: list[DeckCardInfo] = []
+    wins: int
+    losses: int
+    total: int
+    winrate: float
 
 
 class DeckEntry(BaseModel):

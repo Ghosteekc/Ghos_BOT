@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 
 from bot.services.battle_cache_reader import get_battles_for_winrate_chart
+from bot.services.card_icons import deck_card_info_from_parsed
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.card_data import get_card_elixir
@@ -52,10 +53,12 @@ from bot.services.arena_decks import build_classic_meta_entries, get_arena_popul
 from bot.services.deck_constructor import build_constructor_decks
 from bot.services.deck_compare import compare_decks
 from bot.services.deck_detail import build_mine_deck_stats
-from bot.services.top_players import get_top_players
+from bot.services.top_players import _cards_from_current_deck, get_top_players
 from bot.services.meta_analyzer import _guess_deck_name
 from bot.services.random_deck import generate_random_deck
 from bot.services.battle_insights import build_insights_report
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["decks"])
 
@@ -175,6 +178,54 @@ def _user_current_deck(battles: list, tag: str) -> list[str]:
     return []
 
 
+def _parsed_to_deck_card_infos(parsed: list[dict]) -> list[DeckCardInfo]:
+    return [
+        DeckCardInfo(**deck_card_info_from_parsed(card, slot=i))
+        for i, card in enumerate(parsed)
+    ]
+
+
+async def _fetch_profile_current_deck(player_tag: str) -> list[dict]:
+    """Current deck from Clash profile — order and evolutions as in-game."""
+    if not player_tag:
+        return []
+    client = ClashRoyaleClient()
+    try:
+        player = await client.get_player(player_tag)
+        return _cards_from_current_deck(player)
+    except ClashRoyaleAPIError:
+        logger.debug("Failed to fetch currentDeck for %s", player_tag)
+        return []
+    finally:
+        await client.close()
+
+
+def _apply_profile_deck_to_winrates(
+    winrates: dict[str, dict],
+    profile_deck: list[dict],
+) -> dict[str, dict]:
+    """Overlay profile currentDeck order/evos onto matching winrate row; pin it first."""
+    if len(profile_deck) != 8:
+        return winrates
+    key = "|".join(sorted(c["name"] for c in profile_deck))
+    if key in winrates:
+        row = dict(winrates[key])
+        row["cards"] = [c["name"] for c in profile_deck]
+        row["deck_cards"] = profile_deck
+        rest = {k: v for k, v in winrates.items() if k != key}
+        return {key: row, **rest}
+    # Profile deck not in recent battles — still show it first with zero stats.
+    stub = {
+        "cards": [c["name"] for c in profile_deck],
+        "deck_cards": profile_deck,
+        "wins": 0,
+        "losses": 0,
+        "total": 0,
+        "winrate": 0.0,
+    }
+    return {key: stub, **winrates}
+
+
 async def _cards_to_deck_infos(cards: list[str]) -> list[DeckCardInfo]:
     await ensure_cards_loaded()
     infos: list[DeckCardInfo] = []
@@ -193,23 +244,22 @@ async def _cards_to_deck_infos(cards: list[str]) -> list[DeckCardInfo]:
 async def _build_user_deck_entries(battles: list, tag: str) -> list[DeckEntry]:
     await ensure_cards_loaded()
     winrates = calculate_deck_winrates(battles, normalize_tag(tag))
+    profile_deck = await _fetch_profile_current_deck(tag)
+    winrates = _apply_profile_deck_to_winrates(winrates, profile_deck)
     decks: list[DeckEntry] = []
     for i, (_, data) in enumerate(winrates.items()):
         if i >= 12:
             break
+        parsed = data.get("deck_cards") or []
         cards = data["cards"]
+        if len(parsed) == 8:
+            card_infos = _parsed_to_deck_card_infos(parsed)
+            cards = [c.name for c in card_infos]
+        else:
+            card_infos = await _cards_to_deck_infos(cards)
         deck_link = build_deck_share_link(cards) if len(cards) == 8 else None
-        elixirs = [get_card_elixir(c) for c in cards]
+        elixirs = [c.cost or get_card_elixir(c.name) for c in card_infos]
         avg = round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0
-        card_infos = []
-        for c in cards:
-            info = get_card_info(c)
-            card_infos.append(DeckCardInfo(
-                id=c.lower().replace(" ", "-"),
-                name=c,
-                icon=info.get("icon", "") if info else "",
-                cost=get_card_elixir(c),
-            ))
         decks.append(DeckEntry(
             id=i,
             name=_guess_deck_name(cards),
@@ -532,14 +582,21 @@ async def battle_insights(user: User = Depends(require_subscription)) -> Insight
 
 @router.get("/winrates", response_model=list[WinrateEntry])
 async def deck_winrates(user: User = Depends(require_subscription)) -> list[WinrateEntry]:
+    await ensure_cards_loaded()
     battles = await _get_battles(user)
     winrates = calculate_deck_winrates(battles, normalize_tag(user.player_tag))
+    profile_deck = await _fetch_profile_current_deck(user.player_tag or "")
+    winrates = _apply_profile_deck_to_winrates(winrates, profile_deck)
     result = []
     for i, (_, data) in enumerate(winrates.items()):
         if i >= 10:
             break
+        parsed = data.get("deck_cards") or []
+        deck_cards = _parsed_to_deck_card_infos(parsed) if len(parsed) == 8 else []
+        cards = [c.name for c in deck_cards] if deck_cards else data["cards"]
         result.append(WinrateEntry(
-            cards=data["cards"],
+            cards=cards,
+            deck_cards=deck_cards,
             wins=data["wins"],
             losses=data["losses"],
             total=data["total"],

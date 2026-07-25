@@ -39,14 +39,19 @@ _SMALL_SPELLS = frozenset({
 })
 _FINISHERS = frozenset({"Fireball", "Rocket", "Lightning", "Poison"})
 _ANTI_AIR_CARDS = frozenset({
-    "Musketeer", "Wizard", "Executioner", "Inferno Dragon", "Mini P.E.K.K.A",
-    "Mega Minion", "Electro Wizard", "Hunter", "Inferno Tower", "Tesla",
-    "Archers", "Bats", "Minions", "Phoenix", "Firecracker", "Ice Wizard", "Baby Dragon",
+    "Archers", "Musketeer", "Three Musketeers", "Wizard", "Baby Dragon", "Electro Dragon",
+    "Executioner", "Electro Wizard", "Ice Wizard", "Inferno Dragon", "Magic Archer",
+    "Flying Machine", "Minions", "Minion Horde", "Mega Minion", "Bats", "Skeleton Dragons",
+    "Firecracker", "Mother Witch", "Phoenix", "Princess", "Hunter", "Dart Goblin",
+    "Witch", "Spear Goblins", "Zappies", "Rascals", "Archer Queen", "Little Prince",
+    "Night Witch", "Tesla", "Inferno Tower",
 })
 _SPLASH_CARDS = frozenset({
-    "Wizard", "Baby Dragon", "Valkyrie", "Bowler", "Executioner",
+    "Wizard", "Baby Dragon", "Valkyrie", "Bowler", "Executioner", "Bomber",
     "Fireball", "Arrows", "Poison", "Earthquake", "Electro Dragon",
-    "Goblin Demolisher", "Magic Archer",
+    "Goblin Demolisher", "Magic Archer", "Witch", "Electro Wizard", "Ice Wizard",
+    "Skeleton Dragons", "Mega Knight", "Dark Prince", "Firecracker", "Skeleton King",
+    "Mother Witch", "Royal Delivery",
 })
 _DEFENSE_ROLES = frozenset({
     ROLE_AIR, ROLE_SPLASH, ROLE_ANTI_TANK, ROLE_DEFENSIVE, ROLE_ANTI_SWARM, ROLE_BUILDING,

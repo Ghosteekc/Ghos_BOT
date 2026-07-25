@@ -53,14 +53,20 @@ def analyze_deck(cards: list[str]) -> DeckStats:
     buildings = [c for c in cards if get_card_role(c) == "building"]
 
     anti_air = {
-        "Musketeer", "Wizard", "Executioner", "Inferno Dragon", "Mini P.E.K.K.A",
-        "Mega Minion", "Electro Wizard", "Hunter", "Inferno Tower", "Tesla",
-        "Archers", "Bats", "Minions", "Phoenix", "Firecracker", "Ice Wizard",
-        "Baby Dragon",
+        "Archers", "Musketeer", "Three Musketeers", "Wizard", "Baby Dragon", "Electro Dragon",
+        "Executioner", "Electro Wizard", "Ice Wizard", "Inferno Dragon", "Magic Archer",
+        "Flying Machine", "Minions", "Minion Horde", "Mega Minion", "Bats", "Skeleton Dragons",
+        "Firecracker", "Mother Witch", "Phoenix", "Princess", "Hunter", "Dart Goblin",
+        "Witch", "Spear Goblins", "Zappies", "Rascals", "Archer Queen", "Little Prince",
+        "Night Witch", "Tesla", "Inferno Tower",
     }
-    splash_cards = {"Wizard", "Baby Dragon", "Valkyrie", "Bowler", "Executioner",
-                    "Fireball", "Arrows", "Poison", "Earthquake", "Electro Dragon",
-                    "Goblin Demolisher", "Magic Archer"}
+    splash_cards = {
+        "Wizard", "Baby Dragon", "Valkyrie", "Bowler", "Executioner", "Bomber",
+        "Fireball", "Arrows", "Poison", "Earthquake", "Electro Dragon",
+        "Goblin Demolisher", "Magic Archer", "Witch", "Electro Wizard", "Ice Wizard",
+        "Skeleton Dragons", "Mega Knight", "Dark Prince", "Firecracker", "Skeleton King",
+        "Mother Witch", "Royal Delivery",
+    }
 
     return DeckStats(
         cards=cards,
@@ -176,8 +182,15 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
 
 
 def calculate_deck_winrates(battles: list[dict], player_tag: str) -> dict[str, dict]:
-    """Винрейт по колодам (ключ — отсортированный список карт)."""
+    """Винрейт по колодам (ключ — набор карт).
+
+    Порядок слотов и эволюции/герои берутся из боёв (как в игре), а не из
+    алфавитной сортировки имён.
+    """
+    from bot.services.card_icons import cards_from_team, merge_deck_variants
+
     deck_results: dict[str, list[bool]] = {}
+    deck_variants: dict[str, list[list[dict]]] = {}
 
     for battle in battles:
         battle_type = battle.get("type") or "PvP"
@@ -191,20 +204,52 @@ def calculate_deck_winrates(battles: list[dict], player_tag: str) -> dict[str, d
         if team_tag and normalize_tag(team_tag) != normalize_tag(player_tag):
             continue
 
-        deck_key = "|".join(sorted(extract_deck(team)))
+        parsed = cards_from_team(team)
+        if len(parsed) != 8:
+            # Cached stubs may only have names — keep order as stored.
+            raw_names = [c.get("name") for c in team.get("cards", []) if c.get("name")]
+            if len(raw_names) != 8:
+                continue
+            parsed = [
+                {
+                    "name": name,
+                    "icon": "",
+                    "evolution_level": 0,
+                    "is_hero": False,
+                    "cost": get_card_elixir(name),
+                    "slot": i,
+                }
+                for i, name in enumerate(raw_names)
+            ]
+
+        deck_key = "|".join(sorted(c["name"] for c in parsed))
         if not deck_key:
             continue
 
         won = team.get("crowns", 0) > opponent.get("crowns", 0)
         deck_results.setdefault(deck_key, []).append(won)
+        deck_variants.setdefault(deck_key, []).append(parsed)
 
     winrates = {}
     for deck_key, results in deck_results.items():
         wins = sum(results)
         total = len(results)
-        cards = deck_key.split("|")
+        merged = merge_deck_variants(deck_variants.get(deck_key, []))
+        if not merged:
+            merged = [
+                {
+                    "name": name,
+                    "icon": "",
+                    "evolution_level": 0,
+                    "is_hero": False,
+                    "cost": get_card_elixir(name),
+                    "slot": i,
+                }
+                for i, name in enumerate(deck_key.split("|"))
+            ]
         winrates[deck_key] = {
-            "cards": cards,
+            "cards": [c["name"] for c in merged],
+            "deck_cards": merged,
             "wins": wins,
             "losses": total - wins,
             "total": total,

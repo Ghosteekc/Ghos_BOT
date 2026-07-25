@@ -20,10 +20,12 @@ _AIR_OFFENSE = {
 }
 
 _ANTI_AIR = {
-    "Musketeer", "Wizard", "Executioner", "Inferno Dragon", "Mini P.E.K.K.A",
-    "Mega Minion", "Electro Wizard", "Hunter", "Inferno Tower", "Tesla",
-    "Archers", "Bats", "Minions", "Phoenix", "Firecracker", "Ice Wizard",
-    "Baby Dragon",
+    "Archers", "Musketeer", "Three Musketeers", "Wizard", "Baby Dragon", "Electro Dragon",
+    "Executioner", "Electro Wizard", "Ice Wizard", "Inferno Dragon", "Magic Archer",
+    "Flying Machine", "Minions", "Minion Horde", "Mega Minion", "Bats", "Skeleton Dragons",
+    "Firecracker", "Mother Witch", "Phoenix", "Princess", "Hunter", "Dart Goblin",
+    "Witch", "Spear Goblins", "Zappies", "Rascals", "Archer Queen", "Little Prince",
+    "Night Witch", "Tesla", "Inferno Tower",
 }
 
 _FLYING_TROOPS = {
@@ -347,7 +349,8 @@ _GROUND_COUNTERS = {"Inferno Tower", "Tesla", "Cannon", "Tombstone"}
 
 _GROUND_ANTI_AIR = frozenset({
     "Musketeer", "Hunter", "Archers", "Firecracker", "Wizard", "Executioner",
-    "Bowler", "Valkyrie", "Mini P.E.K.K.A",
+    "Electro Wizard", "Ice Wizard", "Magic Archer", "Dart Goblin", "Princess",
+    "Zappies", "Rascals", "Little Prince", "Archer Queen", "Witch",
 })
 
 
@@ -716,7 +719,11 @@ def _deck_has_air(deck: list[str]) -> bool:
 
 
 def _is_anti_air_specialist(card: str) -> bool:
-    return card in _ANTI_AIR and card not in {"Baby Dragon", "Wizard", "Electro Wizard", "Mini P.E.K.K.A"}
+    # Splash/hybrid air answers stay useful vs ground; pure flyers are specialists.
+    return card in _ANTI_AIR and card not in {
+        "Baby Dragon", "Wizard", "Electro Wizard", "Executioner", "Electro Dragon",
+        "Witch", "Ice Wizard", "Hunter", "Magic Archer",
+    }
 
 
 def build_synergy_deck(

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from bot.config import settings
-from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed, normalize_deck_upgrades
+from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed, merge_deck_variants, normalize_deck_upgrades
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
@@ -100,57 +100,7 @@ def _guess_category(cards: list[str]) -> str:
 
 def _merge_slot_variants(variants: list[list[dict]]) -> list[dict]:
     """Pick the most common card order and evolution/hero per slot."""
-    if not variants:
-        return []
-    order_counts: Counter[tuple[str, ...]] = Counter()
-    for variant in variants:
-        order_counts[tuple(c["name"] for c in variant)] += 1
-    best_order = order_counts.most_common(1)[0][0]
-    matching = [v for v in variants if tuple(c["name"] for c in v) == best_order]
-    base = matching[0] if matching else variants[0]
-    merged: list[dict] = []
-    for slot, card in enumerate(base):
-        evo_votes: Counter[int] = Counter()
-        hero_votes = 0
-        for variant in matching:
-            if slot >= len(variant):
-                continue
-            item = variant[slot]
-            if item["name"] != card["name"]:
-                continue
-            if item.get("is_hero"):
-                hero_votes += 1
-            else:
-                evo_votes[int(item.get("evolution_level") or 0)] += 1
-        is_hero = hero_votes > len(matching) / 2
-        best_evo = 0 if is_hero else (evo_votes.most_common(1)[0][0] if evo_votes else 0)
-        parsed = {
-            "name": card["name"],
-            "icon": "",
-            "evolution_level": best_evo,
-            "is_hero": is_hero,
-            "cost": card.get("cost") or get_card_elixir(card["name"]),
-            "slot": slot,
-        }
-        reg = get_card_info(card["name"]) or {}
-        icons = {
-            "medium": reg.get("icon") or "",
-            "evolutionMedium": reg.get("evolution_icon") or "",
-            "heroMedium": reg.get("hero_icon") or "",
-        }
-        from bot.services.card_icons import pick_icon_urls
-
-        if is_hero:
-            parsed["evolution_level"] = 0
-        parsed["icon"] = pick_icon_urls(
-            icons,
-            evolution_level=parsed["evolution_level"],
-            hero_level=1 if is_hero else 0,
-        )
-        if parsed["evolution_level"] < 1 and not is_hero:
-            parsed["icon"] = icons["medium"] or parsed["icon"]
-        merged.append(parsed)
-    return normalize_deck_upgrades(merged)
+    return merge_deck_variants(variants)
 
 
 async def _collect_player_tags(client: ClashRoyaleClient) -> tuple[list[dict], str]:

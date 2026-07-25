@@ -105,3 +105,47 @@ def deck_card_info_from_parsed(parsed: dict, *, slot: int | None = None) -> dict
         "is_hero": bool(parsed.get("is_hero")),
         "slot": slot_val,
     }
+
+
+def merge_deck_variants(variants: list[list[dict]]) -> list[dict]:
+    """Pick the most common card order and evolution/hero per slot (as in-game)."""
+    from collections import Counter
+
+    if not variants:
+        return []
+    order_counts: Counter[tuple[str, ...]] = Counter()
+    for variant in variants:
+        order_counts[tuple(c["name"] for c in variant)] += 1
+    best_order = order_counts.most_common(1)[0][0]
+    matching = [v for v in variants if tuple(c["name"] for c in v) == best_order]
+    # Prefer newest battle among matching order (variants are newest-first).
+    base = matching[0] if matching else variants[0]
+    merged: list[dict] = []
+    for slot, card in enumerate(base):
+        evo_votes: Counter[int] = Counter()
+        hero_votes = 0
+        for variant in matching:
+            if slot >= len(variant):
+                continue
+            item = variant[slot]
+            if item["name"] != card["name"]:
+                continue
+            if item.get("is_hero"):
+                hero_votes += 1
+            else:
+                evo_votes[int(item.get("evolution_level") or 0)] += 1
+        is_hero = hero_votes > len(matching) / 2
+        best_evo = 0 if is_hero else (evo_votes.most_common(1)[0][0] if evo_votes else 0)
+        parsed = {
+            "name": card["name"],
+            "icon": "",
+            "evolution_level": best_evo,
+            "is_hero": is_hero,
+            "cost": card.get("cost") or get_card_elixir(card["name"]),
+            "slot": slot,
+        }
+        if is_hero:
+            parsed["evolution_level"] = 0
+        _refresh_card_icon(parsed)
+        merged.append(parsed)
+    return normalize_deck_upgrades(merged)
