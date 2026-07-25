@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-# Ranked unlocks at 15k trophies this season (or Champion ticket from prior season).
-LEAGUE_UNLOCK_TROPHIES = 15_000
+from datetime import date, datetime, timezone
 
 # Official CR API still uses 1–10 (Challenger I … Ultimate Champion).
 # Russian names match in-game «Абсолютный чемпион» for Ultimate Champion.
@@ -21,6 +20,25 @@ _LEAGUE_NAMES_RU: dict[int, str] = {
 }
 
 ABSOLUTE_CHAMPION_LEAGUE = 10
+
+
+def ranked_unlock_trophies(now: date | None = None) -> int:
+    """Trophy Road threshold to unlock Ranked this season.
+
+    Source: Supercell «Update to Ranked Trophy Requirements» (14 Jul 2026):
+    Jul–Aug 2026 → 13 000, Sep–Oct → 13 500, from Nov → 14 000.
+    Ranked also unlocks via Champion (or higher) finish in the previous season.
+    """
+    d = now or datetime.now(timezone.utc).date()
+    if d < date(2026, 9, 1):
+        return 13_000
+    if d < date(2026, 11, 1):
+        return 13_500
+    return 14_000
+
+
+# Back-compat alias for tests / imports
+LEAGUE_UNLOCK_TROPHIES = ranked_unlock_trophies()
 
 
 def league_name_ru(league_number: int | None) -> str | None:
@@ -54,17 +72,21 @@ def _season_league(result: object) -> tuple[int | None, int | None]:
     return league_number, trophies
 
 
-def build_league_info(player: dict) -> dict:
+def build_league_info(player: dict, *, now: date | None = None) -> dict:
     """Build league banner payload from Clash Royale player JSON."""
+    unlock_trophies = ranked_unlock_trophies(now)
     current_num, current_cups = _season_league(player.get("currentPathOfLegendSeasonResult"))
     best_num, _ = _season_league(player.get("bestPathOfLegendSeasonResult"))
 
+    # Unlocked if CR already returned a Ranked season result (trophy threshold
+    # or previous-season Champion ticket). Trophy count alone is not enough —
+    # a player can sit above the threshold without entering Ranked yet.
     unlocked = current_num is not None or best_num is not None
     is_absolute = current_num == ABSOLUTE_CHAMPION_LEAGUE
 
     return {
         "unlocked": unlocked,
-        "unlock_trophies": LEAGUE_UNLOCK_TROPHIES,
+        "unlock_trophies": unlock_trophies,
         "current_league_number": current_num,
         "current_league_name": league_name_ru(current_num),
         "current_league_icon": league_icon_url(current_num),

@@ -16,7 +16,7 @@ class CardLevelCount(BaseModel):
 
 class LeagueInfo(BaseModel):
     unlocked: bool = False
-    unlock_trophies: int = 15_000
+    unlock_trophies: int = 13_000
     current_league_number: int | None = None
     current_league_name: str | None = None
     current_league_icon: str | None = None
