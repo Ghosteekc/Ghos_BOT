@@ -8,6 +8,7 @@ from bot.services.card_icons import deck_card_info_from_parsed
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.league_info import build_league_info
+from bot.services.player_collection import build_collection_stats_from_player
 from bot.services.top_players import (
     _SKIP_BATTLE_TYPES,
     _LADDER_BATTLE_TYPES,
@@ -104,6 +105,7 @@ async def build_player_preview(tag: str) -> dict:
     recent_wr, recent_games = _recent_ladder_winrate(normalized, battles)
     if winrate is None and recent_wr is not None:
         winrate = recent_wr
+    collection_stats = build_collection_stats_from_player(player)
 
     deck_cards = _cards_from_current_deck(player)
     if not deck_cards:
@@ -135,6 +137,7 @@ async def build_player_preview(tag: str) -> dict:
         "max_trophies": player.get("bestTrophies"),
         "clan_name": clan.get("name") if isinstance(clan, dict) else None,
         "exp_level": player.get("expLevel"),
+        "collection_level": collection_stats["collection_level"],
         "winrate": winrate,
         "total_wins": total_wins,
         "total_losses": total_losses,

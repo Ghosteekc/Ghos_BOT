@@ -450,6 +450,7 @@ class SearchResult(BaseModel):
     max_trophies: int | None = None
     clan_name: str | None = None
     exp_level: int | None = None
+    collection_level: int | None = None
     arena_icon: str | None = None
     winrate: float | None = None
     total_wins: int | None = None
