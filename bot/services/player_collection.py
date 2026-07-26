@@ -80,17 +80,21 @@ def _card_display_mode(
     return "base"
 
 
-def _card_collection_points(level: int | None, evolution_level: int) -> int:
-    """In-game collection level from API evolutionLevel tiers.
+def _card_collection_points(
+    level: int | None,
+    *,
+    evolution_unlocked: bool,
+    hero_unlocked: bool,
+) -> int:
+    """In-game collection level contribution for one card.
 
-    Uses raw evolutionLevel (not UI unlock flags): +5 at >=1 (evo), +5 at >=2 (hero).
-    Hero-only cards (evo=2) contribute +10 here; flags would only add +5 and undercount.
+    +1 per card level, +5 if evolution unlocked, +5 if hero unlocked.
+    Do not use raw evolutionLevel tiers: evo=2 means hero-only (not evo+hero).
     """
     total = int(level or 0)
-    evo = int(evolution_level or 0)
-    if evo >= 1:
+    if evolution_unlocked:
         total += 5
-    if evo >= 2:
+    if hero_unlocked:
         total += 5
     return total
 
@@ -133,15 +137,15 @@ _RARITY_COUNT_FIELDS = {
 }
 
 
-def _tower_princess_collection_points(player: dict) -> int:
-    """Tower Princess level from supportCards (matches in-game collection level)."""
-    for raw in player.get("supportCards") or []:
-        if raw.get("name") != "Tower Princess":
-            continue
-        rarity = (raw.get("rarity") or "common").lower()
-        api_level = raw.get("level")
-        return to_display_level(int(api_level) if api_level is not None else None, rarity) or 0
-    return 0
+def _support_card_display_level(raw: dict) -> int:
+    rarity = (raw.get("rarity") or "common").lower()
+    api_level = raw.get("level")
+    return to_display_level(int(api_level) if api_level is not None else None, rarity) or 0
+
+
+def _tower_troops_collection_points(player: dict) -> int:
+    """Sum display levels of all tower troops from supportCards."""
+    return sum(_support_card_display_level(raw) for raw in player.get("supportCards") or [])
 
 
 def build_collection_stats_from_entries(entries: list[dict]) -> dict:
@@ -158,16 +162,21 @@ def build_collection_stats_from_entries(entries: list[dict]) -> dict:
         if level:
             by_level[int(level)] = by_level.get(int(level), 0) + 1
 
-        evo_unlocked = bool(card.get("has_evolution_unlocked"))
-        hero_unlocked = bool(card.get("has_hero_unlocked"))
-        if card.get("evolution_unlocked") or card.get("evolution_stat") or card.get("has_evolution_unlocked"):
+        evo_unlocked = bool(
+            card.get("evolution_unlocked")
+            or card.get("evolution_stat")
+            or card.get("has_evolution_unlocked")
+        )
+        hero_unlocked = bool(card.get("has_hero_unlocked") or card.get("hero_unlocked"))
+        if evo_unlocked:
             evolution_count += 1
         if hero_unlocked:
             hero_count += 1
 
         collection_level += _card_collection_points(
             int(level) if level else 0,
-            int(card.get("evolution_level") or 0),
+            evolution_unlocked=evo_unlocked,
+            hero_unlocked=hero_unlocked,
         )
 
         rarity = (card.get("rarity") or "").lower()
@@ -211,7 +220,7 @@ def build_collection_stats_from_player(player: dict) -> dict:
             "star_level": star_level,
         })
     stats = build_collection_stats_from_entries(rows)
-    stats["collection_level"] += _tower_princess_collection_points(player)
+    stats["collection_level"] += _tower_troops_collection_points(player)
     return stats
 
 
@@ -349,7 +358,7 @@ async def build_player_collection(player: dict) -> dict:
 
     owned_cards = sum(1 for c in card_entries if c["owned"])
     collection_stats = build_collection_stats_from_entries(card_entries)
-    collection_stats["collection_level"] += _tower_princess_collection_points(player)
+    collection_stats["collection_level"] += _tower_troops_collection_points(player)
 
     return {
         "cards": card_entries,
