@@ -20,7 +20,7 @@ from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, norma
 logger = logging.getLogger(__name__)
 
 _refresh_lock = asyncio.Lock()
-CACHE_VERSION = 5
+CACHE_VERSION = 6
 DEFAULT_LIMIT = 10
 _FETCH_CONCURRENCY = 5
 
@@ -29,6 +29,8 @@ _SKIP_BATTLE_TYPES = frozenset({
 })
 
 _LADDER_BATTLE_TYPES = frozenset({"pvp", "pathoflegend", "trail"})
+# Top-players board is Path of Legend — prefer that deck, then trail, then ladder PvP.
+_LADDER_DECK_PRIORITY = ("pathoflegend", "trail", "pvp")
 
 
 @dataclass
@@ -77,6 +79,28 @@ def _latest_deck_from_battlelog(tag: str, battles: list) -> list[dict]:
         parsed = cards_from_team(team)
         if len(parsed) == 8:
             return parsed
+    return []
+
+
+def _latest_ladder_deck_from_battlelog(tag: str, battles: list) -> list[dict]:
+    """Most recent Ranked / ladder deck with in-game slot order (battlelog cards[])."""
+    tag_norm = normalize_tag(tag)
+    for want in _LADDER_DECK_PRIORITY:
+        for battle in battles:
+            team = battle.get("team", [{}])[0]
+            if normalize_tag(team.get("tag") or "") != tag_norm:
+                continue
+            btype = (battle.get("type") or "").lower()
+            if btype != want:
+                continue
+            raw = [c for c in (team.get("cards") or []) if c.get("name")]
+            if len(raw) != 8:
+                continue
+            # Preserve API order exactly — this matches the in-game deck grid.
+            parsed = [parse_battle_card(c) for c in raw]
+            for i, card in enumerate(parsed):
+                card["slot"] = i
+            return normalize_deck_upgrades(parsed)
     return []
 
 
@@ -147,7 +171,11 @@ async def _build_player_entry(client: ClashRoyaleClient, item: dict) -> dict | N
             client.get_battlelog(tag),
         )
         trophies = int(player.get("trophies") or item.get("eloRating") or 0)
-        deck_cards = _cards_from_current_deck(player)
+        # Leaderboard = Path of Legend: show the Ranked deck (slot order from battlelog),
+        # not currentDeck which is often a casual / Trophy Road loadout.
+        deck_cards = _latest_ladder_deck_from_battlelog(tag, battles)
+        if not deck_cards:
+            deck_cards = _cards_from_current_deck(player)
         if not deck_cards:
             deck_cards = _latest_deck_from_battlelog(tag, battles)
         if deck_cards:
@@ -160,6 +188,9 @@ async def _build_player_entry(client: ClashRoyaleClient, item: dict) -> dict | N
         return None
 
     deck_cards = normalize_deck_upgrades(deck_cards)
+    # Keep battle/currentDeck sequence — re-stamp slots after upgrade normalization.
+    for i, card in enumerate(deck_cards):
+        card["slot"] = i
     names = [c["name"] for c in deck_cards]
     card_infos = [deck_card_info_from_parsed(c, slot=i) for i, c in enumerate(deck_cards)]
     elixirs = [c["cost"] for c in card_infos if c["cost"]]
