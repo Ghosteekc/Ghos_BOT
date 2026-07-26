@@ -189,6 +189,17 @@ async def cmd_cancel_link(message: Message, state: FSMContext) -> None:
     await message.answer(LINK_CANCELLED)
 
 
+@router.message(Command("cancel"))
+async def cmd_cancel_idle(message: Message, state: FSMContext) -> None:
+    """Handle /cancel outside link flow — avoid silent 'Update is not handled'."""
+    await _clear_link_state(state)
+    await message.answer(
+        "Сейчас нечего отменять.\n\n"
+        "• Привязать аккаунт: <code>/link #ВАШТЕГ</code>\n"
+        "• Отвязать аккаунт Clash Royale: <code>/unlink</code>"
+    )
+
+
 @router.message(F.text.in_({REGISTRATION_BUTTON, LEGACY_SUBSCRIPTION_BUTTON}))
 async def btn_registration(message: Message, state: FSMContext) -> None:
     await _prompt_link_tag(message, state)
