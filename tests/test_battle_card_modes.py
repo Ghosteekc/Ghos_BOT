@@ -89,3 +89,45 @@ def test_dual_path_knight():
     hero_card = {**evo_card, "evolutionLevel": 2}
     assert battle_card_modes(evo_card) == (1, False)
     assert battle_card_modes(hero_card) == (0, True)
+
+
+def test_two_evo_plus_two_champions_demotes_extra_evo():
+    """March 2026: max 3 specials — 2 evo + 2 champions is illegal."""
+    from bot.services.card_icons import normalize_deck_upgrades
+
+    cards = [
+        {"name": "P.E.K.K.A", "evolution_level": 1, "is_hero": False, "rarity": "epic", "cost": 7, "icon": ""},
+        {"name": "Monk", "evolution_level": 0, "is_hero": False, "rarity": "champion", "cost": 5, "icon": ""},
+        {"name": "Ram Rider", "evolution_level": 1, "is_hero": False, "rarity": "legendary", "cost": 5, "icon": ""},
+        {"name": "Little Prince", "evolution_level": 0, "is_hero": False, "rarity": "champion", "cost": 3, "icon": ""},
+        {"name": "Firecracker", "evolution_level": 0, "is_hero": False, "rarity": "common", "cost": 3, "icon": ""},
+        {"name": "Arrows", "evolution_level": 0, "is_hero": False, "rarity": "common", "cost": 3, "icon": ""},
+        {"name": "Goblin Curse", "evolution_level": 0, "is_hero": False, "rarity": "rare", "cost": 2, "icon": ""},
+        {"name": "Skeleton Army", "evolution_level": 0, "is_hero": False, "rarity": "epic", "cost": 3, "icon": ""},
+    ]
+    result = normalize_deck_upgrades(cards)
+    evo_count = sum(1 for c in result if int(c.get("evolution_level") or 0) >= 1)
+    champ_count = sum(1 for c in result if (c.get("rarity") or "").lower() == "champion")
+    assert champ_count == 2
+    assert evo_count == 1
+    assert evo_count + champ_count <= 3
+    # Keep first evo (P.E.K.K.A), demote trailing Ram Rider
+    by_name = {c["name"]: c for c in result}
+    assert by_name["P.E.K.K.A"]["evolution_level"] == 1
+    assert by_name["Ram Rider"]["evolution_level"] == 0
+
+
+def test_two_evo_plus_one_hero_allowed():
+    from bot.services.card_icons import normalize_deck_upgrades
+
+    cards = [
+        {"name": "Archers", "evolution_level": 1, "is_hero": False, "rarity": "common", "cost": 3, "icon": ""},
+        {"name": "Giant", "evolution_level": 0, "is_hero": True, "rarity": "rare", "cost": 5, "icon": ""},
+        {"name": "Skeletons", "evolution_level": 1, "is_hero": False, "rarity": "common", "cost": 1, "icon": ""},
+        {"name": "Fireball", "evolution_level": 0, "is_hero": False, "rarity": "rare", "cost": 4, "icon": ""},
+    ]
+    result = normalize_deck_upgrades(cards)
+    evo_count = sum(1 for c in result if int(c.get("evolution_level") or 0) >= 1)
+    hero_count = sum(1 for c in result if c.get("is_hero"))
+    assert evo_count == 2
+    assert hero_count == 1

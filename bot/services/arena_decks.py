@@ -426,7 +426,12 @@ def _stats_to_entries(deck_stats: dict[str, dict], *, id_base: int) -> list[dict
     entries: list[dict] = []
     for i, (total, wr, players, data) in enumerate(ranked[:12]):
         cards = data["cards"]
-        variant = data["variants"][0] if data.get("variants") else None
+        variant = None
+        variants = data.get("variants") or []
+        if variants:
+            from bot.services.card_icons import merge_deck_variants
+
+            variant = merge_deck_variants(variants)
         card_infos, avg = _cards_to_infos(cards, variant)
         if total:
             desc = f"Арена · {players} игрок(ов) · {wr:.0f}% · {total} боёв"

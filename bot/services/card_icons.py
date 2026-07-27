@@ -7,6 +7,8 @@ from bot.services.card_registry import get_card_info
 
 MAX_EVOLUTIONS_PER_DECK = 2
 MAX_HEROES_PER_DECK = 2
+# March 2026: 1 Evolution + 1 Hero/Champion + 1 Wild (= evo OR hero/champion).
+MAX_SPECIAL_SLOTS_PER_DECK = 3
 
 
 def pick_icon_urls(icon_urls: dict | None, *, evolution_level: int = 0, hero_level: int = 0) -> str:
@@ -122,30 +124,80 @@ def cards_from_team(team: dict) -> list[dict]:
     return normalize_deck_upgrades(parsed)
 
 
+def _card_rarity(card: dict) -> str:
+    rarity = (card.get("rarity") or "").lower()
+    if rarity:
+        return rarity
+    info = get_card_info(card.get("name") or "") or {}
+    return (info.get("rarity") or "").lower()
+
+
+def _is_champion_card(card: dict) -> bool:
+    return _card_rarity(card) == "champion"
+
+
+def _is_evo_card(card: dict) -> bool:
+    return int(card.get("evolution_level") or 0) >= 1 and not card.get("is_hero")
+
+
+def _uses_hero_slot(card: dict) -> bool:
+    """Heroes and Champions both occupy the Hero / Wild special slots."""
+    return bool(card.get("is_hero")) or _is_champion_card(card)
+
+
 def normalize_deck_upgrades(cards: list[dict]) -> list[dict]:
-    """Game rules: max 2 evolutions and 2 heroes; hero and evo are mutually exclusive."""
+    """Clamp deck upgrades to Clash Royale special-slot rules (March 2026).
+
+    - Per card: hero and evolution are mutually exclusive
+    - Max 2 evolutions, max 2 heroes
+    - Champions always occupy a hero-equivalent slot
+    - Total specials (evolutions + heroes/champions) <= 3
+      (1 Evo slot + 1 Hero slot + 1 Wild)
+    """
     result = [dict(c) for c in cards]
     for card in result:
+        if not card.get("rarity"):
+            card["rarity"] = _card_rarity(card)
         if card.get("is_hero"):
             card["evolution_level"] = 0
         elif int(card.get("evolution_level") or 0) >= 1:
             card["is_hero"] = False
         _refresh_card_icon(card)
 
-    evo_slots = [
-        i for i, c in enumerate(result)
-        if int(c.get("evolution_level") or 0) >= 1 and not c.get("is_hero")
-    ]
+    evo_slots = [i for i, c in enumerate(result) if _is_evo_card(c)]
     if len(evo_slots) > MAX_EVOLUTIONS_PER_DECK:
         for idx in evo_slots[MAX_EVOLUTIONS_PER_DECK:]:
             result[idx]["evolution_level"] = 0
             _refresh_card_icon(result[idx])
 
-    hero_slots = [i for i, c in enumerate(result) if c.get("is_hero")]
-    if len(hero_slots) > MAX_HEROES_PER_DECK:
-        for idx in hero_slots[MAX_HEROES_PER_DECK:]:
+    # Soft-cap explicit hero flags (champions stay — they are always special).
+    hero_flag_slots = [i for i, c in enumerate(result) if c.get("is_hero")]
+    if len(hero_flag_slots) > MAX_HEROES_PER_DECK:
+        for idx in hero_flag_slots[MAX_HEROES_PER_DECK:]:
             result[idx]["is_hero"] = False
             _refresh_card_icon(result[idx])
+
+    # Enforce total special budget: demote trailing evolutions first, then hero flags.
+    while True:
+        evo_slots = [i for i, c in enumerate(result) if _is_evo_card(c)]
+        hero_slots = [i for i, c in enumerate(result) if _uses_hero_slot(c)]
+        if len(evo_slots) + len(hero_slots) <= MAX_SPECIAL_SLOTS_PER_DECK:
+            break
+        if evo_slots:
+            idx = evo_slots[-1]
+            result[idx]["evolution_level"] = 0
+            _refresh_card_icon(result[idx])
+            continue
+        # Only heroes/champions over budget — drop trailing non-champion hero flags.
+        demoted = False
+        for idx in reversed(hero_slots):
+            if result[idx].get("is_hero") and not _is_champion_card(result[idx]):
+                result[idx]["is_hero"] = False
+                _refresh_card_icon(result[idx])
+                demoted = True
+                break
+        if not demoted:
+            break
     return result
 
 
