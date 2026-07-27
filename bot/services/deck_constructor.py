@@ -16,12 +16,17 @@ _SLOT_HERO = {1}
 
 
 def slot_variant(slot_index: int, card_name: str) -> tuple[int, bool]:
+    """Resolve evo/hero for a constructor slot.
+
+    ``maxEvolutionLevel`` alone is not enough: hero-only cards (Magic Archer,
+    Giant, …) also have maxEvolutionLevel >= 1 but no ``evolutionMedium``.
+    """
     info = get_card_info(card_name) or {}
-    max_evo = int(info.get("max_evolution_level") or 0)
+    has_evo = bool(info.get("evolution_icon"))
     has_hero = bool(info.get("hero_icon"))
     if slot_index in _SLOT_HERO and has_hero:
         return 0, True
-    if slot_index in _SLOT_EVO and max_evo >= 1:
+    if slot_index in _SLOT_EVO and has_evo:
         return 1, False
     return 0, False
 
