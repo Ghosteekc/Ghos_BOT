@@ -6,6 +6,7 @@ from bot.services.card_data import get_card_elixir
 from bot.services.card_registry import get_card_info
 
 MAX_EVOLUTIONS_PER_DECK = 2
+MAX_HEROES_PER_DECK = 2
 
 
 def pick_icon_urls(icon_urls: dict | None, *, evolution_level: int = 0, hero_level: int = 0) -> str:
@@ -17,20 +18,73 @@ def pick_icon_urls(icon_urls: dict | None, *, evolution_level: int = 0, hero_lev
     return icons.get("medium") or icons.get("small") or ""
 
 
+def _card_upgrade_icons(card: dict, info: dict | None) -> tuple[bool, bool]:
+    """Whether this card can be a hero / evolution (from battle payload or catalog)."""
+    icons = card.get("iconUrls") or {}
+    has_hero = bool(icons.get("heroMedium") or (info or {}).get("hero_icon"))
+    has_evo = bool(icons.get("evolutionMedium") or (info or {}).get("evolution_icon"))
+    return has_hero, has_evo
+
+
+def battle_card_modes(card: dict, info: dict | None = None) -> tuple[int, bool]:
+    """Map official battlelog fields to (evolution_level, is_hero).
+
+    Clash Royale battlelog does not send ``heroLevel``. Equipped upgrades use
+    ``evolutionLevel`` with catalog icon hints:
+
+    - evo-only (``evolutionMedium``): ``1`` = evolution equipped
+    - hero-only (``heroMedium`` only, e.g. Giant / Dark Prince): ``2`` = hero
+    - dual-path (both icons, ``maxEvolutionLevel`` 3): ``1`` = evo, ``2`` = hero
+    - missing / ``0`` = base card (``heroMedium`` may still appear in iconUrls)
+    """
+    hero_explicit = int(card.get("heroLevel") or 0)
+    if hero_explicit >= 1:
+        return 0, True
+
+    evo_raw = card.get("evolutionLevel")
+    if evo_raw is None:
+        return 0, False
+    evo_val = int(evo_raw)
+    if evo_val <= 0:
+        return 0, False
+
+    has_hero, has_evo = _card_upgrade_icons(card, info)
+
+    if has_hero and not has_evo:
+        # Hero-only cards (Giant, Dark Prince, Balloon, …)
+        return 0, True
+    if has_evo and not has_hero:
+        return 1, False
+    if has_hero and has_evo:
+        if evo_val == 1:
+            return 1, False
+        if evo_val >= 2:
+            return 0, True
+        return 0, False
+
+    # Fallback when icons are missing from payload/catalog
+    max_evo = int(card.get("maxEvolutionLevel") or (info or {}).get("max_evolution_level") or 0)
+    if max_evo >= 3:
+        if evo_val == 1:
+            return 1, False
+        if evo_val >= 2:
+            return 0, True
+    if max_evo == 2 and evo_val >= 2:
+        return 0, True
+    if evo_val >= 1:
+        return 1, False
+    return 0, False
+
+
 def parse_battle_card(card: dict) -> dict:
     """Parse a card object from battlelog or player deck."""
     from bot.services.card_level import to_display_level
 
     icons = card.get("iconUrls") or {}
-    hero = int(card.get("heroLevel") or 0)
-    evo = int(card.get("evolutionLevel") or 0)
-    if hero >= 1:
-        evo = 0
-    elif evo >= 1:
-        hero = 0
-
     name = card.get("name") or ""
     info = get_card_info(name) if name else None
+    evo, is_hero = battle_card_modes(card, info)
+    hero = 1 if is_hero else 0
     rarity = (card.get("rarity") or (info.get("rarity") if info else "") or "common").lower()
     icon = pick_icon_urls(icons, evolution_level=evo, hero_level=hero)
     if evo < 1 and hero < 1:
@@ -53,7 +107,7 @@ def parse_battle_card(card: dict) -> dict:
         "name": name,
         "icon": icon,
         "evolution_level": evo,
-        "is_hero": hero >= 1,
+        "is_hero": is_hero,
         "cost": int(cost or 0),
         "rarity": rarity,
         "level": display_level,
@@ -69,11 +123,13 @@ def cards_from_team(team: dict) -> list[dict]:
 
 
 def normalize_deck_upgrades(cards: list[dict]) -> list[dict]:
-    """Game rules: max 2 evolutions; hero and evo are mutually exclusive per card."""
+    """Game rules: max 2 evolutions and 2 heroes; hero and evo are mutually exclusive."""
     result = [dict(c) for c in cards]
     for card in result:
         if card.get("is_hero"):
             card["evolution_level"] = 0
+        elif int(card.get("evolution_level") or 0) >= 1:
+            card["is_hero"] = False
         _refresh_card_icon(card)
 
     evo_slots = [
@@ -83,6 +139,12 @@ def normalize_deck_upgrades(cards: list[dict]) -> list[dict]:
     if len(evo_slots) > MAX_EVOLUTIONS_PER_DECK:
         for idx in evo_slots[MAX_EVOLUTIONS_PER_DECK:]:
             result[idx]["evolution_level"] = 0
+            _refresh_card_icon(result[idx])
+
+    hero_slots = [i for i, c in enumerate(result) if c.get("is_hero")]
+    if len(hero_slots) > MAX_HEROES_PER_DECK:
+        for idx in hero_slots[MAX_HEROES_PER_DECK:]:
+            result[idx]["is_hero"] = False
             _refresh_card_icon(result[idx])
     return result
 
