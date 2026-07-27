@@ -19,6 +19,8 @@ def pick_icon_urls(icon_urls: dict | None, *, evolution_level: int = 0, hero_lev
 
 def parse_battle_card(card: dict) -> dict:
     """Parse a card object from battlelog or player deck."""
+    from bot.services.card_level import to_display_level
+
     icons = card.get("iconUrls") or {}
     hero = int(card.get("heroLevel") or 0)
     evo = int(card.get("evolutionLevel") or 0)
@@ -29,6 +31,7 @@ def parse_battle_card(card: dict) -> dict:
 
     name = card.get("name") or ""
     info = get_card_info(name) if name else None
+    rarity = (card.get("rarity") or (info.get("rarity") if info else "") or "common").lower()
     icon = pick_icon_urls(icons, evolution_level=evo, hero_level=hero)
     if evo < 1 and hero < 1:
         icon = icons.get("medium") or icons.get("small") or icon
@@ -42,12 +45,18 @@ def parse_battle_card(card: dict) -> dict:
         if evo < 1 and hero < 1:
             icon = reg_icons["medium"] or icon
     cost = card.get("elixirCost") or (info.get("elixir") if info else None) or get_card_elixir(name)
+    api_level = card.get("level")
+    display_level = (
+        to_display_level(int(api_level), rarity) if api_level is not None else None
+    )
     return {
         "name": name,
         "icon": icon,
         "evolution_level": evo,
         "is_hero": hero >= 1,
         "cost": int(cost or 0),
+        "rarity": rarity,
+        "level": display_level,
         "slot": 0,
     }
 
@@ -96,15 +105,20 @@ def _refresh_card_icon(card: dict) -> None:
 def deck_card_info_from_parsed(parsed: dict, *, slot: int | None = None) -> dict:
     name = parsed["name"]
     slot_val = slot if slot is not None else parsed.get("slot", 0)
-    return {
+    info = {
         "id": f"{name.lower().replace(' ', '-')}-{slot_val}",
         "name": name,
         "icon": parsed.get("icon") or "",
+        "rarity": parsed.get("rarity") or "common",
         "cost": parsed.get("cost") or get_card_elixir(name),
         "evolution_level": parsed.get("evolution_level") or 0,
         "is_hero": bool(parsed.get("is_hero")),
         "slot": slot_val,
     }
+    level = parsed.get("level")
+    if level is not None:
+        info["level"] = int(level)
+    return info
 
 
 def merge_deck_variants(variants: list[list[dict]]) -> list[dict]:

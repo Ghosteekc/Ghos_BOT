@@ -320,6 +320,7 @@ class DeckCardInfo(BaseModel):
     evolution_level: int = 0
     is_hero: bool = False
     slot: int = 0
+    level: int | None = None
 
 
 class WinrateEntry(BaseModel):
