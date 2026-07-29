@@ -47,6 +47,7 @@ class UserSettings(Base):
     notifications: Mapped[bool] = mapped_column(Boolean, default=True)
     telegram_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
     haptic_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    haptic_intensity: Mapped[str] = mapped_column(String(10), default="standard")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -145,7 +146,19 @@ async def init_db() -> None:
             await conn.execute(
                 text("ALTER TABLE user_settings ADD COLUMN haptic_enabled BOOLEAN DEFAULT 1 NOT NULL")
             )
-            logger.info("Added 'haptic_enabled' column to user_settings table")
+            logging.getLogger(__name__).info("Added 'haptic_enabled' column to user_settings table")
+
+        result = await conn.execute(
+            text("SELECT COUNT(*) FROM pragma_table_info('user_settings') WHERE name='haptic_intensity'")
+        )
+        if result.scalar_one_or_none() == 0:
+            await conn.execute(
+                text(
+                    "ALTER TABLE user_settings ADD COLUMN haptic_intensity VARCHAR(10) "
+                    "DEFAULT 'standard' NOT NULL"
+                )
+            )
+            logger.info("Added 'haptic_intensity' column to user_settings table")
 
     await _migrate_battle_cache_opponent()
     await _migrate_battle_cache_trophy()

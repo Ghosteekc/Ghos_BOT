@@ -10,12 +10,16 @@ from bot.models.database import UserSettings
 
 
 def settings_to_response(row: UserSettings) -> SettingsResponse:
+    intensity = getattr(row, "haptic_intensity", None) or "standard"
+    if intensity not in ("weak", "standard", "strong"):
+        intensity = "standard"
     return SettingsResponse(
         theme=row.theme,  # type: ignore[arg-type]
         language=row.language,  # type: ignore[arg-type]
         notifications=row.notifications,
         telegram_notifications=row.telegram_notifications,
         haptic_enabled=row.haptic_enabled,
+        haptic_intensity=intensity,  # type: ignore[arg-type]
     )
 
 

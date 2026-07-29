@@ -30,18 +30,21 @@ async def _run_persist_roundtrip() -> None:
         assert defaults.theme == "dark"
         assert defaults.notifications is True
         assert defaults.haptic_enabled is True
+        assert defaults.haptic_intensity == "standard"
 
     async with session_factory() as session:
         updated = await update_user_settings(
             session,
             user_id,
-            SettingsUpdateRequest(haptic_enabled=False),
+            SettingsUpdateRequest(haptic_enabled=False, haptic_intensity="weak"),
         )
         assert updated.haptic_enabled is False
+        assert updated.haptic_intensity == "weak"
 
     async with session_factory() as session:
         reloaded = await load_settings_response(session, user_id)
         assert reloaded.haptic_enabled is False
+        assert reloaded.haptic_intensity == "weak"
 
     async with session_factory() as session:
         updated = await update_user_settings(

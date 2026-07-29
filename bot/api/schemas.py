@@ -503,6 +503,7 @@ class SettingsResponse(BaseModel):
     notifications: bool = True
     telegram_notifications: bool = True
     haptic_enabled: bool = True
+    haptic_intensity: Literal["weak", "standard", "strong"] = "standard"
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -511,6 +512,7 @@ class SettingsUpdateRequest(BaseModel):
     notifications: bool | None = None
     telegram_notifications: bool | None = None
     haptic_enabled: bool | None = None
+    haptic_intensity: Literal["weak", "standard", "strong"] | None = None
 
     model_config = {"extra": "forbid"}
 

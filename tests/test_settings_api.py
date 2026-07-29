@@ -35,6 +35,7 @@ async def _run_get_creates_defaults() -> None:
         body = await get_settings(user=user, session=session)
         assert body.theme == "dark"
         assert body.haptic_enabled is True
+        assert body.haptic_intensity == "standard"
 
         after = await session.execute(select(UserSettings).where(UserSettings.user_id == user.id))
         assert after.scalar_one_or_none() is not None
@@ -48,18 +49,24 @@ async def _run_put_then_get_roundtrip() -> None:
         await get_settings(user=user, session=session)
 
         saved = await update_settings(
-            payload=SettingsUpdateRequest(haptic_enabled=False, theme="light"),
+            payload=SettingsUpdateRequest(
+                haptic_enabled=False,
+                theme="light",
+                haptic_intensity="strong",
+            ),
             user=user,
             session=session,
         )
         assert saved.haptic_enabled is False
         assert saved.theme == "light"
         assert saved.telegram_notifications is True
+        assert saved.haptic_intensity == "strong"
 
         reloaded = await get_settings(user=user, session=session)
         assert reloaded.haptic_enabled is False
         assert reloaded.theme == "light"
         assert reloaded.notifications is True
+        assert reloaded.haptic_intensity == "strong"
     finally:
         await session.close()
 
@@ -80,6 +87,15 @@ async def _run_partial_put_preserves_fields() -> None:
         assert patched.theme == "auto"
         assert patched.notifications is False
         assert patched.haptic_enabled is False
+        assert patched.haptic_intensity == "standard"
+
+        intensity = await update_settings(
+            payload=SettingsUpdateRequest(haptic_intensity="weak"),
+            user=user,
+            session=session,
+        )
+        assert intensity.haptic_intensity == "weak"
+        assert intensity.haptic_enabled is False
     finally:
         await session.close()
 
