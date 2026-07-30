@@ -485,6 +485,8 @@ def _replace_weakest_filler(
     replacement: str,
     pair_synergy: PairSynergyFn,
 ) -> list[str]:
+    from bot.services.card_data import card_has_role
+
     core_set = set(core)
     # Prefer dropping a non-attack filler so we never remove an existing push card.
     fillers = [c for c in deck if c not in core_set and not is_attack_win(c)]
@@ -492,9 +494,27 @@ def _replace_weakest_filler(
         fillers = [c for c in deck if c not in core_set]
     if not fillers or replacement in deck:
         return deck
+
+    soft_roles = ("big_spell", "small_spell", "air_defense", "building")
+
+    def unique_soft_cover(card: str) -> int:
+        """1 = карта единственная с soft-ролью — не выкидывать."""
+        for role in soft_roles:
+            if not card_has_role(card, role):
+                continue
+            others = any(card_has_role(x, role) for x in deck if x != card)
+            if not others:
+                return 1
+        return 0
+
     worst = min(
         fillers,
-        key=lambda c: sum(pair_synergy(c, x) for x in deck if x != c),
+        key=lambda c: (
+            unique_soft_cover(c),
+            sum(pair_synergy(c, x) for x in deck if x != c),
+            get_card_elixir(c),
+            c,
+        ),
     )
     out = list(deck)
     out[out.index(worst)] = replacement

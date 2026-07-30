@@ -461,7 +461,26 @@ def detect_archetype_from_cards(cards: list[str]) -> str:
             best_score = s
             best = arch
 
-    # Слишком слабый сигнал — Meta
-    if best_score < 38.0:
+    meta_score = score_archetype(cards, "Meta")
+    # Слабый сигнал или Meta лучше узкого ярлыка (Bridge Spam без маркеров и т.п.)
+    if best_score < 42.0 or meta_score >= best_score + 2.0:
         return "Meta"
+
+    # Архетипы с жёсткими якорями — без якоря не назначаем
+    anchors = ARCHETYPE_ANCHORS.get(best, set())
+    card_set = set(cards)
+    if best in {"Lava", "Siege", "Bridge Spam", "Graveyard", "Log Bait", "Royal Giant", "Fireball Bait"}:
+        if not (card_set & anchors):
+            return "Meta"
+        if best == "Lava" and not (card_set & {"Lava Hound", "Balloon"}):
+            return "Meta"
+        if best == "Siege" and not (card_set & {"X-Bow", "Mortar"}):
+            return "Meta"
+        if best == "Bridge Spam" and not (card_set & _BRIDGE_MARKERS):
+            return "Meta"
+        if best == "Fireball Bait" and not (card_set & {"Goblin Barrel", "Princess", "Dart Goblin"}):
+            return "Meta"
+        if best == "Log Bait" and "Goblin Barrel" not in card_set:
+            return "Meta"
+
     return best

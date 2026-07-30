@@ -77,7 +77,7 @@ def _apply_spell_counter_rules(name: str, strong: list[str], partial: list[str])
 
 def _deckshop_counter_tier(counter_card: str, target: str) -> str | None:
     """DeckShop counters_vs_attack: counter_card бьёт target."""
-    row = _MATCHUPS.get(counter_card)
+    row = _matchups().get(counter_card)
     if not row:
         return None
     if target in row.counters_strong:
@@ -173,7 +173,16 @@ def _build_index(deckshop_counters: dict[str, dict]) -> dict[str, CardMatchups]:
 
 
 _DECKSHOP_COUNTERS, _DECKSHOP_SOURCE, _DECKSHOP_STATUS = load_deckshop_snapshot()
-_MATCHUPS: dict[str, CardMatchups] = _build_index(_DECKSHOP_COUNTERS)
+# Ленивая индексация: _build_index вызывает is_pure_spell → get_card_profile.
+# Eager init на import ломал роли через цикл deck_builder package.
+_MATCHUPS: dict[str, CardMatchups] | None = None
+
+
+def _matchups() -> dict[str, CardMatchups]:
+    global _MATCHUPS
+    if _MATCHUPS is None:
+        _MATCHUPS = _build_index(_DECKSHOP_COUNTERS)
+    return _MATCHUPS
 
 
 def deckshop_matchup_status() -> dict:
@@ -186,11 +195,11 @@ def deckshop_available() -> bool:
 
 
 def get_matchups(card: str) -> CardMatchups | None:
-    return _MATCHUPS.get(card)
+    return _matchups().get(card)
 
 
 def ru(card: str, *, short: bool = True) -> str:
-    row = _MATCHUPS.get(card)
+    row = _matchups().get(card)
     if row and row.name_ru:
         return row.name_ru if not short else card_name_ru(card, short=True) or row.name_ru
     return card_name_ru(card, short=short) or card
@@ -271,7 +280,7 @@ def synergy_between(a: str, b: str) -> str | None:
     """Есть ли синергия a→b: strong / partial / None."""
     if a == b:
         return None
-    row = _MATCHUPS.get(a)
+    row = _matchups().get(a)
     if not row:
         if b in SYNERGIES.get(a, []):
             return "strong"
@@ -318,7 +327,7 @@ def synergy_partners(
     limit: int = 6,
 ) -> tuple[list[str], list[str]]:
     """Сильные и слабые синергичные карты (из pool или все известные)."""
-    row = _MATCHUPS.get(card)
+    row = _matchups().get(card)
     if not row:
         legacy = SYNERGIES.get(card, [])
         if pool is not None:

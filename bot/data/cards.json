@@ -954,6 +954,7 @@
       "type": "troop",
       "roles": [
         "anti_swarm",
+        "counterpush",
         "defensive",
         "mini_tank",
         "splash"

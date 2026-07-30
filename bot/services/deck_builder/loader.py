@@ -141,4 +141,9 @@ class DeckDatabase:
 def get_database() -> DeckDatabase:
     db = DeckDatabase()
     db.load()
+    # Сбрасываем профили, если они успели закэшироваться из CARD_META
+    # во время циклического импорта (card_matchups ↔ deck_builder).
+    from bot.services.card_profile import clear_card_profile_cache
+
+    clear_card_profile_cache()
     return db

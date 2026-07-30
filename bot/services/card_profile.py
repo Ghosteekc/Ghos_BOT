@@ -13,7 +13,11 @@ SYNERGIES и локальные множества в analyzer/improver) пок�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
+
+# Не используем lru_cache: при циклическом импорте (card_matchups → is_pure_spell →
+# get_card_profile → get_database → package init → balance → card_matchups)
+# fallback из CARD_META кэшировался навсегда и ломал big_spell/air_defense/анализ.
+_PROFILE_CACHE: dict[str, "CardProfile"] = {}
 
 
 @dataclass(frozen=True)
@@ -98,8 +102,23 @@ class CardProfile:
         return self.name in WIN_CONDITIONS
 
 
+_SMALL_SPELL_META = frozenset({
+    "Zap", "The Log", "Giant Snowball", "Barbarian Barrel", "Arrows", "Rage",
+    "Royal Delivery", "Vines",
+})
+_BIG_SPELL_META = frozenset({
+    "Fireball", "Poison", "Rocket", "Lightning", "Freeze", "Earthquake", "Tornado",
+})
+_AIR_META = frozenset({
+    "Musketeer", "Mega Minion", "Inferno Dragon", "Minions", "Archers", "Dart Goblin",
+    "Electro Wizard", "Ice Wizard", "Wizard", "Baby Dragon", "Executioner", "Hunter",
+    "Tesla", "Inferno Tower", "Firecracker", "Mother Witch", "Flying Machine",
+    "Magic Archer", "Phoenix", "Little Prince", "Archer Queen",
+})
+
+
 def _profile_from_meta(name: str) -> CardProfile:
-    """Fallback, если карты нет в cards.json."""
+    """Fallback, если карты нет в cards.json или DB ещё не загружена."""
     from bot.services.card_data import CARD_META, WIN_CONDITIONS
 
     meta = CARD_META.get(name, {})
@@ -109,14 +128,23 @@ def _profile_from_meta(name: str) -> CardProfile:
     roles: set[str] = set()
     if base_role == "air":
         roles.add("air_defense")
-    elif base_role:
+    elif base_role and base_role not in {"spell", "building"}:
         roles.add(base_role)
     if name in WIN_CONDITIONS:
         roles.add("win_condition")
-    if card_type == "spell":
+    if card_type == "spell" or base_role == "spell":
         roles.add("spell")
-    if card_type == "building":
+        if name not in WIN_CONDITIONS:
+            if name in _SMALL_SPELL_META or elixir <= 2:
+                roles.add("small_spell")
+            if name in _BIG_SPELL_META or (elixir >= 4 and name not in _SMALL_SPELL_META):
+                roles.add("big_spell")
+    if card_type == "building" or base_role == "building":
         roles.add("building")
+    if name in _AIR_META or base_role == "air":
+        roles.add("air_defense")
+    if base_role == "splash":
+        roles.add("splash")
     if not roles:
         roles.add("support")
     return CardProfile(
@@ -127,21 +155,41 @@ def _profile_from_meta(name: str) -> CardProfile:
     )
 
 
-@lru_cache(maxsize=512)
+def clear_card_profile_cache() -> None:
+    """Сброс после успешной загрузки DeckDatabase."""
+    _PROFILE_CACHE.clear()
+
+
 def get_card_profile(name: str) -> CardProfile:
     """Единая точка доступа к свойствам карты."""
+    cached = _PROFILE_CACHE.get(name)
+    if cached is not None:
+        return cached
+
+    rec = None
+    db_ready = False
     try:
         from bot.services.deck_builder.loader import get_database
 
-        rec = get_database().get_card(name)
+        db = get_database()
+        db_ready = True
+        rec = db.get_card(name)
     except Exception:
-        rec = None
+        # Цикл импорта / частичная инициализация — не кэшируем fallback.
+        return _profile_from_meta(name)
 
     if rec is not None:
-        return CardProfile(
+        profile = CardProfile(
             name=name,
             elixir=int(rec.elixir),
             card_type=str(rec.type or "troop"),
             roles=frozenset(rec.roles),
         )
-    return _profile_from_meta(name)
+        _PROFILE_CACHE[name] = profile
+        return profile
+
+    profile = _profile_from_meta(name)
+    # Карты реально нет в каталоге — можно кэшировать meta.
+    if db_ready:
+        _PROFILE_CACHE[name] = profile
+    return profile

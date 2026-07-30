@@ -68,7 +68,7 @@ ANTI_SWARM = {
 COUNTERPUSH = {
     "Bandit", "Dark Prince", "Prince", "Battle Ram", "Royal Ghost", "Miner",
     "Hog Rider", "Wall Breakers", "Ram Rider", "Elite Barbarians", "Golden Knight",
-    "Mighty Miner",
+    "Mighty Miner", "Valkyrie",
 }
 DPS = {
     "Musketeer", "Wizard", "Electro Wizard", "Hunter", "Magic Archer", "Mini P.E.K.K.A",

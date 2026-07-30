@@ -43,6 +43,7 @@ from bot.services.deck_builder.constants import (
     ROLE_ANTI_TANK,
     ROLE_BIG_SPELL,
     ROLE_BUILDING,
+    ROLE_COUNTERPUSH,
     ROLE_CYCLE,
     ROLE_DEFENSIVE,
     ROLE_DPS,
@@ -1438,9 +1439,12 @@ def _apply_suggestion(
     if category == "anti_air":
         avoid_roles = frozenset({ROLE_AIR})
     elif category == "point_target":
-        avoid_roles = frozenset({ROLE_ANTI_TANK, ROLE_DEFENSIVE})
+        # Не выкидываем splash/mini_tank (Валькирия) ради здания «anti_tank».
+        avoid_roles = frozenset({
+            ROLE_ANTI_TANK, ROLE_DEFENSIVE, ROLE_MINI_TANK, ROLE_SPLASH, ROLE_COUNTERPUSH,
+        })
     elif category == "defense":
-        avoid_roles = frozenset({ROLE_BUILDING, ROLE_DEFENSIVE, ROLE_SPLASH})
+        avoid_roles = frozenset({ROLE_BUILDING, ROLE_DEFENSIVE, ROLE_SPLASH, ROLE_MINI_TANK, ROLE_COUNTERPUSH})
 
     plan = build_game_plan(deck, archetype=intent.archetype, intent=intent)
     solution = search_gap_solution(

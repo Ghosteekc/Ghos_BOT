@@ -460,15 +460,30 @@ def _pick_pros(
     game_plan: GamePlan | None,
 ) -> list[str]:
     """Плюсы выбранной карты — по осям CandidateRating и категории gap."""
+    from bot.services.card_data import card_has_role, is_building
+
     pros: list[str] = []
     cat_pro = _CATEGORY_PRO.get(category)
     if cat_pro:
         pros.append(cat_pro)
 
+    # «Контрпуш» только если карта реально даёт давление после защиты,
+    # а не чистое здание вроде Надгробия.
+    pick = rating.card
+    can_counterpush = (
+        card_has_role(pick, "counterpush")
+        or card_has_role(pick, "mini_tank")
+        or (
+            not is_building(pick)
+            and category in {"anti_air", "support", "splash"}
+            and rating.gameplan_fit >= 52
+        )
+    )
     if (
         intent.attack_bias >= 0.55
         and category in {"anti_air", "defense", "support", "splash", "point_target"}
         and rating.gameplan_fit >= 52
+        and can_counterpush
     ):
         pros.append("усиливает контрпуш")
 

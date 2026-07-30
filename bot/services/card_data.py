@@ -257,7 +257,11 @@ POINT_TARGET_THREATS = {
     "Mega Knight", "Dark Prince", "Elite Barbarians", "Boss Bandit", "Rune Giant",
 }
 
-POINT_TARGET_COUNTERS = {"Guards", "Knight", "Ice Golem", "Skeleton Army", "Ronin"}
+POINT_TARGET_COUNTERS = {
+    "Guards", "Knight", "Ice Golem", "Skeleton Army", "Ronin",
+    "Valkyrie", "Mini P.E.K.K.A", "P.E.K.K.A", "Dark Prince", "Barbarians",
+    "Cannon", "Tesla", "Tombstone", "Inferno Tower", "Mega Knight",
+}
 
 # На заклинания нет карты-контры, кроме Монаха — отражает Фаербол и Ракету
 SPELL_CARD_COUNTERS: dict[str, list[str]] = {
@@ -333,7 +337,13 @@ def is_point_target_threat(name: str) -> bool:
 
 
 def has_point_target_answer(cards: list[str]) -> bool:
-    return bool(set(cards) & POINT_TARGET_COUNTERS)
+    if bool(set(cards) & POINT_TARGET_COUNTERS):
+        return True
+    # Роли: anti_tank / mini_tank закрывают точечных танков не хуже Guards.
+    return any(
+        card_has_role(c, "anti_tank") or card_has_role(c, "mini_tank")
+        for c in cards
+    )
 
 
 def is_pure_spell(name: str) -> bool:

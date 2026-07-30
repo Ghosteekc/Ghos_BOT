@@ -88,27 +88,27 @@ def validate_builder_variant(
     checks = {
         "balance": (
             not breakdown.hard_issues
-            and breakdown.total >= 58.0
+            and breakdown.total >= 52.0
             and not {"elixir", "big_spell", "small_spell"} & set(breakdown.soft_issues)
         ),
-        "synergy": breakdown.synergy >= 55.0,
+        "synergy": breakdown.synergy >= 30.0,
         "counter_coverage": (
-            breakdown.anti_air >= 55.0
-            and breakdown.anti_swarm >= 60.0
-            and breakdown.defense >= 35.0
+            breakdown.anti_air >= 50.0
+            and breakdown.anti_swarm >= 55.0
+            and breakdown.defense >= 30.0
         ),
         "win_condition": win_plan.primary_win,
-        "air_defense": breakdown.anti_air >= 55.0,
+        "air_defense": breakdown.anti_air >= 50.0,
         "ground_defense": has_ground_defense,
         "cycle": "cycle" not in breakdown.soft_issues,
         "spell_balance": (
-            breakdown.spell_balance >= 65.0
+            breakdown.spell_balance >= 55.0
             and not {"big_spell", "small_spell"} & set(breakdown.soft_issues)
         ),
         "building": (
             not intent.require_building or "building" not in breakdown.soft_issues
         ),
-        "archetype_identity": breakdown.archetype_fit >= 50.0,
+        "archetype_identity": breakdown.archetype_fit >= 35.0 or archetype in {"Meta", "Control"},
         "deck_identity": (
             set(mandatory_cards).issubset(deck)
             and all(roles.values())
