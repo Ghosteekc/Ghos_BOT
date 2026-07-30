@@ -7,7 +7,6 @@ ROLE_WIN = "win_condition"
 ROLE_TANK = "tank"
 ROLE_MINI_TANK = "mini_tank"
 ROLE_SPLASH = "splash"
-ROLE_SPELL = "spell"
 ROLE_SMALL_SPELL = "small_spell"
 ROLE_BIG_SPELL = "big_spell"
 ROLE_BUILDING = "building"
@@ -43,9 +42,6 @@ WEIGHT_ELIXIR = 15.0
 WEIGHT_SYNERGY = 15.0
 WEIGHT_POPULARITY = 5.0
 
-MATCH_CONFIDENCE_THRESHOLD = 80.0
-SYNERGY_MIN_THRESHOLD = 80.0
-
 # Диапазон среднего эликсира
 DEFAULT_ELIXIR_MIN = 2.6
 DEFAULT_ELIXIR_MAX = 4.6
@@ -60,21 +56,10 @@ ARCHETYPE_ELIXIR: dict[str, tuple[float, float]] = {
     "Siege": (2.8, 3.6),
     "Control": (3.0, 4.0),
     "Graveyard": (3.2, 4.2),
+    "Split Lane": (2.8, 3.6),
+    "Fireball Bait": (2.8, 3.8),
     "Meta": (2.8, 4.4),
 }
-
-# Приоритет добора (legacy; в finalize используется scoring, не жёсткий цикл).
-FILL_PRIORITY: list[str] = [
-    ROLE_WIN,
-    ROLE_BIG_SPELL,
-    ROLE_SMALL_SPELL,
-    ROLE_AIR,
-    ROLE_MINI_TANK,
-    ROLE_BUILDING,
-    ROLE_DPS,
-    ROLE_CYCLE,
-    ROLE_COUNTERPUSH,
-]
 
 # Карты-якоря архетипов
 ARCHETYPE_ANCHORS: dict[str, set[str]] = {

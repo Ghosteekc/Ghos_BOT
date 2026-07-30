@@ -11,12 +11,11 @@ from bot.services.deck_builder.balance import (
     compute_score_breakdown,
     finalize_deck as balance_finalize_deck,
     hard_constraint_issues,
+    is_attack_win,
     is_playable_balanced,
     is_spell,
-    is_win,
 )
 from bot.services.deck_builder.constants import (
-    ARCHETYPE_ANCHORS,
     ARCHETYPE_ELIXIR,
     ARCHETYPE_PRIMARY_WIN,
     DEFAULT_ELIXIR_MAX,
@@ -63,44 +62,10 @@ def _avg_elixir(cards: list[str], db: DeckDatabase) -> float:
 
 
 def _detect_archetype(core: list[str]) -> str:
-    core_wins = [c for c in core if c in WIN_CONDITIONS]
-    for win in core_wins:
-        if win in {"Lava Hound", "Balloon"}:
-            return "Lava"
-        if win in {"Golem", "Giant", "Electro Giant"}:
-            return "Beatdown"
-        if win == "Royal Giant":
-            return "Royal Giant"
-        if win in {"Hog Rider", "Battle Ram"}:
-            return "Cycle"
-        if win == "Goblin Barrel":
-            return "Log Bait"
-        if win == "Graveyard":
-            return "Graveyard"
-        if win in {"X-Bow", "Mortar"}:
-            return "Siege"
-        if win in {"P.E.K.K.A", "Mega Knight", "Royal Ghost", "Bandit"}:
-            return "Bridge Spam"
-        if win == "Miner":
-            return "Control"
+    """Публичная точка для builder/improver — мультифакторный скоринг."""
+    from bot.services.deck_builder.archetype_detect import detect_archetype_from_cards
 
-    core_set = set(core)
-    best, best_hits = "Meta", 0
-    for archetype, anchors in ARCHETYPE_ANCHORS.items():
-        hits = len(core_set & anchors)
-        if hits > best_hits:
-            best_hits, best = hits, archetype
-    if best_hits > 0:
-        return best
-
-    if any(c in {"X-Bow", "Mortar"} for c in core):
-        return "Siege"
-    avg = _avg_elixir(core, get_database())
-    if avg <= 3.3:
-        return "Cycle"
-    if avg >= 4.0:
-        return "Beatdown"
-    return best
+    return detect_archetype_from_cards(core)
 
 
 def _pair_synergy(db: DeckDatabase, a: str, b: str) -> int:
@@ -188,17 +153,42 @@ def _score_deck_match(
     return ScoredDeck(record=record, score=raw, confidence=confidence, overlap=overlap)
 
 
-def _rank_similar_decks(db: DeckDatabase, core: list[str], archetype: str, *, limit: int = 12) -> list[ScoredDeck]:
+def _rank_similar_decks(
+    db: DeckDatabase,
+    core: list[str],
+    archetype: str,
+    *,
+    limit: int = 12,
+    decision=None,
+) -> list[ScoredDeck]:
+    from bot.services.deck_builder.constructor_decision import template_decision_bonus
+
     indices = db.candidate_indices(core)
     scored: list[ScoredDeck] = []
     for idx in indices:
         sd = _score_deck_match(db, core, archetype, db.decks[idx])
         if sd:
+            if decision is not None:
+                extra = template_decision_bonus(sd.record, decision)
+                sd = ScoredDeck(
+                    record=sd.record,
+                    score=sd.score + extra,
+                    confidence=min(100.0, sd.confidence + extra * 0.35),
+                    overlap=sd.overlap,
+                )
             scored.append(sd)
     if not scored:
         for record in db.decks:
             sd = _score_deck_match(db, core, archetype, record)
             if sd:
+                if decision is not None:
+                    extra = template_decision_bonus(sd.record, decision)
+                    sd = ScoredDeck(
+                        record=sd.record,
+                        score=sd.score + extra,
+                        confidence=min(100.0, sd.confidence + extra * 0.35),
+                        overlap=sd.overlap,
+                    )
                 scored.append(sd)
     scored.sort(key=lambda x: (-x.score, -x.confidence, -x.overlap))
     return scored[:limit]
@@ -286,6 +276,17 @@ def build_deck_from_core(
     *,
     db: DeckDatabase | None = None,
 ) -> BuildResult:
+    """Сборка колоды.
+
+    Порядок решений:
+      1) DeckIntent → 2) GamePlan → 3) шаблон → 4–6) кандидаты / оценка / finalize
+    (существующий finalize сохранён).
+    """
+    from bot.services.deck_builder.constructor_decision import (
+        prepare_constructor_decision,
+        result_decision_bonus,
+    )
+
     if len(core) != 4 or len(set(core)) != 4:
         raise ValueError("Нужно ровно 4 уникальные карты")
 
@@ -294,19 +295,28 @@ def build_deck_from_core(
         pool = set(db.cards.keys())
     pool = set(pool) | set(core)
 
-    archetype = _detect_archetype(core)
-    ranked = _rank_similar_decks(db, core, archetype, limit=6)
+    # 1–2) Intent + GamePlan
+    decision = prepare_constructor_decision(core, detect_archetype=_detect_archetype)
+    archetype = decision.archetype
+
+    # 3) Выбор шаблона (с bias Intent/GamePlan)
+    ranked = _rank_similar_decks(db, core, archetype, limit=6, decision=decision)
     best = ranked[0] if ranked else None
+
+    # 4–6) Кандидаты из шаблона → оценка finalize → итоговая колода
     deck = _build_one_variant(core, db, pool, archetype, best.record if best else None)
     synergy_score, _ = calculate_deck_synergy(deck)
     breakdown = _build_score_breakdown(deck, core, db, archetype)
+    # лёгкая подстройка confidence под decision-fit (API BuildResult без новых полей)
+    conf = round(best.confidence if best else 35.0, 1)
+    conf = min(100.0, conf + result_decision_bonus(deck, decision) * 0.4)
 
     return BuildResult(
         deck=deck,
         archetype=archetype,
         average_elixir=_avg_elixir(deck, db),
         synergy_score=round(synergy_score, 1),
-        confidence=round(best.confidence if best else 35.0, 1),
+        confidence=round(conf, 1),
         source_deck_id=best.record.id if best else None,
         balanced=_result_balanced(deck, core, db, archetype),
         score_breakdown=breakdown,
@@ -319,13 +329,20 @@ def build_multiple_decks(
     *,
     limit: int = 6,
 ) -> list[BuildResult]:
+    """Несколько вариантов. Порядок: Intent → GamePlan → шаблоны → сборка."""
+    from bot.services.deck_builder.constructor_decision import (
+        prepare_constructor_decision,
+        result_decision_bonus,
+    )
+
     db = get_database()
     if pool is None:
         pool = set(db.cards.keys())
     pool = set(pool) | set(core)
 
-    archetype = _detect_archetype(core)
-    ranked = _rank_similar_decks(db, core, archetype, limit=limit * 5)
+    decision = prepare_constructor_decision(core, detect_archetype=_detect_archetype)
+    archetype = decision.archetype
+    ranked = _rank_similar_decks(db, core, archetype, limit=limit * 5, decision=decision)
 
     results: list[BuildResult] = []
     seen: set[str] = set()
@@ -335,7 +352,7 @@ def build_multiple_decks(
             break
         for filler_skip in (0, 1, 2):
             deck = _build_one_variant(core, db, pool, archetype, sd.record, filler_skip=filler_skip)
-            arch = sd.record.archetype
+            arch = sd.record.archetype or archetype
             if len(deck) != 8 or hard_constraint_issues(deck, db, core):
                 continue
             key = _deck_key(deck)
@@ -344,12 +361,13 @@ def build_multiple_decks(
             seen.add(key)
             synergy_score, _ = calculate_deck_synergy(deck)
             breakdown = _build_score_breakdown(deck, core, db, arch)
+            conf = min(100.0, sd.confidence + result_decision_bonus(deck, decision) * 0.4)
             results.append(BuildResult(
                 deck=deck,
                 archetype=arch,
                 average_elixir=_avg_elixir(deck, db),
                 synergy_score=round(synergy_score, 1),
-                confidence=round(sd.confidence, 1),
+                confidence=round(conf, 1),
                 source_deck_id=sd.record.id,
                 balanced=_result_balanced(deck, core, db, arch),
                 score_breakdown=breakdown,
@@ -362,12 +380,13 @@ def build_multiple_decks(
         seen.add(key)
         synergy_score, _ = calculate_deck_synergy(deck)
         breakdown = _build_score_breakdown(deck, core, db, archetype)
+        conf = 35.0 + result_decision_bonus(deck, decision) * 0.4
         results.append(BuildResult(
             deck=deck,
             archetype=archetype,
             average_elixir=_avg_elixir(deck, db),
             synergy_score=round(synergy_score, 1),
-            confidence=35.0,
+            confidence=round(min(100.0, conf), 1),
             balanced=_result_balanced(deck, core, db, archetype),
             score_breakdown=breakdown,
         ))
@@ -377,19 +396,21 @@ def build_multiple_decks(
     if fkey not in seen and len(results) < limit:
         synergy_score, _ = calculate_deck_synergy(fallback)
         breakdown = _build_score_breakdown(fallback, core, db, archetype)
+        conf = 30.0 + result_decision_bonus(fallback, decision) * 0.4
         results.append(BuildResult(
             deck=fallback,
             archetype=archetype,
             average_elixir=_avg_elixir(fallback, db),
             synergy_score=round(synergy_score, 1),
-            confidence=30.0,
+            confidence=round(min(100.0, conf), 1),
             balanced=_result_balanced(fallback, core, db, archetype),
             score_breakdown=breakdown,
         ))
 
     def _rank_key(r: BuildResult) -> float:
         total = r.score_breakdown.total if r.score_breakdown else 0.0
-        return total * 0.5 + r.synergy_score * 0.3 + r.confidence * 0.2
+        fit = result_decision_bonus(r.deck, decision)
+        return total * 0.45 + r.synergy_score * 0.25 + r.confidence * 0.15 + fit * 0.15
 
     results.sort(key=lambda r: -_rank_key(r))
     return _dedupe_build_results(results)[:limit]
@@ -413,8 +434,15 @@ def _dedupe_build_results(results: list[BuildResult]) -> list[BuildResult]:
 
 # Совместимость для deck_improver / deck_detail (не используются в finalize).
 def _card_roles(db: DeckDatabase, name: str) -> frozenset[str]:
-    rec = db.get_card(name)
-    return rec.roles if rec else frozenset()
+    from bot.services.deck_builder.balance import _card_roles as _roles
+
+    return _roles(db, name)
+
+
+def _card_has_role(db: DeckDatabase, name: str, role: str) -> bool:
+    from bot.services.deck_builder.balance import _card_has_role as _has
+
+    return _has(db, name, role)
 
 
 def _count_spells(deck: list[str], db: DeckDatabase) -> int:
@@ -422,7 +450,8 @@ def _count_spells(deck: list[str], db: DeckDatabase) -> int:
 
 
 def _count_wins(deck: list[str], db: DeckDatabase) -> int:
-    return sum(1 for c in deck if is_win(db, c))
+    # Совпадает с finalize / hard MAX_WINS (только attack-wins).
+    return sum(1 for c in deck if is_attack_win(c))
 
 
 def _is_spell(db: DeckDatabase, name: str) -> bool:
@@ -430,30 +459,8 @@ def _is_spell(db: DeckDatabase, name: str) -> bool:
 
 
 def _is_win(db: DeckDatabase, name: str) -> bool:
-    return is_win(db, name)
+    return is_attack_win(name)
 
 
 def _elixir_bounds(archetype: str) -> tuple[float, float]:
     return ARCHETYPE_ELIXIR.get(archetype, (DEFAULT_ELIXIR_MIN, DEFAULT_ELIXIR_MAX))
-
-
-def _pick_for_role(
-    deck: list[str],
-    db: DeckDatabase,
-    pool: set[str],
-    role: str,
-    core: list[str],
-    archetype: str,
-) -> str | None:
-    lo, hi = _elixir_bounds(archetype)
-    mid = (lo + hi) / 2
-    candidates = [c for c in pool if c not in deck and role in _card_roles(db, c)]
-    if not candidates:
-        return None
-
-    def rank(card: str) -> tuple[float, float]:
-        syn = sum(_pair_synergy(db, card, x) for x in deck) / max(len(deck), 1)
-        elixir_penalty = abs(_avg_elixir(deck + [card], db) - mid)
-        return (-syn, elixir_penalty)
-
-    return min(candidates, key=rank)

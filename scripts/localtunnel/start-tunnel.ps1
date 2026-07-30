@@ -1,4 +1,4 @@
-﻿# Stable localtunnel to bot on :8080 - only fixed subdomain ghosteekcr.
+# Stable localtunnel to bot on :8080 - only fixed subdomain ghosteekcr.
 # Run in a SEPARATE Windows PowerShell window - NOT in Cursor terminal.
 #
 #   .\start-tunnel.ps1
@@ -9,7 +9,13 @@ param(
     [int]$Port = 8080,
     [string]$Subdomain = "ghosteekcr",
     [switch]$SkipLocaLtCheck,
-    [switch]$KillOnly
+    # If set, exit when loca.lt homepage is unreachable (old behaviour).
+    [switch]$StrictLocaLtCheck,
+    [switch]$KillOnly,
+    # How often to probe the public URL while the tunnel looks "alive".
+    [int]$HealthIntervalSec = 30,
+    # Consecutive public health failures before restarting the tunnel.
+    [int]$HealthFailLimit = 3
 )
 
 $ErrorActionPreference = "Continue"
@@ -69,8 +75,11 @@ function Wait-ForBackend {
 function Test-TunnelPublicHealth {
     param([string]$Url)
     try {
-        $headers = @{ "Bypass-Tunnel-Reminder" = "true" }
-        $r = Invoke-RestMethod -Uri "$Url/api/health" -Headers $headers -TimeoutSec 20
+        $headers = @{
+            "Bypass-Tunnel-Reminder" = "true"
+            "User-Agent" = "GhosteekTunnelHealth/1.0"
+        }
+        $r = Invoke-RestMethod -Uri "$Url/api/health" -Headers $headers -TimeoutSec 12
         return $r.status -eq "ok"
     } catch {
         return $false
@@ -78,12 +87,63 @@ function Test-TunnelPublicHealth {
 }
 
 function Test-LocaLt {
-    try {
-        $r = Invoke-WebRequest -Uri "https://loca.lt/" -TimeoutSec 8 -UseBasicParsing
-        return $r.StatusCode -ge 200
-    } catch {
-        return $false
+    # Homepage often blocked/flaky; also probe the fixed subdomain and localtunnel host.
+    $targets = @(
+        "https://loca.lt/",
+        "https://localtunnel.me/",
+        "https://$Subdomain.loca.lt/"
+    )
+    foreach ($uri in $targets) {
+        try {
+            $r = Invoke-WebRequest -Uri $uri -TimeoutSec 6 -UseBasicParsing -MaximumRedirection 2
+            if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) {
+                return $true
+            }
+        } catch {
+            # 511 / tunnel reminder pages still mean the edge is reachable
+            $msg = $_.Exception.Message
+            if ($msg -match "511|503|502|401|403|tunnel") {
+                return $true
+            }
+            $resp = $_.Exception.Response
+            if ($resp -and [int]$resp.StatusCode -ge 200) {
+                return $true
+            }
+        }
     }
+    return $false
+}
+
+function Wait-ForLocaLt {
+    param(
+        [int]$RetrySec = 10,
+        # After this many failed probes, start the tunnel anyway (homepage checks are flaky).
+        [int]$MaxWarnAttempts = 2
+    )
+    if ($SkipLocaLtCheck) {
+        Write-LogLine "Skipping loca.lt reachability check (-SkipLocaLtCheck)." "Yellow"
+        return
+    }
+
+    Write-LogLine "Checking loca.lt reachability..." "Cyan"
+    $attempt = 0
+    while (-not (Test-LocaLt)) {
+        $attempt++
+        if ($StrictLocaLtCheck) {
+            Write-LogLine "loca.lt is NOT reachable from this network." "Red"
+            Write-LogLine "Try VPN or mobile hotspot, then run this script again." "Yellow"
+            Write-LogLine "Or: .\start-tunnel.ps1 -SkipLocaLtCheck" "DarkGray"
+            exit 4
+        }
+        if ($attempt -ge $MaxWarnAttempts) {
+            Write-LogLine "loca.lt probe still failing after $attempt tries - starting tunnel anyway." "Yellow"
+            Write-LogLine "Homepage checks often fail while tunnels still work. Watching public /api/health." "DarkGray"
+            return
+        }
+        Write-LogLine "loca.lt unreachable (attempt $attempt/$MaxWarnAttempts) - retry in ${RetrySec}s..." "Yellow"
+        Start-Sleep -Seconds $RetrySec
+    }
+    Write-LogLine "loca.lt OK." "Green"
 }
 
 function Stop-ProcessTree {
@@ -143,7 +203,7 @@ function Stop-PidFileProcess {
 }
 
 function Stop-ExistingTunnels {
-    param([switch]$Quiet)
+    param([switch]$Quiet, [int]$ExtraWaitSec = 0)
 
     if (-not $Quiet) {
         Write-LogLine "Stopping all previous localtunnel processes (tree kill)..." "Yellow"
@@ -197,7 +257,8 @@ function Stop-ExistingTunnels {
     }
 
     # Give loca.lt time to drop the old TCP reservation
-    Start-Sleep -Seconds 2
+    $baseSleep = if ($ExtraWaitSec -gt 2) { $ExtraWaitSec } else { 2 }
+    Start-Sleep -Seconds $baseSleep
 }
 
 function Enter-TunnelMutex {
@@ -265,7 +326,11 @@ function Test-SubdomainUrl {
 }
 
 function Start-LocalTunnelSession {
-    param([string]$LtJs)
+    param(
+        [string]$LtJs,
+        # If lt.js never prints a URL, treat as dead connect (common when loca.lt TLS is blocked).
+        [int]$ConnectTimeoutSec = 45
+    )
 
     Write-LogLine "Command: node `"$LtJs`" --port $Port --subdomain $Subdomain" "DarkGray"
     Write-LogLine "Connecting to loca.lt (only $Subdomain allowed)..." "Yellow"
@@ -289,7 +354,12 @@ function Start-LocalTunnelSession {
     $savedUrl = $false
     $wrongSubdomain = $false
     $backendLost = $false
+    $publicDead = $false
+    $connectTimeout = $false
     $readyAnnounced = $false
+    $healthFails = 0
+    $nextHealthAt = [datetime]::UtcNow
+    $connectDeadline = [datetime]::UtcNow.AddSeconds($ConnectTimeoutSec)
 
     while (-not $proc.HasExited) {
         if (-not (Test-Backend)) {
@@ -311,7 +381,11 @@ function Start-LocalTunnelSession {
                 } elseif (-not $wrongSubdomain) {
                     $wrongSubdomain = $true
                     Write-LogLine "Subdomain $Subdomain is busy - loca.lt gave: $url" "Red"
-                    Write-LogLine "Wrong tunnel killed. Retrying $ExpectedUrl only..." "Yellow"
+                    Write-LogLine "Will reclaim $ExpectedUrl after cleanup..." "Yellow"
+                    if (-not $proc.HasExited) {
+                        Stop-ProcessTree -ProcessId $proc.Id -Reason "wrong subdomain"
+                        try { $proc.WaitForExit(3000) | Out-Null } catch { }
+                    }
                     break
                 }
             }
@@ -326,22 +400,50 @@ function Start-LocalTunnelSession {
             break
         }
 
+        if (-not $savedUrl -and [datetime]::UtcNow -ge $connectDeadline) {
+            Write-LogLine "No tunnel URL within ${ConnectTimeoutSec}s - loca.lt likely blocked (TLS/network)." "Red"
+            Write-LogLine "Local bot on :$Port is fine; Mini App needs a working public tunnel." "Yellow"
+            Write-LogLine "Try: VPN / mobile hotspot, or .\start-tunnel.ps1 -SkipLocaLtCheck after network change." "DarkGray"
+            $connectTimeout = $true
+            break
+        }
+
         if ($savedUrl -and -not $readyAnnounced) {
             if (Test-TunnelPublicHealth -Url $ExpectedUrl) {
                 Write-SuccessBanner -Url $ExpectedUrl
                 $readyAnnounced = $true
+                $healthFails = 0
+                $nextHealthAt = [datetime]::UtcNow.AddSeconds($HealthIntervalSec)
+            } elseif ([datetime]::UtcNow -ge $connectDeadline) {
+                Write-LogLine "URL printed but public /api/health never became OK within ${ConnectTimeoutSec}s." "Red"
+                $connectTimeout = $true
+                break
             }
+        } elseif ($readyAnnounced -and [datetime]::UtcNow -ge $nextHealthAt) {
+            if (Test-TunnelPublicHealth -Url $ExpectedUrl) {
+                if ($healthFails -gt 0) {
+                    Write-LogLine "Public health recovered after $healthFails fail(s)." "Green"
+                }
+                $healthFails = 0
+            } else {
+                $healthFails++
+                Write-LogLine "Public health FAIL $healthFails/$HealthFailLimit ($ExpectedUrl/api/health) - local bot may still be OK" "Yellow"
+                if ($healthFails -ge $HealthFailLimit) {
+                    Write-LogLine "Tunnel looks alive but public URL is dead (zombie). Restarting..." "Red"
+                    $publicDead = $true
+                    break
+                }
+            }
+            $nextHealthAt = [datetime]::UtcNow.AddSeconds($HealthIntervalSec)
         }
 
         Start-Sleep -Milliseconds 400
     }
 
-    # Always tree-kill our child so it cannot become an orphan holding the subdomain
     if (-not $proc.HasExited) {
         Stop-ProcessTree -ProcessId $proc.Id -Reason "end of session"
         try { $proc.WaitForExit(5000) | Out-Null } catch { }
     } else {
-        # Process exited on its own - still sweep orphans matching lt.js
         $orphans = @(Get-TunnelRelatedProcesses | Where-Object { $_.Name -eq "node.exe" })
         foreach ($o in $orphans) {
             Stop-ProcessTree -ProcessId $o.ProcessId -Reason "orphan after exit"
@@ -354,6 +456,8 @@ function Start-LocalTunnelSession {
     return @{
         WrongSubdomain = $wrongSubdomain
         BackendLost = $backendLost
+        PublicDead = $publicDead
+        ConnectTimeout = $connectTimeout
         ReadyAnnounced = $readyAnnounced
         ExitCode = if ($null -ne $proc.ExitCode) { $proc.ExitCode } else { -1 }
     }
@@ -382,21 +486,13 @@ try {
     # Second sweep after taking the lock (previous instance may have spawned a child mid-kill)
     Stop-ExistingTunnels -Quiet
 
-    if (-not $SkipLocaLtCheck) {
-        Write-LogLine "Checking loca.lt reachability..." "Cyan"
-        if (-not (Test-LocaLt)) {
-            Write-LogLine "loca.lt is NOT reachable from this network." "Red"
-            Write-LogLine "Try VPN or mobile hotspot, then run this script again." "Yellow"
-            Write-LogLine "Or force start: .\start-tunnel.ps1 -SkipLocaLtCheck" "DarkGray"
-            exit 4
-        }
-        Write-LogLine "loca.lt OK." "Green"
-    }
+    Wait-ForLocaLt
 
     $LtJs = Ensure-LocalLt
     Wait-ForBackend
 
-    Write-LogLine "Supervisor started. Retries until $ExpectedUrl is active or you close this window." "Cyan"
+    Write-LogLine "Supervisor started. Public health every ${HealthIntervalSec}s (restart after $HealthFailLimit fails)." "Cyan"
+    Write-LogLine "Retries until $ExpectedUrl is active or you close this window." "Cyan"
 
     $session = 0
     $reclaimAttempt = 0
@@ -423,24 +519,39 @@ try {
 
         if ($result.WrongSubdomain) {
             $reclaimAttempt++
-            $waitSec = [Math]::Min(8 + ($reclaimAttempt * 4), 45)
-            Write-LogLine "Reclaim attempt $reclaimAttempt - full cleanup, then wait ${waitSec}s..." "Yellow"
-            Stop-ExistingTunnels
-            Start-Sleep -Seconds $waitSec
+            # loca.lt normally frees the subdomain within 5-8 s after the process dies.
+            # Use a flat short pause; do NOT grow exponentially (causes "stuck for minutes").
+            $waitSec = if ($reclaimAttempt -eq 1) { 7 } else { 10 }
+            Write-LogLine "Reclaim attempt $reclaimAttempt - cleanup + ${waitSec}s for loca.lt to free '$Subdomain'..." "Yellow"
+            Stop-ExistingTunnels -ExtraWaitSec $waitSec
             continue
         }
 
+        # Successful / zombie session ended - reset reclaim counter
         $reclaimAttempt = 0
         $exitCode = $result.ExitCode
+
+        if ($result.PublicDead) {
+            Write-LogLine "Restarting after zombie public URL (local process was still up). Wait 6 sec..." "Yellow"
+            Stop-ExistingTunnels -ExtraWaitSec 6
+            continue
+        }
+
+        if ($result.ConnectTimeout) {
+            Write-LogLine "Connect timeout - waiting 20s before retry (network/VPN may need a moment)..." "Yellow"
+            Stop-ExistingTunnels -ExtraWaitSec 20
+            continue
+        }
 
         if ($result.ReadyAnnounced) {
             Write-LogLine "Tunnel session ended (code $exitCode). Restarting in 5 sec..." "Yellow"
         } else {
-            Write-LogLine "Tunnel exited before ready (code $exitCode). Restart in 5 sec..." "Yellow"
+            Write-LogLine "Tunnel exited before ready (code $exitCode). Restart in 4 sec..." "Yellow"
         }
 
         Stop-ExistingTunnels
-        Start-Sleep -Seconds 5
+        $restartDelay = if ($result.ReadyAnnounced) { 5 } else { 4 }
+        Start-Sleep -Seconds $restartDelay
     }
 }
 finally {

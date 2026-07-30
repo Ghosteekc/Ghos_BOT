@@ -18,6 +18,7 @@ from bot.api.schemas import (
     DeckEntry,
     DeckImprovementSuggestion,
     DeckCardMatchup,
+    DeckGamePlan,
     MineDeckStatsRequest,
     MineDeckStatsResponse,
     DeckListResponse,
@@ -25,6 +26,9 @@ from bot.api.schemas import (
     OpponentEntry,
     RandomDeckResponse,
     RecommendationsResponse,
+    RecommendDeckRequest,
+    RecommendDeckResponse,
+    RecommendationResultModel,
     StatsDeckEntry,
     StatsOverviewResponse,
     StatsResponse,
@@ -387,6 +391,12 @@ async def get_mine_deck_stats(
         improvements=[DeckImprovementSuggestion(**item) for item in data["improvements"]],
         balanced=data["balanced"],
         sample_note=data["sample_note"],
+        game_plan=DeckGamePlan(**data["game_plan"]) if data.get("game_plan") else None,
+        recommendation=(
+            RecommendationResultModel(**data["recommendation"])
+            if data.get("recommendation")
+            else None
+        ),
     )
 
 
@@ -475,6 +485,9 @@ async def deck_constructor(
                 confidence=d.get("confidence", 0),
                 balanced=d.get("balanced", True),
                 score_breakdown=d.get("score_breakdown"),
+                improvements=d.get("improvements") or [],
+                game_plan=d.get("game_plan"),
+                recommendation=d.get("recommendation"),
             )
             for d in result["decks"]
         ],
@@ -534,6 +547,30 @@ async def compare_user_deck(
         reference_synergy_score=result.get("reference_synergy_score", 50.0),
         user_synergy_notes=result.get("user_synergy_notes", []),
         reference_synergy_notes=result.get("reference_synergy_notes", []),
+        user_recommendation=result.get("user_recommendation"),
+        reference_recommendation=result.get("reference_recommendation"),
+    )
+
+
+@router.post("/decks/recommend", response_model=RecommendDeckResponse)
+async def recommend_deck(
+    body: RecommendDeckRequest,
+    user: User = Depends(require_linked_player),
+) -> RecommendDeckResponse:
+    """Единый RecommendationEngine — SoT рекомендаций для Passport / анализа."""
+    del user
+    cards = [c.strip() for c in body.cards if c and str(c).strip()]
+    if len(cards) != 8 or len(set(cards)) != 8:
+        raise HTTPException(status_code=400, detail="Нужна полная колода из 8 уникальных карт")
+
+    from bot.services.recommendation_engine import RecommendationEngine
+
+    await ensure_cards_loaded()
+    result = RecommendationEngine.analyze(cards, apply_swaps=body.apply_swaps)
+    payload = result.to_public_dict()
+    return RecommendDeckResponse(
+        recommendation=RecommendationResultModel(**payload),
+        improvements=[DeckImprovementSuggestion(**item) for item in result.improvements_ui()],
     )
 
 
@@ -813,6 +850,8 @@ async def extended_stats(user: User = Depends(require_subscription)) -> StatsOve
 
 @router.get("/recommendations", response_model=RecommendationsResponse)
 async def recommendations(user: User = Depends(require_subscription)) -> RecommendationsResponse:
+    from bot.services.recommendation_engine import RecommendationEngine
+
     battles = await _get_battles(user)
     tag = normalize_tag(user.player_tag)
 
@@ -827,18 +866,34 @@ async def recommendations(user: User = Depends(require_subscription)) -> Recomme
 
     preferred = [c for c, _ in get_most_played_cards(battles, tag)]
 
-    deck_result = None
-    if current_deck:
-        try:
-            deck_result = customize_deck_for_arena(current_deck, user.arena_id, preferred, user.trophies)
-        except Exception:
-            deck_result = None
+    customized: list[str] = []
+    issues: list[str] = []
+    avg_elixir = 0.0
+    synergy_core: list[str] = []
+    synergy_deck: list[str] = []
 
-    synergy = (
-        build_synergy_deck(current_deck, user.arena_id, user.trophies, preferred)
-        if current_deck
-        else None
-    )
+    if current_deck and len(current_deck) == 8:
+        try:
+            rec = RecommendationEngine.analyze(
+                current_deck,
+                arena_id=user.arena_id,
+                trophies=user.trophies,
+                preferred_cards=preferred,
+                apply_swaps=True,
+            )
+            customized = rec.improvement_plan.improved_deck
+            issues = list(rec.decision_explanation.why_picks) or [
+                s.message for s in rec.improvement_plan.steps[:4]
+            ]
+            from bot.services.deck_analyzer import analyze_deck
+
+            avg_elixir = analyze_deck(customized).avg_elixir
+            synergy_core = list(rec.improvement_plan.locked)
+            if rec.improvement_plan.needed:
+                synergy_deck = customized
+        except Exception:
+            customized = []
+            issues = []
 
     last_summary = None
     if last_battle:
@@ -846,23 +901,26 @@ async def recommendations(user: User = Depends(require_subscription)) -> Recomme
         opp = last_battle.get("opponent", [{}])[0]
         won = team.get("crowns", 0) > opp.get("crowns", 0)
         try:
+            from bot.services.deck_analyzer import analyze_battle
+            from bot.api.schemas import LastBattleSummary
+
             analysis = analyze_battle(team, opp)
-            last_summary = {
-                "won": won,
-                "opponent_name": opp.get("name", "Соперник"),
-                "trophy_change": team.get("trophyChange", 0),
-                "matchup_score": round(analysis.matchup_score, 1),
-                "top_reason": analysis.reasons[0] if analysis.reasons else None,
-            }
+            last_summary = LastBattleSummary(
+                won=won,
+                opponent_name=opp.get("name", "Соперник"),
+                trophy_change=int(team.get("trophyChange") or 0),
+                matchup_score=round(analysis.matchup_score, 1),
+                top_reason=analysis.reasons[0] if analysis.reasons else None,
+            )
         except Exception:
             last_summary = None
 
     return RecommendationsResponse(
         current_deck=current_deck,
-        avg_elixir=deck_result["avg_elixir"] if deck_result else 0.0,
-        issues=deck_result["issues"] if deck_result else [],
-        customized_deck=deck_result["customized"] if deck_result else [],
-        synergy_core=synergy.get("core", []) if synergy else [],
-        synergy_deck=synergy["deck"] if synergy else [],
+        avg_elixir=avg_elixir,
+        issues=issues,
+        customized_deck=customized,
+        synergy_core=synergy_core,
+        synergy_deck=synergy_deck,
         last_battle=last_summary,
     )

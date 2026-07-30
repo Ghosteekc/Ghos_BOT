@@ -13,7 +13,6 @@ Snapshot читается только с диска — без HTTP к DeckShop
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
 
 from bot.services.card_data import (
     COUNTERS,
@@ -32,6 +31,8 @@ from bot.services.card_data import (
 )
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deckshop_data import get_deckshop_status_summary, load_deckshop_snapshot
+
+# TODO(card-profile): _card_roles уже читает loader; callers ещё смешивают legacy COUNTERS/SYNERGIES.
 
 
 @dataclass(frozen=True)
@@ -92,17 +93,11 @@ def _tier(raw: dict | None) -> tuple[list[str], list[str]]:
     return _dedupe(raw.get("strong") or []), _dedupe(raw.get("partial") or [])
 
 
-@lru_cache(maxsize=1)
 def _card_roles(name: str) -> frozenset[str]:
-    try:
-        from bot.services.deck_builder.loader import get_database
+    # Единый источник ролей (cards.json) через CardProfile.
+    from bot.services.card_profile import get_card_profile
 
-        rec = get_database().get_card(name)
-        if rec:
-            return rec.roles
-    except Exception:
-        pass
-    return frozenset()
+    return get_card_profile(name).roles
 
 
 def _role_counter_tier(counter_card: str, target: str) -> str | None:

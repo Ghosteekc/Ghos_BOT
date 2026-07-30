@@ -23,13 +23,13 @@ from bot.services.deck_builder.constants import (
     ROLE_BIG_SPELL,
     ROLE_BUILDING,
     ROLE_COUNTERPUSH,
+    ROLE_CYCLE,
     ROLE_DEFENSIVE,
     ROLE_DPS,
     ROLE_MINI_TANK,
     ROLE_SMALL_SPELL,
     ROLE_SPLASH,
     ROLE_TANK,
-    ROLE_WIN,
     SYNERGY_PARTIAL,
     SYNERGY_STRONG,
     SYNERGY_WEAK,
@@ -50,6 +50,7 @@ SOFT_ROLE_BONUS: dict[str, float] = {
     ROLE_BUILDING: 4.0,
     ROLE_DPS: 3.0,
     ROLE_COUNTERPUSH: 3.0,
+    ROLE_CYCLE: 5.0,
 }
 
 SCORE_WEIGHTS: dict[str, float] = {
@@ -102,22 +103,27 @@ def _avg_elixir(cards: list[str], db: DeckDatabase) -> float:
 
 
 def _card_roles(db: DeckDatabase, name: str) -> frozenset[str]:
-    rec = db.get_card(name)
-    return rec.roles if rec else frozenset()
+    """Все roles[] карты. db сохранён для совместимости сигнатуры."""
+    del db
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).roles
+
+
+def _card_has_role(db: DeckDatabase, name: str, role: str) -> bool:
+    del db
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).has_role(role)
 
 
 def is_spell(db: DeckDatabase, name: str) -> bool:
-    roles = _card_roles(db, name)
-    return "spell" in roles or ROLE_SMALL_SPELL in roles or ROLE_BIG_SPELL in roles
+    return _card_has_role(db, name, "spell")
 
 
 def is_attack_win(name: str) -> bool:
     """Primary tower-push win condition (Hog, Giant, Ram…) — not Bandit/support push."""
     return name in WIN_CONDITIONS
-
-
-def is_win(db: DeckDatabase, name: str) -> bool:
-    return is_attack_win(name) or ROLE_WIN in _card_roles(db, name)
 
 
 def count_spells(deck: list[str], db: DeckDatabase) -> int:
@@ -130,7 +136,7 @@ def count_wins(deck: list[str], db: DeckDatabase) -> int:
 
 
 def count_role(deck: list[str], db: DeckDatabase, role: str) -> int:
-    return sum(1 for c in deck if role in _card_roles(db, c))
+    return sum(1 for c in deck if _card_has_role(db, c, role))
 
 
 def has_role(deck: list[str], db: DeckDatabase, role: str) -> bool:
@@ -177,30 +183,45 @@ def hard_constraint_issues(
 
 
 def soft_balance_issues(deck: list[str], db: DeckDatabase, archetype: str) -> list[str]:
+    """Мягкие пробелы относительно DeckIntent (не универсальный чек-лист)."""
+    from bot.services.deck_intent import DeckIntentEngine
+
+    intent = DeckIntentEngine.infer(deck, archetype=archetype)
+    required = intent.required_soft_checks
     lo, hi = _elixir_bounds(archetype)
     issues: list[str] = []
     avg = _avg_elixir(deck, db)
 
-    if not has_role(deck, db, ROLE_BIG_SPELL):
+    if "big_spell" in required and not has_role(deck, db, ROLE_BIG_SPELL):
         issues.append("big_spell")
-    if not has_role(deck, db, ROLE_SMALL_SPELL):
+    if "small_spell" in required and not has_role(deck, db, ROLE_SMALL_SPELL):
         issues.append("small_spell")
-    if count_role(deck, db, ROLE_AIR) < 2:
-        issues.append("air_defense")
-    if not has_role(deck, db, ROLE_ANTI_TANK):
+    if "air_defense" in required:
+        air_n = count_role(deck, db, ROLE_AIR)
+        if air_n < max(1, intent.min_air_defense):
+            issues.append("air_defense")
+    if "anti_tank" in required and not has_role(deck, db, ROLE_ANTI_TANK):
         issues.append("anti_tank")
-    if not has_role(deck, db, ROLE_DEFENSIVE):
-        issues.append("defensive")
-    if not has_role(deck, db, ROLE_ANTI_SWARM):
+    if "anti_swarm" in required and not (
+        has_role(deck, db, ROLE_ANTI_SWARM) or has_role(deck, db, ROLE_SPLASH)
+    ):
         issues.append("anti_swarm")
+    if "building" in required and not has_role(deck, db, ROLE_BUILDING):
+        issues.append("building")
+    if "cycle" in required:
+        cycle_n = count_role(deck, db, ROLE_CYCLE)
+        # Дешёвые карты ≤2 тоже считаем циклом, если роли cycle нет в JSON.
+        if cycle_n < intent.min_cycle_cards:
+            cheap = sum(
+                1
+                for c in deck
+                if (db.get_card(c).elixir if db.get_card(c) else get_card_elixir(c)) <= 2
+            )
+            if max(cycle_n, cheap) < intent.min_cycle_cards:
+                issues.append("cycle")
     if avg < lo - 0.4 or avg > hi + 0.4:
         issues.append("elixir")
     return issues
-
-
-def balance_issues(deck: list[str], db: DeckDatabase, archetype: str) -> list[str]:
-    """Обратная совместимость: все issues (hard + soft)."""
-    return hard_constraint_issues(deck, db) + soft_balance_issues(deck, db, archetype)
 
 
 def _core_synergy_avg(
@@ -380,13 +401,17 @@ def _soft_role_bonus_for_card(
     roles = _card_roles(db, card)
     bonus = 0.0
     for issue in missing_roles:
+        if issue == "anti_swarm":
+            if ROLE_ANTI_SWARM in roles or ROLE_SPLASH in roles:
+                bonus += SOFT_ROLE_BONUS.get(ROLE_ANTI_SWARM, 4.0)
+            continue
         role = {
             "big_spell": ROLE_BIG_SPELL,
             "small_spell": ROLE_SMALL_SPELL,
             "air_defense": ROLE_AIR,
             "anti_tank": ROLE_ANTI_TANK,
-            "defensive": ROLE_DEFENSIVE,
-            "anti_swarm": ROLE_ANTI_SWARM,
+            "building": ROLE_BUILDING,
+            "cycle": ROLE_CYCLE,
         }.get(issue)
         if role and role in roles:
             bonus += SOFT_ROLE_BONUS.get(role, 4.0)

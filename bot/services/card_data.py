@@ -1,5 +1,11 @@
-"""Данные о картах: тип, эликсир, счётчики и синергии."""
+"""Данные о картах: тип, эликсир, счётчики и синергии.
 
+TODO(card-profile): CARD_META / COUNTERS / SYNERGIES / WIN_CONDITIONS — legacy.
+Elixir/type/roles читайте через ``bot.services.card_profile.CardProfile``
+(cards.json). Словари ниже не удалять, пока вызывающие места не мигрированы.
+"""
+
+# TODO(card-profile): CARD_META дублирует elixir/type/role из cards.json.
 CARD_META: dict[str, dict] = {
     "Knight": {"elixir": 3, "type": "troop", "role": "tank"},
     "Archers": {"elixir": 3, "type": "troop", "role": "support"},
@@ -125,6 +131,7 @@ CARD_META: dict[str, dict] = {
     "Rage": {"elixir": 2, "type": "spell", "role": "spell"},
 }
 
+# TODO(card-profile): COUNTERS дублирует DeckShop snapshot — legacy fallback.
 COUNTERS: dict[str, list[str]] = {
     "Hog Rider": [
         "Cannon", "Tesla", "Tornado", "Tombstone", "Bowler", "Barbarians",
@@ -192,6 +199,7 @@ COUNTERS: dict[str, list[str]] = {
     "Tornado": ["Balloon", "Lava Hound", "Miner", "Goblin Barrel"],
 }
 
+# TODO(card-profile): SYNERGIES дублирует DeckShop / decks.json synergyPairs.
 SYNERGIES: dict[str, list[str]] = {
     "Hog Rider": ["Ice Golem", "Ice Spirit", "Skeletons", "Musketeer", "Cannon", "Fireball"],
     "Balloon": ["Lumberjack", "Freeze", "Baby Dragon", "Tornado", "Miner"],
@@ -227,6 +235,7 @@ ARENA_CARD_POOL: dict[str, list[str]] = {
              "Wall Breakers", "Elixir Golem", "Skeleton King", "Phoenix", "Ronin"],
 }
 
+# TODO(card-profile): WIN_CONDITIONS дублирует role win_condition в cards.json.
 WIN_CONDITIONS = {
     "Hog Rider", "Balloon", "Golem", "Graveyard", "X-Bow", "Mortar", "Royal Giant",
     "Goblin Barrel", "Lava Hound", "Miner", "Giant", "P.E.K.K.A", "Battle Ram",
@@ -235,7 +244,7 @@ WIN_CONDITIONS = {
     "Ram Rider", "Mighty Miner", "Goblin Machine", "Boss Bandit", "Rune Giant",
 }
 
-# Спам-толпы (не путать со Стражами — те танкуют точечный урон)
+# TODO(card-profile): SWARM_CARDS → CardProfile.is_swarm / cards.json roles.
 SWARM_CARDS = {
     "Goblins", "Spear Goblins", "Skeleton Army", "Goblin Gang", "Barbarians",
     "Minion Horde", "Bats", "Skeletons", "Royal Recruits",
@@ -293,15 +302,30 @@ MANUAL_COUNTERS_PARTIAL: dict[str, frozenset[str]] = {
 
 
 def get_card_elixir(name: str) -> int:
-    return CARD_META.get(name, {}).get("elixir", 4)
+    """Elixir из CardProfile (cards.json), с fallback на CARD_META."""
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).elixir
 
 
-def get_card_role(name: str) -> str:
-    return CARD_META.get(name, {}).get("role", "support")
+def get_card_roles(name: str) -> frozenset[str]:
+    """Все роли карты из cards.json roles[] (без синтеза новых)."""
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).roles
+
+
+def card_has_role(name: str, role: str) -> bool:
+    """True, если role есть среди всех ролей карты (не только primary)."""
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).has_role(role)
 
 
 def is_spam_card(name: str) -> bool:
-    return name in SWARM_CARDS or get_card_role(name) == "swarm"
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).is_swarm
 
 
 def is_point_target_threat(name: str) -> bool:
@@ -314,10 +338,9 @@ def has_point_target_answer(cards: list[str]) -> bool:
 
 def is_pure_spell(name: str) -> bool:
     """Заклинание без win-condition — карта-контра на него не ставится."""
-    meta = CARD_META.get(name, {})
-    if meta.get("type") != "spell":
-        return False
-    return get_card_role(name) != "win_condition"
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).is_pure_spell
 
 
 def card_counters_for_spell(spell: str) -> list[str]:
@@ -326,7 +349,9 @@ def card_counters_for_spell(spell: str) -> list[str]:
 
 
 def is_building(name: str) -> bool:
-    return CARD_META.get(name, {}).get("type") == "building"
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).is_building
 
 
 def spell_counter_tier_vs_building(spell: str) -> str | None:
@@ -339,4 +364,6 @@ def spell_counter_tier_vs_building(spell: str) -> str | None:
 
 
 def is_offense_win_condition(name: str) -> bool:
-    return name in WIN_CONDITIONS
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).is_offense_win_condition

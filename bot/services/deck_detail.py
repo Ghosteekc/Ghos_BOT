@@ -1,22 +1,16 @@
-"""Per-deck stats: matchups, improvements, winrate from battle history."""
+"""Per-deck stats: matchups, winrate from battle history.
+
+Recommendations — только через RecommendationEngine (без локальных gap-эвристик).
+"""
 
 from __future__ import annotations
 
-from bot.services.card_data import COUNTERS, get_card_role, is_pure_spell
-from bot.services.deck_builder.builder import _is_spell
-from bot.services.deck_builder.loader import get_database
+from bot.services.card_data import COUNTERS, is_pure_spell
 from bot.services.card_names_ru import card_name_ru
 from bot.services.clash_api import normalize_tag
 from bot.services.deck_analyzer import analyze_deck, extract_deck
 from bot.services.meta_analyzer import _guess_deck_name
-
-_SMALL_SPELLS = {"Zap", "The Log", "Giant Snowball", "Barbarian Barrel", "Ice Spirit", "Electro Spirit"}
-_FINISHERS = {"Fireball", "Rocket", "Lightning", "Poison"}
-_ANTI_AIR_SUGGESTIONS = ["Musketeer", "Mega Minion", "Inferno Dragon", "Tesla", "Archers"]
-_SPLASH_SUGGESTIONS = ["Valkyrie", "Wizard", "Baby Dragon", "Fireball", "Arrows"]
-_DEFENSE_SUGGESTIONS = ["Cannon", "Tesla", "Tombstone", "Inferno Tower"]
-_CYCLE_SUGGESTIONS = ["Skeletons", "Ice Spirit", "Electro Spirit", "Ice Golem"]
-_POINT_TARGET_SUGGESTIONS = ["Guards", "Knight", "Ice Golem", "Skeleton Army"]
+from bot.services.recommendation_engine import RecommendationEngine
 
 
 def deck_key(cards: list[str]) -> str:
@@ -107,108 +101,6 @@ def _analyze_opponent_card_matchups(deck_cards: list[str], deck_battles: list[di
     return strong[:8], weak[:8]
 
 
-def _suggest_improvements(cards: list[str]) -> list[dict]:
-    if len(cards) != 8:
-        return []
-
-    stats = analyze_deck(cards)
-    deck_set = set(cards)
-    db = get_database()
-    suggestions: list[dict] = []
-
-    def add(category: str, message: str, suggested: list[str], *, force: bool = False) -> None:
-        missing = [c for c in suggested if c not in deck_set][:4]
-        if not missing and not force:
-            return
-        suggestions.append({
-            "category": category,
-            "message": message,
-            "suggested_cards": missing,
-        })
-
-    if not stats.spells and not any(_is_spell(db, c) for c in cards):
-        add(
-            "spells",
-            "В колоде нет заклинаний — сложнее контролировать поле и добивать башни",
-            ["The Log", "Fireball", "Zap", "Arrows"],
-        )
-    elif len(stats.spells) == 1 and not any(s in _FINISHERS for s in stats.spells):
-        add(
-            "finishers",
-            "Мало добивающих заклинаний — добавьте Fireball или Rocket для финиша",
-            ["Fireball", "Rocket", "Lightning"],
-        )
-
-    if not stats.air_coverage:
-        add(
-            "anti_air",
-            "Слабая защита от воздуха — Balloon и Minions будут опасны",
-            _ANTI_AIR_SUGGESTIONS,
-        )
-
-    if not stats.splash_coverage:
-        add(
-            "splash",
-            "Нет сплеша — спам и связки Goblin Gang / Skeleton Army сложно зачищать",
-            _SPLASH_SUGGESTIONS,
-        )
-
-    if not stats.buildings and not (
-        stats.air_coverage and stats.splash_coverage and stats.point_target_coverage
-    ):
-        add(
-            "defense",
-            "Нет построек — Hog Rider и Balloon сложнее останавливать на мосту",
-            _DEFENSE_SUGGESTIONS,
-        )
-
-    if not stats.point_target_coverage:
-        add(
-            "point_target",
-            "Нет ответа на точечный урон — Стражи держат P.E.K.K.A, Мини P.E.K.K.A, Хог и подобных",
-            _POINT_TARGET_SUGGESTIONS,
-        )
-
-    if not any(c in _SMALL_SPELLS for c in cards):
-        add(
-            "swarm",
-            "Нет дешёвого ответа на спам — Zap или Ice Spirit сильно помогут в цикле",
-            list(_SMALL_SPELLS),
-        )
-
-    if stats.avg_elixir > 4.2 and not any(get_card_role(c) == "cycle" for c in cards):
-        add(
-            "cycle",
-            f"Тяжёлая колода ({stats.avg_elixir} эл.) — добавьте дешёвый цикл для давления",
-            _CYCLE_SUGGESTIONS,
-        )
-
-    if len(stats.win_conditions) > 2:
-        add(
-            "focus",
-            "Слишком много win-condition — колода теряет фокус",
-            [],
-            force=True,
-        )
-
-    if not stats.win_conditions:
-        add(
-            "win_condition",
-            "Нет явного win-condition — добавьте карту для урона по башне",
-            ["Hog Rider", "Balloon", "Royal Giant", "Miner", "Goblin Barrel"],
-        )
-
-    heavy_tanks = {"Golem", "Electro Giant", "Giant", "Lava Hound", "Elixir Golem"}
-    if deck_set & heavy_tanks and len(stats.spells) < 2:
-        add(
-            "support",
-            "Битдаун без второго заклинания — добавьте Poison или Lightning для поддержки пуша",
-            ["Lightning", "Poison", "Zap"],
-        )
-
-    return suggestions
-
-
 def build_mine_deck_stats(battles: list[dict], player_tag: str, cards: list[str]) -> dict:
     if len(cards) != 8:
         return {"error": "Нужна полная колода из 8 карт"}
@@ -226,8 +118,14 @@ def build_mine_deck_stats(battles: list[dict], player_tag: str, cards: list[str]
 
     stats = analyze_deck(cards)
     strong, weak = _analyze_opponent_card_matchups(cards, deck_battles)
-    improvements = _suggest_improvements(cards)
-    balanced = len(improvements) == 0
+
+    rec = RecommendationEngine.analyze(cards, apply_swaps=False)
+    improvements = rec.improvements_ui()
+    balanced = (
+        len(improvements) == 0
+        and not rec.balance_issues.hard
+        and not rec.balance_issues.soft
+    )
 
     sample_note = ""
     if total == 0:
@@ -249,4 +147,6 @@ def build_mine_deck_stats(battles: list[dict], player_tag: str, cards: list[str]
         "improvements": improvements,
         "balanced": balanced,
         "sample_note": sample_note,
+        "game_plan": rec.game_plan.to_dict(),
+        "recommendation": rec.to_public_dict(),
     }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bot.services.card_data import WIN_CONDITIONS, get_card_elixir, get_card_role
+from bot.services.card_data import WIN_CONDITIONS, get_card_elixir, get_card_roles
 from bot.services.card_level import to_display_level
 from bot.services.card_matchups import synergy_partners
 from bot.services.card_names_ru import card_name_ru
@@ -274,13 +274,13 @@ def _same_style_candidate(
         return False
     if abs(get_card_elixir(candidate) - get_card_elixir(old)) > 1:
         return False
-    old_role = get_card_role(old)
-    new_role = get_card_role(candidate)
-    if old_role == new_role:
+    old_roles = get_card_roles(old)
+    new_roles = get_card_roles(candidate)
+    if old_roles & new_roles:
         return True
-    # Soft fallback: allow support/tank swaps within defense-ish roles
-    defense = {"support", "tank", "swarm", "building"}
-    return old_role in defense and new_role in defense
+    # Soft fallback: defense-ish роли из полного roles[]
+    defense = frozenset({"support", "tank", "swarm", "building", "defensive", "mini_tank"})
+    return bool(old_roles & defense) and bool(new_roles & defense)
 
 
 def build_higher_level_style_deck(

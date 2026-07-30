@@ -8,8 +8,8 @@ from bot.services.card_data import (
     COUNTERS,
     POINT_TARGET_COUNTERS,
     WIN_CONDITIONS,
+    card_has_role,
     get_card_elixir,
-    get_card_role,
     has_point_target_answer,
     is_point_target_threat,
     is_pure_spell,
@@ -27,6 +27,7 @@ from bot.services.deck_analyzer import (
 TOWER_SPELLS = {"Fireball", "Rocket", "Lightning", "Poison", "Earthquake", "Freeze"}
 CHIP_CARDS = {"Royal Giant", "Mortar", "X-Bow", "Goblin Drill", "Miner"}
 
+# TODO(card-profile): AIR_CARDS / SPLASH_CARDS дублируют CardProfile roles — не удалять.
 AIR_CARDS = {
     "Minions", "Minion Horde", "Baby Dragon", "Mega Minion", "Inferno Dragon",
     "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix", "Flying Machine",
@@ -34,6 +35,7 @@ AIR_CARDS = {
 }
 
 # Keep in sync with deck_analyzer.analyze_deck splash set.
+# TODO(card-profile): мигрировать на CardProfile.is_splash
 SPLASH_CARDS = {
     "Wizard", "Baby Dragon", "Valkyrie", "Bowler", "Executioner", "Bomber",
     "Fireball", "Arrows", "Poison", "Earthquake", "Electro Dragon",
@@ -74,8 +76,7 @@ class EnhancedBattleAnalysis(BattleAnalysis):
 
 
 def _generic_counters(threat: str) -> list[str]:
-    role = get_card_role(threat)
-    if threat in AIR_CARDS or role == "air":
+    if threat in AIR_CARDS or card_has_role(threat, "air"):
         return ["Inferno Tower", "Musketeer", "Inferno Dragon", "Wizard"]
     if is_spam_card(threat) or threat in {
         "Skeleton King", "Skeleton Barrel", "Royal Recruits", "Goblin Hut", "Furnace",
@@ -83,7 +84,7 @@ def _generic_counters(threat: str) -> list[str]:
         return ["Wizard", "Baby Dragon", "Valkyrie", "Executioner", "Arrows", "The Log", "Bowler"]
     if is_point_target_threat(threat):
         return list(POINT_TARGET_COUNTERS) + ["Inferno Tower", "Tesla"]
-    if role == "building" or threat in CHIP_CARDS:
+    if card_has_role(threat, "building") or threat in CHIP_CARDS:
         return ["Earthquake", "Rocket", "Miner", "Royal Giant"]
     if is_pure_spell(threat):
         return []
@@ -102,15 +103,14 @@ def _damage_score(
     deck: list[str],
 ) -> float:
     score = 0.0
-    role = get_card_role(card)
 
-    if card in WIN_CONDITIONS or role == "win_condition":
+    if card in WIN_CONDITIONS or card_has_role(card, "win_condition"):
         score += 10.0
     if card in CHIP_CARDS:
         score += 9.0
-    if card in TOWER_SPELLS or role == "spell":
+    if card in TOWER_SPELLS or card_has_role(card, "spell"):
         score += 6.0 + min(crowns, 3)
-    if role == "building" and card in CHIP_CARDS:
+    if card_has_role(card, "building") and card in CHIP_CARDS:
         score += 8.0
     if card == "Miner":
         score += 7.0
@@ -177,7 +177,7 @@ def _relevant_user_cards(user_deck: list[str], opp_deck: list[str], threats: lis
 
 
 def _air_in_deck(deck: list[str]) -> list[str]:
-    return [c for c in deck if c in AIR_CARDS or get_card_role(c) == "air"]
+    return [c for c in deck if c in AIR_CARDS or card_has_role(c, "air")]
 
 
 def _swarm_in_deck(deck: list[str]) -> list[str]:

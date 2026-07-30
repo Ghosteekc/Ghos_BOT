@@ -198,6 +198,19 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict:
     if not user_better and not user_worse:
         user_better.append("Колоды близки по контрам и синергии")
 
+    # Рекомендации по составу — только RecommendationEngine (одинаковые для той же колоды).
+    from bot.services.recommendation_engine import RecommendationEngine
+
+    user_rec = RecommendationEngine.analyze(user_cards, apply_swaps=False)
+    ref_rec = RecommendationEngine.analyze(ref_cards, apply_swaps=False)
+
+    for msg in user_rec.balance_issues.messages[:3]:
+        user_worse.append(f"Состав: {msg}")
+    for step in user_rec.improvement_plan.steps[:2]:
+        user_worse.append(f"Улучшение: {step.message}")
+    for msg in ref_rec.balance_issues.messages[:3]:
+        ref_worse.append(f"Состав: {msg}")
+
     return {
         "user_better": _dedupe(user_better),
         "user_worse": _dedupe(user_worse),
@@ -211,4 +224,6 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict:
         "reference_synergy_score": ref_syn_score,
         "user_synergy_notes": user_syn_notes,
         "reference_synergy_notes": ref_syn_notes,
+        "user_recommendation": user_rec.to_public_dict(),
+        "reference_recommendation": ref_rec.to_public_dict(),
     }

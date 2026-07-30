@@ -268,6 +268,9 @@ class ConstructorDeckEntry(BaseModel):
     confidence: float = 0.0
     balanced: bool = True
     score_breakdown: ScoreBreakdownEntry | None = None
+    improvements: list[dict] = []
+    game_plan: dict | None = None
+    recommendation: dict | None = None
 
 
 class ConstructorResponse(BaseModel):
@@ -407,6 +410,8 @@ class DeckCompareResponse(BaseModel):
     reference_synergy_score: float = 50.0
     user_synergy_notes: list[str] = []
     reference_synergy_notes: list[str] = []
+    user_recommendation: dict | None = None
+    reference_recommendation: dict | None = None
 
 
 class DeckCardMatchup(BaseModel):
@@ -427,6 +432,129 @@ class MineDeckStatsRequest(BaseModel):
     cards: list[str]
 
 
+class DeckGamePlan(BaseModel):
+    """План игры колоды (из RecommendationEngine)."""
+
+    how_to_win: str = ""
+    primary_threat: str = ""
+    when_to_attack: str = ""
+    key_cards: list[str] = []
+    core_combinations: list[str] = []
+    critical_weaknesses: list[str] = []
+
+
+class DeckIntentModel(BaseModel):
+    archetype: str = ""
+    play_style: str = ""
+    primary_win: str | None = None
+    required_soft_checks: list[str] = []
+    min_air_defense: int = 0
+    require_building: bool = False
+    min_cycle_cards: int = 0
+    required_role_ids: list[str] = []
+    attack_bias: float = 0.5
+
+
+class BalanceIssuesModel(BaseModel):
+    hard: list[str] = []
+    soft: list[str] = []
+    messages: list[str] = []
+
+
+class CandidateRatingModel(BaseModel):
+    card: str = ""
+    strategy_fit: float = 0.0
+    gameplan_fit: float = 0.0
+    primary_win_support: float = 0.0
+    secondary_combo_support: float = 0.0
+    tempo_fit: float = 0.0
+    deck_identity: float = 0.0
+    existing_synergy: float = 0.0
+    future_synergy: float = 0.0
+    role_overlap: float = 0.0
+    replacement_cost: float = 0.0
+    total: float = 0.0
+
+
+class ImprovementStepModel(BaseModel):
+    category: str = ""
+    message: str = ""
+    drop: str | None = None
+    pick: str | None = None
+    suggested_cards: list[str] = []
+    tier: str | None = None
+    rating: CandidateRatingModel | None = None
+    reason: str | None = None
+
+
+class ImprovementPlanModel(BaseModel):
+    needed: bool = False
+    steps: list[ImprovementStepModel] = []
+    improved_deck: list[str] = []
+    locked: list[str] = []
+
+
+class RejectedCandidateExplanationModel(BaseModel):
+    card: str = ""
+    reasons: list[str] = []
+
+
+class PickExplanationModel(BaseModel):
+    category: str = ""
+    pick: str = ""
+    drop: str | None = None
+    reason: str = ""
+    pros: list[str] = []
+    rejected: list[RejectedCandidateExplanationModel] = []
+
+
+class RecommendationSwapModel(BaseModel):
+    drop: str | None = None
+    pick: str = ""
+    reason: str = ""
+
+
+class DecisionExplanationModel(BaseModel):
+    archetype: str = ""
+    primary_win: str | None = None
+    why_gaps: list[str] = []
+    why_picks: list[str] = []
+    rejected: list[str] = []
+    pick_explanations: list[PickExplanationModel] = []
+    swaps: list[RecommendationSwapModel] = []
+
+
+class CandidateRankingModel(BaseModel):
+    by_gap: dict[str, list[CandidateRatingModel]] = {}
+    applied: list[CandidateRatingModel] = []
+
+
+class RiskAssessmentModel(BaseModel):
+    score: float = 0.0
+    factors: list[str] = []
+    open_gaps: list[str] = []
+
+
+class RecommendationResultModel(BaseModel):
+    intent: DeckIntentModel
+    game_plan: DeckGamePlan
+    balance_issues: BalanceIssuesModel
+    improvement_plan: ImprovementPlanModel
+    decision_explanation: DecisionExplanationModel
+    candidate_ranking: CandidateRankingModel
+    risk_assessment: RiskAssessmentModel
+
+
+class RecommendDeckRequest(BaseModel):
+    cards: list[str]
+    apply_swaps: bool = False
+
+
+class RecommendDeckResponse(BaseModel):
+    recommendation: RecommendationResultModel
+    improvements: list[DeckImprovementSuggestion] = []
+
+
 class MineDeckStatsResponse(BaseModel):
     name: str = ""
     cards: list[DeckCardInfo] = []
@@ -441,6 +569,8 @@ class MineDeckStatsResponse(BaseModel):
     improvements: list[DeckImprovementSuggestion] = []
     balanced: bool = False
     sample_note: str = ""
+    game_plan: DeckGamePlan | None = None
+    recommendation: RecommendationResultModel | None = None
 
 
 class SearchResult(BaseModel):

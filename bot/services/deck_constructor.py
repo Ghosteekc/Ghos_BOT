@@ -163,6 +163,8 @@ def build_constructor_decks(
     pool = _get_arena_pool(arena_id, trophies)
     pool.update(core_names)
 
+    from bot.services.recommendation_engine import RecommendationEngine
+
     built = build_multiple_decks(core_names, pool, limit=limit)
     decks: list[dict] = []
     deck_id = 7000
@@ -171,6 +173,7 @@ def build_constructor_decks(
         if not any(is_attack_win(c) for c in result.deck):
             continue
         synergy_score, synergy_notes = calculate_deck_synergy(result.deck)
+        rec = RecommendationEngine.analyze(result.deck, pool=pool, apply_swaps=False)
         entry = _build_deck_entry(
             core_parsed,
             result.deck,
@@ -180,10 +183,13 @@ def build_constructor_decks(
             confidence=result.confidence,
             synergy_score=synergy_score or result.synergy_score,
             synergy_notes=synergy_notes,
-            balanced=result.balanced,
+            balanced=result.balanced and not rec.balance_issues.soft and not rec.balance_issues.hard,
             score_breakdown=result.score_breakdown.as_dict() if result.score_breakdown else None,
         )
         if entry:
+            entry["improvements"] = rec.improvements_ui()
+            entry["game_plan"] = rec.game_plan.to_dict()
+            entry["recommendation"] = rec.to_public_dict()
             decks.append(entry)
             deck_id += 1
 

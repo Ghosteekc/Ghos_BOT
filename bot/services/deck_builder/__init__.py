@@ -1,6 +1,5 @@
 from bot.services.deck_builder.balance import (
     ScoreBreakdown,
-    balance_issues,
     compute_score_breakdown,
     hard_constraint_issues,
     soft_balance_issues,
@@ -16,7 +15,6 @@ __all__ = [
     "BuildResult",
     "DeckDatabase",
     "ScoreBreakdown",
-    "balance_issues",
     "build_deck_from_core",
     "build_multiple_decks",
     "compute_score_breakdown",

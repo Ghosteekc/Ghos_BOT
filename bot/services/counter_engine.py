@@ -3,8 +3,9 @@ from bot.services.card_data import (
     CARD_META,
     POINT_TARGET_COUNTERS,
     WIN_CONDITIONS,
+    card_has_role,
     get_card_elixir,
-    get_card_role,
+    get_card_roles,
     is_point_target_threat,
     is_spam_card,
 )
@@ -13,6 +14,8 @@ from bot.services.card_matchups import card_counters_target, synergy_partners
 from bot.services.deck_analyzer import analyze_deck, extract_deck, find_opponent_threats
 from bot.services.deck_improver import improve_player_deck
 
+# TODO(card-profile): _ANTI_AIR / _AIR_OFFENSE / splash sets дублируют CardProfile.
+# Алгоритм counter_engine не менять на этом этапе.
 _AIR_OFFENSE = {
     "Minions", "Minion Horde", "Baby Dragon", "Mega Minion", "Inferno Dragon",
     "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix",
@@ -185,7 +188,7 @@ def _locked_attack_cards(deck: list[str]) -> set[str]:
     if locked:
         return locked
     # No Hog/Giant-style card: keep one soft win-condition as the attack core.
-    soft = [c for c in deck if get_card_role(c) == "win_condition"]
+    soft = [c for c in deck if card_has_role(c, "win_condition")]
     return {soft[0]} if soft else set()
 
 
@@ -193,7 +196,8 @@ def _can_swap_in(card: str, deck_without_drop: list[str], drop: str) -> bool:
     """Allow same-role swaps even at role caps; otherwise use normal limits."""
     if card in deck_without_drop:
         return False
-    if get_card_role(card) == get_card_role(drop):
+    # Мультироли: достаточно пересечения roles[], не только primary.
+    if get_card_roles(card) & get_card_roles(drop):
         return True
     return _can_add(card, deck_without_drop)
 
@@ -257,7 +261,7 @@ def _adapt_user_deck_vs_opponent(
 
     # If the user's deck somehow lost its attack card, restore from the original.
     if not any(_is_primary_attack(c) for c in deck) and not any(
-        get_card_role(c) == "win_condition" for c in deck
+        card_has_role(c, "win_condition") for c in deck
     ):
         original_attack = next((c for c in user_deck if _is_primary_attack(c)), None)
         if original_attack and original_attack not in deck:
@@ -368,7 +372,7 @@ def _key_threats(opponent_deck: list[str]) -> list[str]:
     )
 
     for card in opponent_deck:
-        if card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
+        if card in WIN_CONDITIONS or card_has_role(card, "win_condition"):
             threats.append(card)
 
     for card in opponent_deck:
@@ -400,8 +404,8 @@ def _swarm_hard_countered(card: str, opponent_deck: list[str]) -> bool:
 def _deck_role_counts(deck: list[str]) -> dict[str, int]:
     return {
         "win": sum(1 for c in deck if _is_primary_attack(c)),
-        "spell": sum(1 for c in deck if get_card_role(c) == "spell"),
-        "building": sum(1 for c in deck if get_card_role(c) == "building"),
+        "spell": sum(1 for c in deck if card_has_role(c, "spell")),
+        "building": sum(1 for c in deck if card_has_role(c, "building")),
     }
 
 
@@ -409,12 +413,11 @@ def _can_add(card: str, deck: list[str]) -> bool:
     if card in deck:
         return False
     counts = _deck_role_counts(deck)
-    role = get_card_role(card)
     if _is_primary_attack(card):
         return counts["win"] < _MAX_WIN_CONDITIONS
-    if role == "spell":
+    if card_has_role(card, "spell"):
         return counts["spell"] < _MAX_SPELLS
-    if role == "building":
+    if card_has_role(card, "building"):
         return counts["building"] < _MAX_BUILDINGS
     return True
 
@@ -441,7 +444,7 @@ def _score_counter_card(
 
     for threat in threats:
         tier = card_counters_target(card, threat)
-        weight = 8.0 if threat in WIN_CONDITIONS or get_card_role(threat) == "win_condition" else 5.0
+        weight = 8.0 if threat in WIN_CONDITIONS or card_has_role(threat, "win_condition") else 5.0
         if tier == "strong":
             score += weight
         elif tier == "partial":
@@ -520,7 +523,7 @@ def _replace_weakest(
         return deck
     candidates = []
     for i, card in enumerate(deck):
-        if skip_win and (_is_primary_attack(card) or get_card_role(card) == "win_condition"):
+        if skip_win and (_is_primary_attack(card) or card_has_role(card, "win_condition")):
             continue
         candidates.append((i, _card_score_in_context(card, opponent_deck, threats)))
     if not candidates:
@@ -537,7 +540,7 @@ def _ensure_spell(
     opponent_deck: list[str] | None = None,
     threats: list[str] | None = None,
 ) -> list[str]:
-    if any(get_card_role(c) == "spell" for c in deck):
+    if any(card_has_role(c, "spell") for c in deck):
         return deck
     opponent_deck = opponent_deck or []
     threats = threats or []
@@ -581,7 +584,7 @@ def _ensure_win_condition(
 
 
 def _ensure_building(deck: list[str], pool: set[str], opponent_deck: list[str]) -> list[str]:
-    if any(get_card_role(c) == "building" for c in deck):
+    if any(card_has_role(c, "building") for c in deck):
         return deck
     if not set(opponent_deck) & _PUSH_THREATS:
         return deck
@@ -640,14 +643,14 @@ def _trim_weak_cards(
             break
         unlocked = [
             c for c in out
-            if not _is_primary_attack(c) and get_card_role(c) != "win_condition"
+            if not _is_primary_attack(c) and not card_has_role(c, "win_condition")
         ]
         if not unlocked:
             break
         weakest = min(
             unlocked,
             key=lambda c: (
-                1 if get_card_role(c) == "spell" and _deck_role_counts(out)["spell"] <= 1 else 0,
+                1 if card_has_role(c, "spell") and _deck_role_counts(out)["spell"] <= 1 else 0,
                 _card_score_in_context(c, opponent_deck, threats),
             ),
         )
@@ -686,7 +689,7 @@ def _trim_excess(
     out = list(deck)
 
     while _deck_role_counts(out)["spell"] > _MAX_SPELLS:
-        spells = [c for c in out if get_card_role(c) == "spell"]
+        spells = [c for c in out if card_has_role(c, "spell")]
         drop = min(spells, key=lambda c: _card_score_in_context(c, opponent_deck, threats))
         out.remove(drop)
 
@@ -707,7 +710,7 @@ def _trim_excess(
         out.remove(drop)
 
     while _deck_role_counts(out)["building"] > _MAX_BUILDINGS:
-        buildings = [c for c in out if get_card_role(c) == "building"]
+        buildings = [c for c in out if card_has_role(c, "building")]
         drop = min(buildings, key=lambda c: _card_score_in_context(c, opponent_deck, threats))
         out.remove(drop)
 
@@ -715,7 +718,7 @@ def _trim_excess(
 
 
 def _deck_has_air(deck: list[str]) -> bool:
-    return any(c in _AIR_OFFENSE or get_card_role(c) == "air" for c in deck)
+    return any(c in _AIR_OFFENSE or card_has_role(c, "air") for c in deck)
 
 
 def _is_anti_air_specialist(card: str) -> bool:
@@ -793,26 +796,24 @@ def _get_arena_pool(arena_id: int | None, trophies: int | None = None) -> set[st
 
 
 def _find_replacement(card: str, pool: set[str], current: list[str]) -> str | None:
-    role = get_card_role(card)
+    """Замена по пересечению roles[] (не только primary) + ближайший эликсир."""
     elixir = get_card_elixir(card)
+    needed = get_card_roles(card)
+    current_set = set(current)
 
-    role_map = {
-        "win_condition": ["Hog Rider", "Balloon", "Royal Giant", "Giant", "Miner"],
-        "spell": ["Zap", "Fireball", "Arrows", "The Log"],
-        "building": ["Cannon", "Tesla", "Inferno Tower"],
-        "tank": ["Knight", "Valkyrie", "Ice Golem", "Guards", "Mini P.E.K.K.A"],
-        "support": ["Musketeer", "Archers", "Wizard", "Electro Wizard"],
-        "swarm": ["Skeletons", "Goblins", "Bats", "Goblin Gang"],
-    }
+    same_roles = [
+        c for c in pool
+        if c not in current_set and (get_card_roles(c) & needed)
+    ]
+    if same_roles:
+        return min(same_roles, key=lambda c: abs(get_card_elixir(c) - elixir))
 
-    candidates = role_map.get(role, [])
-    for c in candidates:
-        if c in pool and c not in current:
-            return c
-
-    for c in pool:
-        if c not in current and abs(get_card_elixir(c) - elixir) <= 1:
-            return c
+    near = [
+        c for c in pool
+        if c not in current_set and abs(get_card_elixir(c) - elixir) <= 1
+    ]
+    if near:
+        return min(near, key=lambda c: abs(get_card_elixir(c) - elixir))
     return None
 
 

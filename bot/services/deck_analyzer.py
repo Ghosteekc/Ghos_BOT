@@ -3,13 +3,16 @@ from dataclasses import dataclass
 
 from bot.services.card_data import (
     SYNERGIES,
-    WIN_CONDITIONS,
+    card_has_role,
     get_card_elixir,
-    get_card_role,
     has_point_target_answer,
     is_point_target_threat,
     is_spam_card,
 )
+from bot.services.card_profile import get_card_profile
+
+# TODO(card-profile): локальные anti_air / splash sets дублируют CardProfile roles.
+# Не менять алгоритм analyze_deck — только помечено для будущей миграции.
 from bot.services.card_matchups import calculate_matchup_score as _deckshop_matchup_score
 from bot.services.card_matchups import counters_in_deck, ru, ru_list
 from bot.services.clash_api import normalize_tag
@@ -48,25 +51,13 @@ def analyze_deck(cards: list[str]) -> DeckStats:
     elixirs = [get_card_elixir(c) for c in cards]
     avg = sum(elixirs) / len(elixirs) if elixirs else 0.0
 
-    win_conds = [c for c in cards if c in WIN_CONDITIONS or get_card_role(c) == "win_condition"]
-    spells = [c for c in cards if get_card_role(c) == "spell"]
-    buildings = [c for c in cards if get_card_role(c) == "building"]
+    # Мультироли: win/spell/building/air/splash — по полному roles[], не primary.
+    win_conds = [c for c in cards if card_has_role(c, "win_condition")]
+    spells = [c for c in cards if card_has_role(c, "spell")]
+    buildings = [c for c in cards if card_has_role(c, "building")]
 
-    anti_air = {
-        "Archers", "Musketeer", "Three Musketeers", "Wizard", "Baby Dragon", "Electro Dragon",
-        "Executioner", "Electro Wizard", "Ice Wizard", "Inferno Dragon", "Magic Archer",
-        "Flying Machine", "Minions", "Minion Horde", "Mega Minion", "Bats", "Skeleton Dragons",
-        "Firecracker", "Mother Witch", "Phoenix", "Princess", "Hunter", "Dart Goblin",
-        "Witch", "Spear Goblins", "Zappies", "Rascals", "Archer Queen", "Little Prince",
-        "Night Witch", "Tesla", "Inferno Tower",
-    }
-    splash_cards = {
-        "Wizard", "Baby Dragon", "Valkyrie", "Bowler", "Executioner", "Bomber",
-        "Fireball", "Arrows", "Poison", "Earthquake", "Electro Dragon",
-        "Goblin Demolisher", "Magic Archer", "Witch", "Electro Wizard", "Ice Wizard",
-        "Skeleton Dragons", "Mega Knight", "Dark Prince", "Firecracker", "Skeleton King",
-        "Mother Witch", "Royal Delivery",
-    }
+    air_coverage = any(get_card_profile(c).is_air_defense for c in cards)
+    splash_coverage = any(card_has_role(c, "splash") for c in cards)
 
     return DeckStats(
         cards=cards,
@@ -74,8 +65,8 @@ def analyze_deck(cards: list[str]) -> DeckStats:
         win_conditions=win_conds,
         spells=spells,
         buildings=buildings,
-        air_coverage=len(set(cards) & anti_air) >= 1,
-        splash_coverage=bool(set(cards) & splash_cards),
+        air_coverage=air_coverage,
+        splash_coverage=splash_coverage,
         point_target_coverage=has_point_target_answer(cards),
     )
 
@@ -83,7 +74,7 @@ def analyze_deck(cards: list[str]) -> DeckStats:
 def find_opponent_threats(opponent_deck: list[str]) -> list[str]:
     threats = []
     for card in opponent_deck:
-        if card in WIN_CONDITIONS or get_card_role(card) == "win_condition":
+        if card_has_role(card, "win_condition"):
             threats.append(card)
     return threats
 
