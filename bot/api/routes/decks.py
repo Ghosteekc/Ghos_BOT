@@ -557,7 +557,7 @@ async def recommend_deck(
     body: RecommendDeckRequest,
     user: User = Depends(require_linked_player),
 ) -> RecommendDeckResponse:
-    """Единый RecommendationEngine — SoT рекомендаций для Passport / анализа."""
+    """Объяснение колоды либо явное улучшение пользовательской колоды."""
     del user
     cards = [c.strip() for c in body.cards if c and str(c).strip()]
     if len(cards) != 8 or len(set(cards)) != 8:

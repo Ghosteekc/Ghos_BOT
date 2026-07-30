@@ -540,6 +540,7 @@ class DeckCoachingModel(BaseModel):
     play_style: str = ""
     key_combinations: list[str] = []
     usage_tips: list[str] = []
+    card_choices: list[dict[str, object]] = []
 
 
 class RecommendationResultModel(BaseModel):

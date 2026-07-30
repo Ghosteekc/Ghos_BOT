@@ -474,7 +474,8 @@ def _pick_best_filler(
             return float("-inf")
         return _filler_candidate_score(card, deck, core, db, archetype, missing, pair_synergy)
 
-    best = max(candidates, key=rank)
+    # Детерминированный tie-break: set pool не должен менять готовую колоду.
+    best = max(sorted(candidates), key=lambda card: (rank(card), card))
     return best if rank(best) > float("-inf") else None
 
 

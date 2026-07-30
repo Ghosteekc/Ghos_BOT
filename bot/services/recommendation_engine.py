@@ -1,4 +1,4 @@
-"""Единый RecommendationEngine — единственный источник рекомендаций по колоде.
+"""RecommendationEngine: объяснение Builder и улучшение пользовательской колоды.
 
 План улучшений строится последовательно:
   Intent → gaps → sort by priority → solve one → virtual apply → re-detect → …
@@ -50,19 +50,6 @@ from bot.services.recommendation_cache import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Колода от Builder: выше порога — без замен (не опровергаем собственную сборку).
-_BUILDER_SCORE_NO_SWAP = 58.0
-# В режиме Builder меняем не больше одной карты и только при критическом пробеле.
-_BUILDER_MAX_SWAPS = 1
-_CRITICAL_GAP_CATEGORIES = frozenset({
-    "win_condition",
-    "spells",
-    "finishers",
-    "anti_air",
-    "defense",
-})
-
 
 class DeckOrigin(str, Enum):
     """Происхождение колоды для политики рекомендаций."""
@@ -188,12 +175,13 @@ class RiskAssessment:
 
 @dataclass(frozen=True)
 class DeckCoaching:
-    """Советы по колоде без замен (режим Builder при хорошей оценке)."""
+    """Объяснение готовой колоды Builder без подбора замен."""
 
     strengths: list[str]
     play_style: str
     key_combinations: list[str]
     usage_tips: list[str]
+    card_choices: list[dict[str, object]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -201,6 +189,7 @@ class DeckCoaching:
             "play_style": self.play_style,
             "key_combinations": list(self.key_combinations),
             "usage_tips": list(self.usage_tips),
+            "card_choices": list(self.card_choices),
         }
 
 
@@ -316,12 +305,6 @@ class RecommendationResult:
             for pe in self.decision_explanation.pick_explanations
             if pe.pick
         ]
-        # Builder без критических замен: не отдаём soft-претензии как «слабости».
-        builder_ok = (
-            self.origin == DeckOrigin.BUILDER.value
-            and not self.improvement_plan.needed
-            and not swaps
-        )
         return {
             "intent": {
                 "archetype": self.intent.archetype,
@@ -338,7 +321,7 @@ class RecommendationResult:
             "balance_issues": {
                 "hard": [],
                 "soft": [],
-                "messages": [] if builder_ok else list(self.balance_issues.messages),
+                "messages": list(self.balance_issues.messages),
             },
             "improvement_plan": {
                 "needed": self.improvement_plan.needed,
@@ -379,9 +362,9 @@ class RecommendationResult:
             },
             "candidate_ranking": {"by_gap": {}, "applied": []},
             "risk_assessment": {
-                "score": 0.0 if builder_ok else self.risk_assessment.score,
-                "factors": [] if builder_ok else list(self.risk_assessment.factors),
-                "open_gaps": [] if builder_ok else list(self.risk_assessment.open_gaps),
+                "score": self.risk_assessment.score,
+                "factors": list(self.risk_assessment.factors),
+                "open_gaps": list(self.risk_assessment.open_gaps),
             },
             "origin": self.origin,
             "coaching": self.coaching.to_dict() if self.coaching else None,
@@ -827,26 +810,11 @@ def _solve_gap(
     return solution
 
 
-def _is_critical_gap(gap: dict, intent: DeckIntent, balance: BalanceIssues) -> bool:
-    """Критический пробел — единственное основание для замены в режиме Builder."""
-    cat = gap["category"]
-    if cat == "win_condition":
-        return True
-    if cat == "spells":
-        return True
-    if cat == "finishers":
-        return "big_spell" in balance.soft
-    if cat == "anti_air":
-        return intent.min_air_defense > 0 and "air_defense" in balance.soft
-    if cat == "defense":
-        return intent.require_building and "building" in balance.soft
-    return False
-
-
 def build_deck_coaching(
     intent: DeckIntent,
     game_plan: GamePlan,
     *,
+    deck: list[str],
     synergy_notes: list[str] | None = None,
 ) -> DeckCoaching:
     """Сильные стороны / стиль / комбинации / советы — без замен карт."""
@@ -882,11 +850,40 @@ def build_deck_coaching(
         tips.append(f"Играйте в стиле «{intent.play_style}» от сильных обменов.")
 
     combos = list(game_plan.core_combinations[:4])
+    role_labels = {
+        "win_condition": "главная win-condition",
+        "big_spell": "закрывает добивание и защиту",
+        "small_spell": "контролирует мелкий спам и поддерживает цикл",
+        "air_defense": "закрывает воздушную защиту",
+        "anti_tank": "останавливает тяжёлые цели",
+        "anti_swarm": "закрывает наземный спам",
+        "splash": "даёт сплеш против роя",
+        "building": "даёт контроль через здание",
+        "cycle": "ускоряет возврат ключевых карт",
+        "counterpush": "усиливает контратаку",
+        "support": "поддерживает основной пуш",
+        "dps": "добавляет урон в защите и контратаке",
+    }
+    card_choices: list[dict[str, object]] = []
+    for card in deck:
+        from bot.services.card_data import get_card_roles
+
+        roles = sorted(get_card_roles(card))
+        role_text = [role_labels[role] for role in roles if role in role_labels]
+        combo = next((line for line in combos if card in line), "")
+        reason = role_text[0] if role_text else "поддерживает общий план колоды"
+        card_choices.append({
+            "card": card,
+            "roles": role_text[:3],
+            "reason": reason[:1].upper() + reason[1:] + ".",
+            "synergy": combo or "Работает в связке с ключевыми картами колоды.",
+        })
     return DeckCoaching(
         strengths=strengths[:5],
         play_style=intent.play_style,
         key_combinations=combos,
         usage_tips=tips[:4],
+        card_choices=card_choices,
     )
 
 
@@ -1150,13 +1147,13 @@ class RecommendationEngine:
         builder_score: float | None = None,
         synergy_notes: list[str] | None = None,
     ) -> RecommendationResult:
-        """Все режимы используют один build_improvement_plan (последовательный сценарий).
+        """Объясняет колоду либо улучшает явную пользовательскую колоду.
 
-        origin=builder: колода только что собрана Builder —
-          не больше одной замены; при score ≥ порога — coaching без замен.
+        ``origin=builder`` всегда explanation-only: выбор карт уже завершён
+        Builder и здесь не пересматривается. Поиск замен разрешён лишь когда
+        пользователь явно запросил ``apply_swaps=True`` для своей колоды.
         """
         from bot.services.counter_engine import _get_arena_pool
-        from bot.services.deck_builder.balance import compute_score_breakdown
 
         origin_val = (
             origin.value if isinstance(origin, DeckOrigin) else str(origin or DeckOrigin.PLAYER.value)
@@ -1231,8 +1228,9 @@ class RecommendationEngine:
         card_pool.update(work)
         card_pool.update(preferred_cards or [])
 
+        is_improver = origin_val == DeckOrigin.PLAYER.value and apply_swaps
         prep_notes: list[str] = []
-        if apply_swaps and not is_builder:
+        if is_improver:
             _apply_arena_fixes(work, card_pool, prep_notes)
 
         locked = _locked_cards(work, db)
@@ -1240,53 +1238,25 @@ class RecommendationEngine:
         intent = DeckIntentEngine.infer(work, archetype=arch)
         start_balance = _balance_issues_for(work, db, arch)
 
-        score = builder_score
-        if score is None and is_builder:
-            core_guess = list(locked)[:4] or work[:4]
-            score = compute_score_breakdown(work, db, core_guess, arch).total
-
-        # Builder: без критических дыр и при достаточной оценке — только coaching.
-        allow_swaps = True
-        max_steps = 6
-        allowed_categories: frozenset[str] | None = None
+        # RecommendationEngine не является вторым Builder.
+        # Замены существуют только в явном режиме Improve My Deck.
+        allow_swaps = is_improver
         coaching: DeckCoaching | None = None
-
-        if is_builder:
-            max_steps = _BUILDER_MAX_SWAPS
-            raw_gaps = _collect_improvement_gaps(work, db, intent)
-            critical_gaps = [
-                g for g in raw_gaps
-                if _is_critical_gap(g, intent, start_balance)
-            ]
-            score_ok = score is not None and float(score) >= _BUILDER_SCORE_NO_SWAP
-            no_hard = not start_balance.hard
-            # Выше порога — не опровергаем сборку заменами (только coaching).
-            if score_ok and no_hard:
-                allow_swaps = False
-                max_steps = 0
-            elif critical_gaps:
-                allowed_categories = frozenset(g["category"] for g in critical_gaps)
-            else:
-                # Soft-дыры без критичности — не предлагаем замены.
-                allow_swaps = False
-                max_steps = 0
-
-        if apply_swaps and not is_builder:
+        if is_improver:
             gaps0 = _collect_improvement_gaps(work, db, intent)
             if gaps0 and not prep_notes:
                 _fix_elixir_if_needed(work, card_pool, locked, prep_notes, intent)
                 locked = _locked_cards(work, db)
                 intent = DeckIntentEngine.infer(work, archetype=arch)
 
-        if allow_swaps and max_steps > 0:
+        if allow_swaps:
             plan, ranking, why_gaps, why_picks, rejected, pick_explanations = build_improvement_plan(
                 work,
                 intent=intent,
                 pool=card_pool,
                 db=db,
                 locked=locked,
-                max_steps=max_steps,
-                allowed_categories=allowed_categories,
+                max_steps=6,
             )
         else:
             plan = ImprovementPlan(
@@ -1301,7 +1271,7 @@ class RecommendationEngine:
         why_picks = [*prep_notes, *why_picks]
 
         improved = list(plan.improved_deck)
-        if apply_swaps and not is_builder:
+        if is_improver:
             locked_set = set(plan.locked)
             _trim_spell_and_win_limits(improved, locked_set, db)
             plan = ImprovementPlan(
@@ -1316,9 +1286,12 @@ class RecommendationEngine:
             plan.improved_deck, archetype=intent.archetype, intent=intent,
         )
 
-        if is_builder and not any(s.drop and s.pick for s in plan.steps):
+        if is_builder:
             coaching = build_deck_coaching(
-                intent, game_plan, synergy_notes=synergy_notes,
+                intent,
+                game_plan,
+                deck=plan.improved_deck,
+                synergy_notes=synergy_notes,
             )
             why_picks = [
                 f"Стиль игры: {coaching.play_style}",
@@ -1327,18 +1300,7 @@ class RecommendationEngine:
                 *[f"Совет: {t}" for t in coaching.usage_tips[:2]],
             ]
 
-        end_gaps = _collect_improvement_gaps(plan.improved_deck, db, intent)
-        if is_builder:
-            end_gaps = [g for g in end_gaps if _is_critical_gap(g, intent, start_balance)]
-            # Информационные open-steps без swap не добавляем в builder-режиме
-            # (build_improvement_plan мог добавить — обрежем).
-            plan = ImprovementPlan(
-                needed=any(s.drop and s.pick for s in plan.steps),
-                steps=[s for s in plan.steps if s.drop and s.pick][:_BUILDER_MAX_SWAPS],
-                improved_deck=list(plan.improved_deck),
-                locked=list(plan.locked),
-            )
-            pick_explanations = pick_explanations[:_BUILDER_MAX_SWAPS]
+        end_gaps = _collect_improvement_gaps(plan.improved_deck, db, intent) if is_improver else []
 
         open_cats = [g["category"] for g in end_gaps]
         explanation = DecisionExplanation(

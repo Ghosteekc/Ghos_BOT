@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from bot.services.card_data import WIN_CONDITIONS, get_card_elixir
+from bot.services.card_data import WIN_CONDITIONS, card_has_role, get_card_elixir
 from bot.services.card_matchups import calculate_deck_synergy, synergy_between
 from bot.services.deck_builder.balance import (
     ScoreBreakdown,
@@ -44,6 +44,7 @@ class BuildResult:
     source_deck_id: str | None = None
     balanced: bool = True
     score_breakdown: ScoreBreakdown | None = None
+    validation: object | None = None
 
 
 @dataclass
@@ -218,6 +219,117 @@ def _result_balanced(deck: list[str], core: list[str], db: DeckDatabase, archety
     return is_playable_balanced(breakdown, core_synergy_avg=core_avg)
 
 
+def _validate_variant(
+    deck: list[str],
+    core: list[str],
+    db: DeckDatabase,
+    decision,
+):
+    """Единый gate: Builder возвращает только стабильные варианты."""
+    from bot.services.deck_builder.validation import validate_builder_variant
+
+    return validate_builder_variant(
+        deck,
+        core,
+        db,
+        archetype=decision.archetype,
+        intent=decision.intent,
+        required_roles=decision.required_roles,
+        mandatory_cards=decision.mandatory_cards,
+        pair_synergy=lambda a, b: _pair_synergy(db, a, b),
+    )
+
+
+_REBUILD_ROLE_ORDER = (
+    "big_spell",
+    "small_spell",
+    "air_defense",
+    "anti_tank",
+    "anti_swarm",
+    "building",
+    "cycle",
+)
+
+
+def _has_required_role(cards: list[str], role: str) -> bool:
+    if role == "cycle":
+        return any(card_has_role(card, role) or get_card_elixir(card) <= 2 for card in cards)
+    return any(card_has_role(card, role) for card in cards)
+
+
+def _required_role_seed(
+    core: list[str],
+    pool: set[str],
+    db: DeckDatabase,
+    decision,
+) -> list[str]:
+    """Детерминированная стартовая заготовка для пересборки без шаблона.
+
+    Заполняет именно отсутствующие Required Roles, затем ``finalize_deck``
+    выполняет обычную балансировку. Это не рекомендация Engine и не fallback
+    случайной картой из set.
+    """
+    from bot.services.special_card_policy import SpecialCardPolicy
+
+    seed = list(core)
+    for role in _REBUILD_ROLE_ORDER:
+        if len(seed) >= 8 or role not in decision.required_roles:
+            continue
+        if _has_required_role(seed, role):
+            continue
+        candidates = [
+            card
+            for card in sorted(pool)
+            if card not in seed
+            and card_has_role(card, role)
+            and not SpecialCardPolicy.forbid_as_auto_pick(
+                card,
+                deck=seed,
+                archetype=decision.archetype,
+                intent=decision.intent,
+                game_plan=decision.game_plan,
+            )
+        ]
+        if not candidates:
+            continue
+        seed.append(max(
+            candidates,
+            key=lambda card: (
+                sum(_pair_synergy(db, card, existing) for existing in seed),
+                -get_card_elixir(card),
+                card,
+            ),
+        ))
+    # Добираем оставшиеся слоты недорогими не-spell картами. Это сохраняет
+    # темп archetype и не даёт финальному добору зависеть от порядка set pool.
+    while len(seed) < 8:
+        candidates = [
+            card
+            for card in sorted(pool)
+            if card not in seed
+            and not is_spell(db, card)
+            and get_card_elixir(card) <= 3
+            and not SpecialCardPolicy.forbid_as_auto_pick(
+                card,
+                deck=seed,
+                archetype=decision.archetype,
+                intent=decision.intent,
+                game_plan=decision.game_plan,
+            )
+        ]
+        if not candidates:
+            break
+        seed.append(max(
+            candidates,
+            key=lambda card: (
+                sum(_pair_synergy(db, card, existing) for existing in seed),
+                -get_card_elixir(card),
+                card,
+            ),
+        ))
+    return seed
+
+
 def _fillers_from_template(core: list[str], template: DeckRecord, db: DeckDatabase) -> list[str]:
     from bot.services.special_card_policy import SpecialCardPolicy
 
@@ -315,16 +427,54 @@ def build_deck_from_core(
     decision = prepare_constructor_decision(core, detect_archetype=_detect_archetype)
     archetype = decision.archetype
 
-    # 3) Выбор шаблона (с bias Intent/GamePlan)
+    # 3–9) Выбор шаблонов → сборка → Builder gate → отклонение слабых вариантов.
     ranked = _rank_similar_decks(db, core, archetype, limit=6, decision=decision)
-    best = ranked[0] if ranked else None
+    selected: ScoredDeck | None = None
+    validation = None
+    deck: list[str] | None = None
+    for candidate in ranked:
+        for filler_skip in (0, 1, 2):
+            trial = _build_one_variant(
+                core,
+                db,
+                pool,
+                archetype,
+                candidate.record,
+                filler_skip=filler_skip,
+            )
+            trial_validation = _validate_variant(trial, core, db, decision)
+            if trial_validation.stable:
+                deck = trial
+                validation = trial_validation
+                selected = candidate
+                break
+        if deck is not None:
+            break
 
-    # 4–6) Кандидаты из шаблона → оценка finalize → итоговая колода
-    deck = _build_one_variant(core, db, pool, archetype, best.record if best else None)
+    # Последняя попытка — сначала детерминированно закрыть Required Roles,
+    # затем тот же finalize + gate.
+    if deck is None:
+        trial = _finalize_deck(
+            _required_role_seed(core, pool, db, decision),
+            core,
+            db,
+            pool,
+            archetype,
+        )
+        trial_validation = _validate_variant(trial, core, db, decision)
+        if trial_validation.stable:
+            deck = trial
+            validation = trial_validation
+
+    if deck is None or validation is None:
+        raise ValueError(
+            "Builder не смог построить стабильную колоду: "
+            + ", ".join(trial_validation.issues),
+        )
     synergy_score, _ = calculate_deck_synergy(deck)
-    breakdown = _build_score_breakdown(deck, core, db, archetype)
+    breakdown = validation.score_breakdown
     # лёгкая подстройка confidence под decision-fit (API BuildResult без новых полей)
-    conf = round(best.confidence if best else 35.0, 1)
+    conf = round(selected.confidence if selected else 35.0, 1)
     conf = min(100.0, conf + result_decision_bonus(deck, decision) * 0.4)
 
     return BuildResult(
@@ -333,9 +483,10 @@ def build_deck_from_core(
         average_elixir=_avg_elixir(deck, db),
         synergy_score=round(synergy_score, 1),
         confidence=round(conf, 1),
-        source_deck_id=best.record.id if best else None,
-        balanced=_result_balanced(deck, core, db, archetype),
+        source_deck_id=selected.record.id if selected else None,
+        balanced=True,
         score_breakdown=breakdown,
+        validation=validation,
     )
 
 
@@ -371,16 +522,15 @@ def build_multiple_decks(
             arch = sd.record.archetype or archetype
             if len(deck) != 8 or hard_constraint_issues(deck, db, core):
                 continue
-            from bot.services.deck_builder.win_plan_check import evaluate_win_plan
-
-            if not evaluate_win_plan(deck, db, arch).complete:
+            validation = _validate_variant(deck, core, db, decision)
+            if not validation.stable:
                 continue
             key = _deck_key(deck)
             if key in seen:
                 continue
             seen.add(key)
             synergy_score, _ = calculate_deck_synergy(deck)
-            breakdown = _build_score_breakdown(deck, core, db, arch)
+            breakdown = validation.score_breakdown
             conf = min(100.0, sd.confidence + result_decision_bonus(deck, decision) * 0.4)
             results.append(BuildResult(
                 deck=deck,
@@ -389,33 +539,26 @@ def build_multiple_decks(
                 synergy_score=round(synergy_score, 1),
                 confidence=round(conf, 1),
                 source_deck_id=sd.record.id,
-                balanced=_result_balanced(deck, core, db, arch),
+                balanced=True,
                 score_breakdown=breakdown,
+                validation=validation,
             ))
             break
 
-    if not results:
-        deck = _build_one_variant(core, db, pool, archetype)
-        key = _deck_key(deck)
-        seen.add(key)
-        synergy_score, _ = calculate_deck_synergy(deck)
-        breakdown = _build_score_breakdown(deck, core, db, archetype)
-        conf = 35.0 + result_decision_bonus(deck, decision) * 0.4
-        results.append(BuildResult(
-            deck=deck,
-            archetype=archetype,
-            average_elixir=_avg_elixir(deck, db),
-            synergy_score=round(synergy_score, 1),
-            confidence=round(min(100.0, conf), 1),
-            balanced=_result_balanced(deck, core, db, archetype),
-            score_breakdown=breakdown,
-        ))
-
-    fallback = _finalize_deck(core, core, db, pool, archetype)
+    fallback = _finalize_deck(
+        _required_role_seed(core, pool, db, decision),
+        core,
+        db,
+        pool,
+        archetype,
+    )
     fkey = _deck_key(fallback)
-    if fkey not in seen and len(results) < limit:
+    fallback_validation = _validate_variant(fallback, core, db, decision)
+    # Если шаблоны не прошли gate, возвращаем только стабильную пересборку
+    # Required Roles. Не полагаемся на transient seen от отброшенных вариантов.
+    if fallback_validation.stable and (not results or (fkey not in seen and len(results) < limit)):
         synergy_score, _ = calculate_deck_synergy(fallback)
-        breakdown = _build_score_breakdown(fallback, core, db, archetype)
+        breakdown = fallback_validation.score_breakdown
         conf = 30.0 + result_decision_bonus(fallback, decision) * 0.4
         results.append(BuildResult(
             deck=fallback,
@@ -423,8 +566,9 @@ def build_multiple_decks(
             average_elixir=_avg_elixir(fallback, db),
             synergy_score=round(synergy_score, 1),
             confidence=round(min(100.0, conf), 1),
-            balanced=_result_balanced(fallback, core, db, archetype),
+            balanced=True,
             score_breakdown=breakdown,
+            validation=fallback_validation,
         ))
 
     def _rank_key(r: BuildResult) -> float:

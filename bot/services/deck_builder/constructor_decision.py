@@ -24,6 +24,27 @@ class ConstructorDecision:
     archetype: str
     intent: DeckIntent
     game_plan: GamePlan
+    required_roles: frozenset[str]
+    mandatory_cards: frozenset[str]
+
+
+def required_roles_for_intent(intent: DeckIntent) -> frozenset[str]:
+    """Роли, которые Builder обязан сохранить в готовом варианте."""
+    soft_to_role = {
+        "big_spell": "big_spell",
+        "small_spell": "small_spell",
+        "air_defense": "air_defense",
+        "anti_tank": "anti_tank",
+        "anti_swarm": "anti_swarm",
+        "building": "building",
+        "cycle": "cycle",
+    }
+    roles = {
+        soft_to_role[check]
+        for check in intent.required_soft_checks
+        if check in soft_to_role
+    }
+    return frozenset(roles)
 
 
 def prepare_constructor_decision(
@@ -41,6 +62,9 @@ def prepare_constructor_decision(
         archetype=archetype,
         intent=intent,
         game_plan=game_plan,
+        required_roles=required_roles_for_intent(intent),
+        # Пользовательское core — обязательная часть идентичности колоды.
+        mandatory_cards=frozenset(core),
     )
 
 

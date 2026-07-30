@@ -166,6 +166,15 @@ def build_constructor_decks(
     from bot.services.recommendation_engine import DeckOrigin, RecommendationEngine
 
     built = build_multiple_decks(core_names, pool, limit=limit)
+    # Builder никогда не отдаёт незавершённый вариант. Если ни один шаблон не
+    # прошёл gate, делаем одну детерминированную пересборку Required Roles.
+    if not built:
+        from bot.services.deck_builder.builder import build_deck_from_core
+
+        try:
+            built = [build_deck_from_core(core_names, pool=pool)]
+        except ValueError:
+            built = []
     decks: list[dict] = []
     deck_id = 7000
 
@@ -194,11 +203,12 @@ def build_constructor_decks(
             confidence=result.confidence,
             synergy_score=synergy_score or result.synergy_score,
             synergy_notes=synergy_notes,
-            balanced=result.balanced and not rec.improvement_plan.needed,
+            balanced=result.balanced,
             score_breakdown=result.score_breakdown.as_dict() if result.score_breakdown else None,
         )
         if entry:
-            entry["improvements"] = rec.improvements_ui()
+            # Constructor не показывает альтернативы к только что выбранным картам.
+            entry["improvements"] = []
             entry["game_plan"] = rec.game_plan.to_dict()
             entry["recommendation"] = rec.to_public_dict()
             decks.append(entry)
