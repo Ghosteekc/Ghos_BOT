@@ -563,10 +563,18 @@ async def recommend_deck(
     if len(cards) != 8 or len(set(cards)) != 8:
         raise HTTPException(status_code=400, detail="Нужна полная колода из 8 уникальных карт")
 
-    from bot.services.recommendation_engine import RecommendationEngine
+    from bot.services.recommendation_engine import DeckOrigin, RecommendationEngine
 
     await ensure_cards_loaded()
-    result = RecommendationEngine.analyze(cards, apply_swaps=body.apply_swaps)
+    origin = (body.origin or "player").strip().lower()
+    if origin not in {DeckOrigin.PLAYER.value, DeckOrigin.BUILDER.value}:
+        origin = DeckOrigin.PLAYER.value
+    result = RecommendationEngine.analyze(
+        cards,
+        apply_swaps=body.apply_swaps,
+        origin=origin,
+        builder_score=body.builder_score,
+    )
     payload = result.to_public_dict()
     return RecommendDeckResponse(
         recommendation=RecommendationResultModel(**payload),

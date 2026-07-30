@@ -427,6 +427,10 @@ def _filler_candidate_score(
     missing_roles: set[str],
     pair_synergy: PairSynergyFn,
 ) -> float:
+    from bot.services.special_card_policy import SpecialCardPolicy
+
+    if SpecialCardPolicy.forbid_as_auto_pick(card, deck=deck + list(core), archetype=archetype):
+        return float("-inf")
     test_deck = deck + [card]
     syn_with_deck = sum(pair_synergy(card, x) for x in deck) / max(len(deck), 1)
     syn_with_core = sum(pair_synergy(card, c) for c in core) / max(len(core), 1)
@@ -449,12 +453,16 @@ def _pick_best_filler(
     allow_spells: bool = True,
     allow_wins: bool = True,
 ) -> str | None:
+    from bot.services.special_card_policy import SpecialCardPolicy
+
     missing = _missing_soft_roles(deck, db, archetype)
+    context = list(dict.fromkeys([*deck, *core]))
     candidates = [
         c for c in pool
         if c not in deck
         and (allow_spells or not is_spell(db, c))
         and (allow_wins or not is_attack_win(c))
+        and not SpecialCardPolicy.forbid_as_auto_pick(c, deck=context, archetype=archetype)
     ]
     if not candidates:
         return None
@@ -621,5 +629,13 @@ def finalize_deck(
         else:
             out.append(pick)
 
+    out = _ensure_win_condition(out[:8], core, db, pool, archetype, pair_synergy)
+    out = out[:8]
+    # Обязательный Win Plan: роли без способа выигрывать — колода не готова.
+    from bot.services.deck_builder.win_plan_check import enforce_win_plan
+
+    out = enforce_win_plan(out, core, db, pool, archetype, pair_synergy)
+    out = _trim_excess_spells(out, core, db, pair_synergy)
+    out = _trim_excess_wins(out, core, db)
     out = _ensure_win_condition(out[:8], core, db, pool, archetype, pair_synergy)
     return out[:8]

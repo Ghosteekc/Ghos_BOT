@@ -18,12 +18,10 @@ def recommendation_cache_key(
     trophies: int | None = None,
     preferred_cards: list[str] | None = None,
     pool: set[str] | None = None,
+    origin: str = "player",
+    builder_score: float | None = None,
 ) -> tuple[Hashable, ...]:
-    """Стабильный ключ: колода (порядок слотов) + контекст пула / Intent-override.
-
-    План улучшения детерминирован и по составу (tie-break), и по порядку слотов
-    в ответе — поэтому в ключе сохраняется исходный порядок карт.
-    """
+    """Стабильный ключ: колода + контекст + происхождение (builder/player)."""
     deck_key = tuple(deck)
     preferred_key = tuple(sorted(preferred_cards or []))
     if pool is not None:
@@ -34,12 +32,15 @@ def recommendation_cache_key(
             arena_id if arena_id is not None else -1,
             trophies if trophies is not None else -1,
         )
+    score_key = round(float(builder_score), 1) if builder_score is not None else None
     return (
         deck_key,
         archetype or "",
         bool(apply_swaps),
         preferred_key,
         pool_key,
+        origin or "player",
+        score_key,
     )
 
 

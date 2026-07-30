@@ -163,7 +163,7 @@ def build_constructor_decks(
     pool = _get_arena_pool(arena_id, trophies)
     pool.update(core_names)
 
-    from bot.services.recommendation_engine import RecommendationEngine
+    from bot.services.recommendation_engine import DeckOrigin, RecommendationEngine
 
     built = build_multiple_decks(core_names, pool, limit=limit)
     decks: list[dict] = []
@@ -173,7 +173,18 @@ def build_constructor_decks(
         if not any(is_attack_win(c) for c in result.deck):
             continue
         synergy_score, synergy_notes = calculate_deck_synergy(result.deck)
-        rec = RecommendationEngine.analyze(result.deck, pool=pool, apply_swaps=False)
+        builder_score = (
+            result.score_breakdown.total if result.score_breakdown else None
+        )
+        rec = RecommendationEngine.analyze(
+            result.deck,
+            pool=pool,
+            apply_swaps=False,
+            archetype=result.archetype,
+            origin=DeckOrigin.BUILDER,
+            builder_score=builder_score,
+            synergy_notes=synergy_notes,
+        )
         entry = _build_deck_entry(
             core_parsed,
             result.deck,
@@ -183,7 +194,7 @@ def build_constructor_decks(
             confidence=result.confidence,
             synergy_score=synergy_score or result.synergy_score,
             synergy_notes=synergy_notes,
-            balanced=result.balanced and not rec.balance_issues.soft and not rec.balance_issues.hard,
+            balanced=result.balanced and not rec.improvement_plan.needed,
             score_breakdown=result.score_breakdown.as_dict() if result.score_breakdown else None,
         )
         if entry:

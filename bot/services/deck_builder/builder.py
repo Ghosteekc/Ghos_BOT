@@ -204,6 +204,10 @@ def _build_score_breakdown(
 
 
 def _result_balanced(deck: list[str], core: list[str], db: DeckDatabase, archetype: str) -> bool:
+    from bot.services.deck_builder.win_plan_check import evaluate_win_plan
+
+    if not evaluate_win_plan(deck, db, archetype).complete:
+        return False
     breakdown = _build_score_breakdown(deck, core, db, archetype)
     core_avg = sum(
         _pair_synergy(db, c, d)
@@ -215,18 +219,30 @@ def _result_balanced(deck: list[str], core: list[str], db: DeckDatabase, archety
 
 
 def _fillers_from_template(core: list[str], template: DeckRecord, db: DeckDatabase) -> list[str]:
+    from bot.services.special_card_policy import SpecialCardPolicy
+
     core_set = set(core)
+    arch = template.archetype
     core_has_win = any(c in WIN_CONDITIONS for c in core)
-    wins = [c for c in template.cards if c not in core_set and c in WIN_CONDITIONS]
+
+    def _ok(card: str) -> bool:
+        # Mirror/Clone/… из похожей меты не тащим без явного контекста ядра/архетипа.
+        return not SpecialCardPolicy.forbid_as_auto_pick(card, deck=core, archetype=arch)
+
+    wins = [c for c in template.cards if c not in core_set and c in WIN_CONDITIONS and _ok(c)]
     troops = [
         c for c in template.cards
-        if c not in core_set and c not in WIN_CONDITIONS and not is_spell(db, c) and c not in GENERIC_CARDS
+        if c not in core_set and c not in WIN_CONDITIONS and not is_spell(db, c)
+        and c not in GENERIC_CARDS and _ok(c)
     ]
     spells = [
         c for c in template.cards
-        if c not in core_set and is_spell(db, c) and c not in GENERIC_CARDS
+        if c not in core_set and is_spell(db, c) and c not in GENERIC_CARDS and _ok(c)
     ]
-    generic = [c for c in template.cards if c not in core_set and c in GENERIC_CARDS]
+    generic = [
+        c for c in template.cards
+        if c not in core_set and c in GENERIC_CARDS and _ok(c)
+    ]
     ordered = ([] if core_has_win else wins[:1]) + troops + spells + generic
     return ordered[:4]
 
@@ -354,6 +370,10 @@ def build_multiple_decks(
             deck = _build_one_variant(core, db, pool, archetype, sd.record, filler_skip=filler_skip)
             arch = sd.record.archetype or archetype
             if len(deck) != 8 or hard_constraint_issues(deck, db, core):
+                continue
+            from bot.services.deck_builder.win_plan_check import evaluate_win_plan
+
+            if not evaluate_win_plan(deck, db, arch).complete:
                 continue
             key = _deck_key(deck)
             if key in seen:

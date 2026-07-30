@@ -58,6 +58,7 @@ from bot.services.deck_builder.constants import (
 from bot.services.deck_builder.loader import get_database
 from bot.services.deck_intent import DeckIntent, DeckIntentEngine
 from bot.services.deck_game_plan import GamePlan, build_game_plan
+from bot.services.special_card_policy import SpecialCardPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -935,6 +936,12 @@ def rate_candidate(
         + role_overlap * _RATING_WEIGHTS["role_overlap"]
         + replacement_cost * _RATING_WEIGHTS["replacement_cost"]
     )
+    total -= SpecialCardPolicy.rating_penalty(
+        pick,
+        deck=remain,
+        intent=intent,
+        game_plan=game_plan,
+    )
 
     return CandidateRating(
         card=pick,
@@ -974,8 +981,17 @@ def rank_candidates(
     min_strategy = float(policy["min_strategy_fit"])
 
     rated: list[CandidateRating] = []
+    remain_ctx = [c for c in deck if c != drop]
     for pick in candidates:
         if pick == drop:
+            continue
+        # Situational spells запрещены как fillers / role-gap / compromise.
+        if SpecialCardPolicy.forbid_as_auto_pick(
+            pick,
+            deck=remain_ctx,
+            intent=intent,
+            game_plan=game_plan,
+        ):
             continue
         if not _legal_swap(deck, drop, pick, db):
             continue

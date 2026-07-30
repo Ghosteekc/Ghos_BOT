@@ -535,6 +535,13 @@ class RiskAssessmentModel(BaseModel):
     open_gaps: list[str] = []
 
 
+class DeckCoachingModel(BaseModel):
+    strengths: list[str] = []
+    play_style: str = ""
+    key_combinations: list[str] = []
+    usage_tips: list[str] = []
+
+
 class RecommendationResultModel(BaseModel):
     intent: DeckIntentModel
     game_plan: DeckGamePlan
@@ -543,11 +550,15 @@ class RecommendationResultModel(BaseModel):
     decision_explanation: DecisionExplanationModel
     candidate_ranking: CandidateRankingModel
     risk_assessment: RiskAssessmentModel
+    origin: str = "player"
+    coaching: DeckCoachingModel | None = None
 
 
 class RecommendDeckRequest(BaseModel):
     cards: list[str]
     apply_swaps: bool = False
+    origin: str = "player"
+    builder_score: float | None = None
 
 
 class RecommendDeckResponse(BaseModel):
