@@ -15,6 +15,7 @@ from bot.services.card_data import (
     is_pure_spell,
     is_spam_card,
 )
+from bot.services.card_matchups import counters_in_deck
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_analyzer import (
     BattleAnalysis,
@@ -313,19 +314,19 @@ def _build_reasons(
         )
 
     for threat in analysis.opponent_threats:
-        counters = _counter_list(threat)
-        user_has = [c for c in counters if c in analysis.user_deck]
+        strong, partial = counters_in_deck(threat, analysis.user_deck)
+        user_has = strong or partial
         if user_has:
+            labels = ", ".join(card_name_ru(c) for c in user_has[:2])
             if analysis.won:
-                reasons.append(
-                    f"Счётчик на «{card_name_ru(threat)}»: {', '.join(card_name_ru(c) for c in user_has[:2])}."
-                )
+                reasons.append(f"Счётчик на «{card_name_ru(threat)}»: {labels}.")
             else:
                 reasons.append(
-                    f"Счётчик на «{card_name_ru(threat)}» был ({', '.join(card_name_ru(c) for c in user_has[:2])}), "
+                    f"Счётчик на «{card_name_ru(threat)}» был ({labels}), "
                     f"но сыграл слабо или не вовремя."
                 )
         else:
+            counters = _counter_list(threat)
             rec = ", ".join(card_name_ru(c) for c in counters[:3])
             reasons.append(
                 f"Нет счётчика на «{card_name_ru(threat)}». Рекомендуется: {rec}."

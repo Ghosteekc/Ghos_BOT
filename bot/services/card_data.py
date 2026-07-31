@@ -139,16 +139,16 @@ COUNTERS: dict[str, list[str]] = {
         "Guards", "Skeleton Army", "Ice Golem",
     ],
     "Balloon": ["Inferno Tower", "Musketeer", "Wizard", "Mega Minion", "Inferno Dragon"],
-    "Golem": ["Inferno Tower", "Inferno Dragon", "P.E.K.K.A", "Mini P.E.K.K.A"],
+    "Golem": ["Inferno Tower", "Inferno Dragon", "P.E.K.K.A", "Mini P.E.K.K.A", "Mighty Miner"],
     "Graveyard": ["Poison", "Valkyrie", "Wizard", "Baby Dragon", "Bowler"],
     "X-Bow": ["Royal Giant", "Giant", "Earthquake", "Rocket", "Miner"],
     "Mortar": ["Royal Giant", "Giant", "Earthquake", "Miner", "Hog Rider"],
-    "Royal Giant": ["Inferno Tower", "P.E.K.K.A", "Mini P.E.K.K.A", "Inferno Dragon"],
+    "Royal Giant": ["Inferno Tower", "P.E.K.K.A", "Mini P.E.K.K.A", "Inferno Dragon", "Mighty Miner"],
     "Goblin Barrel": ["The Log", "Arrows", "Barbarian Barrel", "Giant Snowball", "Princess"],
-    "Lava Hound": ["Inferno Tower", "Inferno Dragon", "Mega Minion", "Musketeer"],
+    "Lava Hound": ["Inferno Tower", "Inferno Dragon", "Mega Minion", "Musketeer", "Mighty Miner"],
     "Miner": ["Knight", "Valkyrie", "Skeleton Army", "Guards", "Cannon"],
     "Mega Knight": ["Inferno Tower", "P.E.K.K.A", "Mini P.E.K.K.A", "Inferno Dragon", "Knight", "Ronin"],
-    "Electro Giant": ["Inferno Tower", "Inferno Dragon", "P.E.K.K.A", "Mini P.E.K.K.A"],
+    "Electro Giant": ["Inferno Tower", "Inferno Dragon", "P.E.K.K.A", "Mini P.E.K.K.A", "Mighty Miner"],
     "Wall Breakers": ["The Log", "Barbarian Barrel", "Skeleton Army", "Goblin Gang"],
     "Battle Ram": ["Cannon", "Tesla", "Tornado", "Skeleton Army"],
     "Skeleton Barrel": [
@@ -157,7 +157,7 @@ COUNTERS: dict[str, list[str]] = {
     "Elite Barbarians": ["Skeleton Army", "Valkyrie", "Mini P.E.K.K.A", "Knight"],
     "Three Musketeers": ["Fireball", "Lightning", "Rocket", "Valkyrie"],
     "Sparky": ["Zap", "Rocket", "Lightning", "Goblin Barrel", "Miner"],
-    "Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "P.E.K.K.A"],
+    "Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "P.E.K.K.A", "Mighty Miner"],
     "P.E.K.K.A": ["Skeleton Army", "Guards", "Goblin Gang", "Inferno Tower", "Ronin"],
     "Royal Ghost": ["Valkyrie", "Knight", "Barbarians", "Mega Minion", "Poison"],
     "Bandit": [
@@ -292,6 +292,13 @@ OFFENSE_COUNTER_ALLOWED: dict[str, frozenset[str]] = {
             "Elite Barbarians", "Minion Horde", "Wall Breakers", "Royal Recruits",
         }
     ),
+    # Mighty Miner — anti-tank чемпион: держит/прожигает тяжёлые танки.
+    "Mighty Miner": frozenset({
+        "Giant", "Golem", "Electro Giant", "Elixir Golem", "Goblin Giant",
+        "Royal Giant", "P.E.K.K.A", "Lava Hound", "Mega Knight", "Rune Giant",
+        "Giant Skeleton", "Sparky", "Inferno Dragon", "Inferno Tower",
+        "Goblin Machine", "Boss Bandit",
+    }),
 }
 
 # Ручные правки поверх DeckShop (кого карта реально контрит)

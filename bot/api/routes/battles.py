@@ -148,6 +148,7 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
     opp_stats = analyze_deck(analysis.opponent_deck)
     user_cards = _team_deck_cards(team)
     opp_cards = _team_deck_cards(opponent)
+    opp_name, opp_tag = resolve_opponent_fields(opponent)
 
     def _stats(s) -> DeckStatsResponse:
         return DeckStatsResponse(
@@ -162,7 +163,8 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
     return BattleDetailResponse(
         index=index,
         won=analysis.won,
-        opponent_name=analysis.opponent_name,
+        opponent_name=opp_name or analysis.opponent_name,
+        opponent_tag=opp_tag,
         trophy_change=analysis.trophy_change,
         matchup_score=analysis.matchup_score,
         duration=duration,

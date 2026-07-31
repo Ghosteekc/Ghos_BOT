@@ -144,6 +144,7 @@ class BattleDetailResponse(BaseModel):
     index: int
     won: bool
     opponent_name: str
+    opponent_tag: str = ""
     trophy_change: int
     matchup_score: float
     duration: int = 0
