@@ -102,18 +102,29 @@ def _damage_score(
     crowns: int,
     deck: list[str],
 ) -> float:
+    """Оценка вероятного урона по башням.
+
+    Приоритет: win-condition → тяжёлые танки / DPS на контрпуше →
+    big-spell chip. Малые заклинания (Arrows/Log/Zap) не считаются угрозой башням.
+    """
     score = 0.0
 
     if card in WIN_CONDITIONS or card_has_role(card, "win_condition"):
         score += 10.0
-    if card in CHIP_CARDS:
+    elif card in CHIP_CARDS:
         score += 9.0
-    if card in TOWER_SPELLS or card_has_role(card, "spell"):
-        score += 6.0 + min(crowns, 3)
-    if card_has_role(card, "building") and card in CHIP_CARDS:
+    elif card_has_role(card, "tank"):
+        # Mega Knight / P.E.K.K.A и т.п. — сами доходят до башни.
         score += 8.0
-    if card == "Miner":
-        score += 7.0
+    elif card_has_role(card, "mini_tank"):
+        # Mini P.E.K.K.A / Knight — типичный урон башне на контрпуше.
+        score += 7.5
+    elif card_has_role(card, "dps") and get_card_elixir(card) >= 4:
+        # Тяжёлый DPS без mini_tank (Prince / Lumberjack), не стеклянный support.
+        score += 6.5
+    elif card in TOWER_SPELLS:
+        # Только big spells, которые бьют по башне; не small spells.
+        score += 5.0 + 0.5 * min(crowns, 3)
 
     synergies = deck
     if card == "Balloon" and "Lumberjack" in synergies:
@@ -390,7 +401,7 @@ def analyze_battle_enhanced(
             name_ru=card_name_ru(c),
             note="Вероятный основной урон по башням" if i == 0 else "Дополнительное давление",
         )
-        for i, (c, s) in enumerate(user_ranked[:2])
+        for i, (c, s) in enumerate(user_ranked[:3])
         if s >= 5
     ]
     opponent_key_cards = [
@@ -399,7 +410,7 @@ def analyze_battle_enhanced(
             name_ru=card_name_ru(c),
             note="Главная угроза по башням" if i == 0 else "Вспомогательная угроза",
         )
-        for i, (c, s) in enumerate(opp_ranked[:2])
+        for i, (c, s) in enumerate(opp_ranked[:3])
         if s >= 5
     ]
 
