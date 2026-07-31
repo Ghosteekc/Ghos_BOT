@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 _SCAN_CONCURRENCY = 6
 _MAX_ARENA_PLAYERS = 28
 _EMPTY_CACHE_TTL_SEC = 180
-_ARENA_CACHE_VERSION = 4
+_ARENA_CACHE_VERSION = 5
 _arena_refresh_lock = asyncio.Lock()
 
 

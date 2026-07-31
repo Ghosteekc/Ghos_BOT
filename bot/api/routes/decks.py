@@ -531,10 +531,16 @@ async def compare_user_deck(
     result = compare_decks(user_cards, ref_cards)
     from bot.services.meta_analyzer import _guess_deck_name
 
+    reference_infos = await _cards_to_deck_infos(ref_cards)
+    if body.reference_levels is not None and len(body.reference_levels) == len(reference_infos):
+        for info, level in zip(reference_infos, body.reference_levels):
+            if level is not None and level > 0:
+                info.level = int(level)
+
     return DeckCompareResponse(
         reference_name=_guess_deck_name(ref_cards),
         user_deck=user_infos,
-        reference_deck=await _cards_to_deck_infos(ref_cards),
+        reference_deck=reference_infos,
         user_better=result["user_better"],
         user_worse=result["user_worse"],
         reference_better=result["reference_better"],

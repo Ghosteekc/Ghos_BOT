@@ -267,11 +267,16 @@ def merge_deck_variants(variants: list[list[dict]]) -> list[dict]:
         parsed = {
             "name": card["name"],
             "icon": "",
+            "rarity": card.get("rarity") or _card_rarity(card),
             "evolution_level": best_evo,
             "is_hero": is_hero,
             "cost": card.get("cost") or get_card_elixir(card["name"]),
             "slot": slot,
         }
+        # ``base`` — последняя реальная колода с наиболее частым порядком.
+        # Сохраняем её уровень, а не сбрасываем его при агрегации вариантов.
+        if card.get("level") is not None:
+            parsed["level"] = int(card["level"])
         if is_hero:
             parsed["evolution_level"] = 0
         _refresh_card_icon(parsed)

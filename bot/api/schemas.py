@@ -385,6 +385,9 @@ class ArenaDecksResponse(BaseModel):
 
 class DeckCompareRequest(BaseModel):
     reference_cards: list[str]
+    # Реальные уровни референсной колоды (топ/арена) передаются только для UI.
+    # Старые deep links с одними именами карт остаются полностью совместимы.
+    reference_levels: list[int | None] | None = None
 
 
 class DeckCompareCardNote(BaseModel):
