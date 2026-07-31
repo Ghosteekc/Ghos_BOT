@@ -12,13 +12,20 @@ from dataclasses import dataclass
 from bot.services.deck_builder.balance import ScoreBreakdown, compute_score_breakdown
 from bot.services.deck_builder.constants import (
     ROLE_ANTI_TANK,
+    ROLE_COUNTERPUSH,
+    ROLE_CYCLE,
     ROLE_DEFENSIVE,
     ROLE_DPS,
     ROLE_MINI_TANK,
+    ROLE_SUPPORT,
 )
 from bot.services.deck_builder.loader import DeckDatabase
 from bot.services.deck_builder.win_plan_check import WinPlanCheck, evaluate_win_plan
 from bot.services.deck_intent import DeckIntent
+
+_COMBO_WIN_PAIRS = frozenset({
+    frozenset({"Lava Hound", "Balloon"}),
+})
 
 
 @dataclass(frozen=True)
@@ -69,11 +76,9 @@ def validate_builder_variant(
         archetype,
         pair_synergy=pair_synergy,
     )
-    win_plan = evaluate_win_plan(deck, db, archetype, intent=intent)
-    roles = {
-        role: any(db.get_card(card) and role in db.get_card(card).roles for card in deck)
-        for role in required_roles
-    }
+    # Intent от core — полезная гипотеза генерации, но не контракт готового
+    # варианта. Win plan должен оцениваться в контексте финального архетипа.
+    win_plan = evaluate_win_plan(deck, db, archetype)
     has_ground_defense = any(
         db.get_card(card)
         and (
@@ -84,10 +89,47 @@ def validate_builder_variant(
         )
         for card in deck
     )
+    has_anti_tank = any(
+        db.get_card(card) and ROLE_ANTI_TANK in db.get_card(card).roles
+        for card in deck
+    )
+    cycle_n = sum(
+        1
+        for card in deck
+        if (
+            db.get_card(card)
+            and ROLE_CYCLE in db.get_card(card).roles
+        )
+        or (db.get_card(card).elixir if db.get_card(card) else 4) <= 2
+    )
+    primary = win_plan.primary_card
+    has_win_support = bool(primary) and any(
+        card != primary
+        and db.get_card(card)
+        and (
+            ROLE_SUPPORT in db.get_card(card).roles
+            or ROLE_DPS in db.get_card(card).roles
+            or ROLE_COUNTERPUSH in db.get_card(card).roles
+        )
+        for card in deck
+    )
+    if primary and not has_win_support:
+        has_win_support = any(
+            card != primary and pair_synergy(primary, card) >= 72
+            for card in deck
+        )
+    wins = {
+        card for card in deck
+        if db.get_card(card) and "win_condition" in db.get_card(card).roles
+    }
+    allows_combo_wins = any(pair <= wins for pair in _COMBO_WIN_PAIRS)
+    hard_issues = set(breakdown.hard_issues)
+    if allows_combo_wins:
+        hard_issues.discard("too_many_wins")
 
     checks = {
         "balance": (
-            not breakdown.hard_issues
+            not hard_issues
             and breakdown.total >= 52.0
             and not {"elixir", "big_spell", "small_spell"} & set(breakdown.soft_issues)
         ),
@@ -98,9 +140,13 @@ def validate_builder_variant(
             and breakdown.defense >= 30.0
         ),
         "win_condition": win_plan.primary_win,
+        "win_support": has_win_support,
         "air_defense": breakdown.anti_air >= 50.0,
         "ground_defense": has_ground_defense,
-        "cycle": "cycle" not in breakdown.soft_issues,
+        "anti_tank": has_anti_tank,
+        # Не навязываем искусственно два cycle-слота, но у готовой колоды
+        # всегда должен быть хотя бы один способ вернуть давление в руку.
+        "cycle": cycle_n >= 1,
         "spell_balance": (
             breakdown.spell_balance >= 55.0
             and not {"big_spell", "small_spell"} & set(breakdown.soft_issues)
@@ -108,10 +154,11 @@ def validate_builder_variant(
         "building": (
             not intent.require_building or "building" not in breakdown.soft_issues
         ),
-        "archetype_identity": breakdown.archetype_fit >= 35.0 or archetype in {"Meta", "Control"},
+        # Архетип — ранжирующий сигнал, не причина отклонить завершённую
+        # стратегию с тем же core.
+        "archetype_identity": True,
         "deck_identity": (
             set(mandatory_cards).issubset(deck)
-            and all(roles.values())
         ),
         "win_plan": win_plan.complete,
     }

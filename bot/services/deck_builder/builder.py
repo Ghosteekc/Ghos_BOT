@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass
 
 from bot.services.card_data import WIN_CONDITIONS, card_has_role, get_card_elixir
@@ -10,7 +12,6 @@ from bot.services.deck_builder.balance import (
     ScoreBreakdown,
     compute_score_breakdown,
     finalize_deck as balance_finalize_deck,
-    hard_constraint_issues,
     is_attack_win,
     is_playable_balanced,
     is_spell,
@@ -32,6 +33,13 @@ from bot.services.deck_builder.constants import (
     WEIGHT_SYNERGY,
 )
 from bot.services.deck_builder.loader import DeckDatabase, DeckRecord, get_database
+
+logger = logging.getLogger(__name__)
+
+# Builder всегда сравнивает широкий набор вариантов до выбора победителя.
+# Это не публичная настройка: количество можно наблюдать через DEBUG-лог.
+_MIN_CANDIDATE_VARIANTS = 36
+_MAX_TEMPLATE_CANDIDATES = 48
 
 
 @dataclass
@@ -224,6 +232,8 @@ def _validate_variant(
     core: list[str],
     db: DeckDatabase,
     decision,
+    *,
+    archetype: str | None = None,
 ):
     """Единый gate: Builder возвращает только стабильные варианты."""
     from bot.services.deck_builder.validation import validate_builder_variant
@@ -232,7 +242,9 @@ def _validate_variant(
         deck,
         core,
         db,
-        archetype=decision.archetype,
+        # Гипотеза core не должна запретить более сильный вариант с другим
+        # завершённым планом; итоговый архетип определяем после сборки.
+        archetype=archetype or decision.archetype,
         intent=decision.intent,
         required_roles=decision.required_roles,
         mandatory_cards=decision.mandatory_cards,
@@ -398,6 +410,168 @@ def _build_one_variant(
     return _finalize_deck(deck, core, db, pool, arch)
 
 
+def _candidate_archetype(deck: list[str], fallback: str) -> str:
+    """Архетип готовой колоды — сигнал для оценки, не ограничение генерации."""
+    detected = _detect_archetype(deck)
+    return detected if detected != "Meta" else fallback
+
+
+def _candidate_pool(
+    core: list[str],
+    db: DeckDatabase,
+    pool: set[str],
+    decision,
+) -> list[tuple[list[str], ScoredDeck | None, str]]:
+    """Собрать минимум 30 различных сырых вариантов до валидации.
+
+    Гипотеза архетипа лишь ранжирует шаблоны. Все шаблоны и контролируемые
+    мутации non-core fillers остаются допустимыми кандидатами.
+    """
+    ranked = _rank_similar_decks(
+        db,
+        core,
+        decision.archetype,
+        limit=_MAX_TEMPLATE_CANDIDATES,
+        decision=decision,
+    )
+    raw: list[tuple[list[str], ScoredDeck | None, str]] = []
+    seen: set[str] = set()
+
+    def add(deck: list[str], source: ScoredDeck | None, reason: str) -> None:
+        key = _deck_key(deck)
+        if len(deck) == 8 and key not in seen:
+            seen.add(key)
+            raw.append((deck, source, reason))
+
+    # Каждому шаблону даём несколько разных стартовых fillers.
+    for source in ranked:
+        for filler_skip in range(4):
+            add(
+                _build_one_variant(
+                    core,
+                    db,
+                    pool,
+                    decision.archetype,
+                    source.record,
+                    filler_skip=filler_skip,
+                ),
+                source,
+                f"template:{source.record.id}/skip:{filler_skip}",
+            )
+
+    # Если шаблонов недостаточно, строим альтернативы вокруг сильного seed,
+    # меняя ровно один filler. Это именно генерация кандидатов, а не Improve.
+    seed = _finalize_deck(
+        _required_role_seed(core, pool, db, decision),
+        core,
+        db,
+        pool,
+        decision.archetype,
+    )
+    add(seed, None, "role-seed")
+    core_set = set(core)
+    replaceable = [card for card in seed if card not in core_set]
+    from bot.services.special_card_policy import SpecialCardPolicy
+
+    alternatives = [
+        card
+        for card in sorted(pool)
+        if card not in seed
+        and not SpecialCardPolicy.forbid_as_auto_pick(
+            card,
+            deck=seed,
+            archetype=decision.archetype,
+            intent=decision.intent,
+            game_plan=decision.game_plan,
+        )
+    ]
+    alternatives.sort(
+        key=lambda card: (
+            -sum(_pair_synergy(db, card, existing) for existing in core),
+            get_card_elixir(card),
+            card,
+        ),
+    )
+    for drop in replaceable:
+        for pick in alternatives:
+            trial = list(seed)
+            trial[trial.index(drop)] = pick
+            add(
+                _finalize_deck(trial, core, db, pool, decision.archetype),
+                None,
+                f"seed-mutation:{drop}->{pick}",
+            )
+            if len(raw) >= _MIN_CANDIDATE_VARIANTS:
+                return raw
+
+    return raw
+
+
+def _result_rank(result: BuildResult, decision) -> float:
+    """Одна формула выбора победителя после полной проверки кандидата."""
+    from bot.services.deck_builder.constructor_decision import result_decision_bonus
+
+    total = result.score_breakdown.total if result.score_breakdown else 0.0
+    plan = result.validation.win_plan if result.validation else None
+    plan_bonus = 12.0 if plan and plan.complete else 0.0
+    pressure_bonus = 5.0 if plan and plan.constant_pressure and plan.counterattack else 0.0
+    return (
+        total * 0.45
+        + result.synergy_score * 0.25
+        + result.confidence * 0.15
+        + result_decision_bonus(result.deck, decision) * 0.10
+        + plan_bonus
+        + pressure_bonus
+    )
+
+
+def _select_diverse_results(results: list[BuildResult], limit: int) -> list[BuildResult]:
+    """Не возвращать ряд почти одинаковых списков карт, если есть альтернативы."""
+    selected: list[BuildResult] = []
+    for result in results:
+        cards = set(result.deck)
+        # Первые варианты могут быть близки, но после этого требуем хотя бы
+        # две различающиеся карты относительно каждого выбранного.
+        if len(selected) >= 2 and any(len(cards & set(item.deck)) >= 7 for item in selected):
+            continue
+        selected.append(result)
+        if len(selected) >= limit:
+            break
+    # При бедном pool лучше вернуть валидную колоду, чем искусственно пустой UI.
+    if not selected:
+        return results[:limit]
+    return selected
+
+
+def _debug_builder(
+    decision,
+    candidates: list[tuple[list[str], ScoredDeck | None, str]],
+    rejected: list[tuple[str, list[str]]],
+    accepted: list[BuildResult],
+) -> None:
+    """Диагностика без изменения API/UI, включается DECK_BUILDER_DEBUG=1."""
+    if os.getenv("DECK_BUILDER_DEBUG", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+    logger.info(
+        "DeckBuilder: archetype_hypothesis=%s game_plan=%s raw_candidates=%d accepted=%d rejected=%d",
+        decision.archetype,
+        decision.game_plan.how_to_win,
+        len(candidates),
+        len(accepted),
+        len(rejected),
+    )
+    for source, issues in rejected:
+        logger.debug("DeckBuilder rejected candidate=%s issues=%s", source, ",".join(issues))
+    for result in accepted:
+        logger.debug(
+            "DeckBuilder accepted deck=%s score=%.2f source=%s win_plan=%s",
+            result.deck,
+            _result_rank(result, decision),
+            result.source_deck_id or "seed",
+            result.validation.win_plan if result.validation else None,
+        )
+
+
 def build_deck_from_core(
     core: list[str],
     pool: set[str] | None = None,
@@ -410,10 +584,7 @@ def build_deck_from_core(
       1) DeckIntent → 2) GamePlan → 3) шаблон → 4–6) кандидаты / оценка / finalize
     (существующий finalize сохранён).
     """
-    from bot.services.deck_builder.constructor_decision import (
-        prepare_constructor_decision,
-        result_decision_bonus,
-    )
+    from bot.services.deck_builder.constructor_decision import prepare_constructor_decision
 
     if len(core) != 4 or len(set(core)) != 4:
         raise ValueError("Нужно ровно 4 уникальные карты")
@@ -427,67 +598,37 @@ def build_deck_from_core(
     decision = prepare_constructor_decision(core, detect_archetype=_detect_archetype)
     archetype = decision.archetype
 
-    # 3–9) Выбор шаблонов → сборка → Builder gate → отклонение слабых вариантов.
-    ranked = _rank_similar_decks(db, core, archetype, limit=6, decision=decision)
-    selected: ScoredDeck | None = None
-    validation = None
-    deck: list[str] | None = None
-    for candidate in ranked:
-        for filler_skip in (0, 1, 2):
-            trial = _build_one_variant(
-                core,
-                db,
-                pool,
-                archetype,
-                candidate.record,
-                filler_skip=filler_skip,
-            )
-            trial_validation = _validate_variant(trial, core, db, decision)
-            if trial_validation.stable:
-                deck = trial
-                validation = trial_validation
-                selected = candidate
-                break
-        if deck is not None:
-            break
+    candidates = _candidate_pool(core, db, pool, decision)
+    accepted: list[BuildResult] = []
+    rejected: list[tuple[str, list[str]]] = []
+    for trial, source, reason in candidates:
+        final_archetype = _candidate_archetype(trial, archetype)
+        validation = _validate_variant(trial, core, db, decision, archetype=final_archetype)
+        if not validation.stable:
+            rejected.append((reason, validation.issues))
+            continue
+        synergy_score, _ = calculate_deck_synergy(trial)
+        confidence = source.confidence if source else 35.0
+        accepted.append(BuildResult(
+            deck=trial,
+            archetype=final_archetype,
+            average_elixir=_avg_elixir(trial, db),
+            synergy_score=round(synergy_score, 1),
+            confidence=round(confidence, 1),
+            source_deck_id=source.record.id if source else None,
+            balanced=True,
+            score_breakdown=validation.score_breakdown,
+            validation=validation,
+        ))
 
-    # Последняя попытка — сначала детерминированно закрыть Required Roles,
-    # затем тот же finalize + gate.
-    if deck is None:
-        trial = _finalize_deck(
-            _required_role_seed(core, pool, db, decision),
-            core,
-            db,
-            pool,
-            archetype,
-        )
-        trial_validation = _validate_variant(trial, core, db, decision)
-        if trial_validation.stable:
-            deck = trial
-            validation = trial_validation
-
-    if deck is None or validation is None:
+    accepted.sort(key=lambda result: -_result_rank(result, decision))
+    _debug_builder(decision, candidates, rejected, accepted)
+    if not accepted:
         raise ValueError(
             "Builder не смог построить стабильную колоду: "
-            + ", ".join(trial_validation.issues),
+            + ", ".join(rejected[-1][1] if rejected else ["no_candidates"]),
         )
-    synergy_score, _ = calculate_deck_synergy(deck)
-    breakdown = validation.score_breakdown
-    # лёгкая подстройка confidence под decision-fit (API BuildResult без новых полей)
-    conf = round(selected.confidence if selected else 35.0, 1)
-    conf = min(100.0, conf + result_decision_bonus(deck, decision) * 0.4)
-
-    return BuildResult(
-        deck=deck,
-        archetype=archetype,
-        average_elixir=_avg_elixir(deck, db),
-        synergy_score=round(synergy_score, 1),
-        confidence=round(conf, 1),
-        source_deck_id=selected.record.id if selected else None,
-        balanced=True,
-        score_breakdown=breakdown,
-        validation=validation,
-    )
+    return accepted[0]
 
 
 def build_multiple_decks(
@@ -497,10 +638,7 @@ def build_multiple_decks(
     limit: int = 6,
 ) -> list[BuildResult]:
     """Несколько вариантов. Порядок: Intent → GamePlan → шаблоны → сборка."""
-    from bot.services.deck_builder.constructor_decision import (
-        prepare_constructor_decision,
-        result_decision_bonus,
-    )
+    from bot.services.deck_builder.constructor_decision import prepare_constructor_decision
 
     db = get_database()
     if pool is None:
@@ -509,75 +647,32 @@ def build_multiple_decks(
 
     decision = prepare_constructor_decision(core, detect_archetype=_detect_archetype)
     archetype = decision.archetype
-    ranked = _rank_similar_decks(db, core, archetype, limit=limit * 5, decision=decision)
-
+    candidates = _candidate_pool(core, db, pool, decision)
     results: list[BuildResult] = []
-    seen: set[str] = set()
-
-    for sd in ranked:
-        if len(results) >= limit:
-            break
-        for filler_skip in (0, 1, 2):
-            deck = _build_one_variant(core, db, pool, archetype, sd.record, filler_skip=filler_skip)
-            arch = sd.record.archetype or archetype
-            if len(deck) != 8 or hard_constraint_issues(deck, db, core):
-                continue
-            validation = _validate_variant(deck, core, db, decision)
-            if not validation.stable:
-                continue
-            key = _deck_key(deck)
-            if key in seen:
-                continue
-            seen.add(key)
-            synergy_score, _ = calculate_deck_synergy(deck)
-            breakdown = validation.score_breakdown
-            conf = min(100.0, sd.confidence + result_decision_bonus(deck, decision) * 0.4)
-            results.append(BuildResult(
-                deck=deck,
-                archetype=arch,
-                average_elixir=_avg_elixir(deck, db),
-                synergy_score=round(synergy_score, 1),
-                confidence=round(conf, 1),
-                source_deck_id=sd.record.id,
-                balanced=True,
-                score_breakdown=breakdown,
-                validation=validation,
-            ))
-            break
-
-    fallback = _finalize_deck(
-        _required_role_seed(core, pool, db, decision),
-        core,
-        db,
-        pool,
-        archetype,
-    )
-    fkey = _deck_key(fallback)
-    fallback_validation = _validate_variant(fallback, core, db, decision)
-    # Если шаблоны не прошли gate, возвращаем только стабильную пересборку
-    # Required Roles. Не полагаемся на transient seen от отброшенных вариантов.
-    if fallback_validation.stable and (not results or (fkey not in seen and len(results) < limit)):
-        synergy_score, _ = calculate_deck_synergy(fallback)
-        breakdown = fallback_validation.score_breakdown
-        conf = 30.0 + result_decision_bonus(fallback, decision) * 0.4
+    rejected: list[tuple[str, list[str]]] = []
+    for deck, source, reason in candidates:
+        final_archetype = _candidate_archetype(deck, archetype)
+        validation = _validate_variant(deck, core, db, decision, archetype=final_archetype)
+        if not validation.stable:
+            rejected.append((reason, validation.issues))
+            continue
+        synergy_score, _ = calculate_deck_synergy(deck)
         results.append(BuildResult(
-            deck=fallback,
-            archetype=archetype,
-            average_elixir=_avg_elixir(fallback, db),
+            deck=deck,
+            archetype=final_archetype,
+            average_elixir=_avg_elixir(deck, db),
             synergy_score=round(synergy_score, 1),
-            confidence=round(min(100.0, conf), 1),
+            confidence=round(source.confidence if source else 35.0, 1),
+            source_deck_id=source.record.id if source else None,
             balanced=True,
-            score_breakdown=breakdown,
-            validation=fallback_validation,
+            score_breakdown=validation.score_breakdown,
+            validation=validation,
         ))
 
-    def _rank_key(r: BuildResult) -> float:
-        total = r.score_breakdown.total if r.score_breakdown else 0.0
-        fit = result_decision_bonus(r.deck, decision)
-        return total * 0.45 + r.synergy_score * 0.25 + r.confidence * 0.15 + fit * 0.15
-
-    results.sort(key=lambda r: -_rank_key(r))
-    return _dedupe_build_results(results)[:limit]
+    results = _dedupe_build_results(results)
+    results.sort(key=lambda result: -_result_rank(result, decision))
+    _debug_builder(decision, candidates, rejected, results)
+    return _select_diverse_results(results, limit)
 
 
 def _deck_key(deck: list[str]) -> str:
