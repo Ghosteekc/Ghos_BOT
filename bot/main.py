@@ -14,6 +14,7 @@ from bot.middleware.subscription import SubscriptionMiddleware
 from bot.models.database import init_db
 from bot.services import sync_service
 from bot.services.clash_api import ClashRoyaleClient
+from bot.services.startup_warmup import warmup_caches
 from bot.services.tunnel_manager import start_tunnel, stop_tunnel_process
 
 logging.basicConfig(
@@ -71,6 +72,10 @@ async def main() -> None:
     stop_event = asyncio.Event()
     sync_task = asyncio.create_task(sync_service.run_periodic(stop_event))
     api_task = asyncio.create_task(run_api())
+    warmup_task: asyncio.Task | None = None
+    if settings.startup_warmup_enabled:
+        # Не ждём окончания: polling/API поднимаются сразу, кеши догоняют в фоне.
+        warmup_task = asyncio.create_task(warmup_caches())
 
     tunnel_proc = None
     if settings.tunnel_auto_start:
@@ -100,10 +105,17 @@ async def main() -> None:
             await asyncio.to_thread(stop_tunnel_process, tunnel_proc)
         api_task.cancel()
         sync_task.cancel()
+        if warmup_task and not warmup_task.done():
+            warmup_task.cancel()
         try:
             await asyncio.wait_for(sync_task, timeout=settings.sync_shutdown_timeout_sec)
         except (asyncio.CancelledError, asyncio.TimeoutError):
             logger.warning("Battle sync task did not stop within timeout")
+        if warmup_task:
+            try:
+                await warmup_task
+            except asyncio.CancelledError:
+                pass
         try:
             await api_task
         except asyncio.CancelledError:

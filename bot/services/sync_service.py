@@ -116,9 +116,39 @@ async def _refresh_meta_safe() -> None:
         logger.exception("Background meta refresh failed")
 
 
+async def _refresh_top_players_safe() -> None:
+    try:
+        from bot.services.top_players import get_top_players
+
+        cache = await get_top_players(limit=10, force=False)
+        logger.info("Background top players refresh: %d decks", len(cache.players))
+    except ClashRoyaleAPIError as exc:
+        if exc.status == 429:
+            logger.warning("Background top players refresh skipped after rate limit: %s", exc)
+            return
+        logger.exception("Background top players refresh failed")
+    except Exception:
+        logger.exception("Background top players refresh failed")
+
+
 async def _run_sync_cycle(cycle_id: int, stop_event: asyncio.Event) -> dict[str, Any]:
     started = time.monotonic()
     logger.info("Battle sync cycle #%d started", cycle_id)
+
+    # Meta / top — отдельно от синка боёв пользователей, чтобы UI не ждал
+    # окончания обхода всех аккаунтов.
+    cache_error = False
+    if not stop_event.is_set():
+        try:
+            await asyncio.gather(
+                _refresh_meta_safe(),
+                _refresh_top_players_safe(),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            cache_error = True
+            logger.exception("Battle sync cycle #%d cache refresh failed", cycle_id)
 
     battle_results: dict[str, int] = {}
     battle_error: str | None = None
@@ -130,26 +160,17 @@ async def _run_sync_cycle(cycle_id: int, stop_event: asyncio.Event) -> dict[str,
         battle_error = "failed"
         logger.exception("Battle sync cycle #%d failed during user sync", cycle_id)
 
-    meta_error = False
-    if not stop_event.is_set():
-        try:
-            await _refresh_meta_safe()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            meta_error = True
-
     elapsed = time.monotonic() - started
     users = len(battle_results)
     new_total = sum(battle_results.values())
     logger.info(
-        "Battle sync cycle #%d finished in %.1fs (users=%d, new_battles=%d, battle=%s, meta_error=%s)",
+        "Battle sync cycle #%d finished in %.1fs (users=%d, new_battles=%d, battle=%s, cache_error=%s)",
         cycle_id,
         elapsed,
         users,
         new_total,
         battle_error or "ok",
-        meta_error,
+        cache_error,
     )
     return {
         "cycle": cycle_id,
@@ -157,7 +178,7 @@ async def _run_sync_cycle(cycle_id: int, stop_event: asyncio.Event) -> dict[str,
         "users": users,
         "new_battles": new_total,
         "battle_error": battle_error,
-        "meta_error": meta_error,
+        "meta_error": cache_error,
     }
 
 

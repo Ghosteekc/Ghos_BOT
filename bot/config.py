@@ -15,10 +15,13 @@ class Settings(BaseSettings):
     trial_days: int = 30
     subscription_price_stars: int = 250
     sync_interval_minutes: int = 60
+    # Задержка только для sync боёв пользователей (не для top/meta warmup).
     sync_startup_delay_sec: int = 45
     sync_battlelog_min_interval_sec: int = 300
     sync_cr_api_timeout_sec: int = 55
     sync_shutdown_timeout_sec: int = 30
+    # Сразу после старта API греть cards/top/meta в фоне.
+    startup_warmup_enabled: bool = True
     cr_api_timeout_sec: int = 15
     cr_api_battlelog_timeout_sec: int = 28
     cr_api_retry_max: int = 3
