@@ -8,6 +8,7 @@ from bot.api.schemas import (
     BattleDetailResponse,
     TacticalDangerCard,
     TacticalMatchupResponse,
+    ElixirEfficiencyResponse,
     BattleHistoryClearResponse,
     BattleListResponse,
     BattleSummary,
@@ -179,6 +180,21 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
             worst_mistakes=tm.worst_mistakes,
         )
 
+    def _elixir(rep) -> ElixirEfficiencyResponse | None:
+        if rep is None:
+            return None
+        return ElixirEfficiencyResponse(
+            average_cost=rep.average_cost,
+            effective_cycle=rep.effective_cycle,
+            cheap_rotation=rep.cheap_rotation,
+            punish_speed=rep.punish_speed,
+            recovery_speed=rep.recovery_speed,
+            double_elixir_power=rep.double_elixir_power,
+            overtime_strength=rep.overtime_strength,
+            elixir_profile=rep.elixir_profile,
+            explanations=rep.explanations,
+        )
+
     return BattleDetailResponse(
         index=index,
         won=analysis.won,
@@ -204,6 +220,8 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
         opponent_key_cards=_key_cards(analysis.opponent_key_cards),
         low_impact_cards=_key_cards(analysis.low_impact_cards),
         tactical_matchup=tactical,
+        user_elixir=_elixir(analysis.user_elixir),
+        opponent_elixir=_elixir(analysis.opponent_elixir),
     )
 
 

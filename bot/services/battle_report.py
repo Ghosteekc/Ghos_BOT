@@ -24,6 +24,7 @@ from bot.services.deck_analyzer import (
     extract_deck,
     find_opponent_threats,
 )
+from bot.services.elixir_efficiency import ElixirEfficiencyAnalyzer, ElixirEfficiencyReport
 from bot.services.tactical_matchup import TacticalMatchupAnalyzer, TacticalMatchupReport
 
 TOWER_SPELLS = {"Fireball", "Rocket", "Lightning", "Poison", "Earthquake", "Freeze"}
@@ -76,6 +77,8 @@ class EnhancedBattleAnalysis(BattleAnalysis):
     low_impact_cards: list[KeyCardInsight] = field(default_factory=list)
     crown_score: str = ""
     tactical_matchup: TacticalMatchupReport | None = None
+    user_elixir: ElixirEfficiencyReport | None = None
+    opponent_elixir: ElixirEfficiencyReport | None = None
 
 
 def _generic_counters(threat: str) -> list[str]:
@@ -439,6 +442,8 @@ def analyze_battle_enhanced(
     )
 
     tactical = TacticalMatchupAnalyzer.analyze(user_deck, opp_deck)
+    user_elixir = ElixirEfficiencyAnalyzer.analyze(user_deck)
+    opponent_elixir = ElixirEfficiencyAnalyzer.analyze(opp_deck)
 
     return EnhancedBattleAnalysis(
         won=base.won,
@@ -456,4 +461,6 @@ def analyze_battle_enhanced(
         low_impact_cards=low_impact,
         crown_score=crown_score,
         tactical_matchup=tactical if tactical.has_content() else None,
+        user_elixir=user_elixir if len(user_deck) >= 8 else None,
+        opponent_elixir=opponent_elixir if len(opp_deck) >= 8 else None,
     )

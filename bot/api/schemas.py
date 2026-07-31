@@ -157,6 +157,18 @@ class TacticalMatchupResponse(BaseModel):
     worst_mistakes: list[str] = []
 
 
+class ElixirEfficiencyResponse(BaseModel):
+    average_cost: float = 0.0
+    effective_cycle: int = 0
+    cheap_rotation: int = 0
+    punish_speed: int = 0
+    recovery_speed: int = 0
+    double_elixir_power: int = 0
+    overtime_strength: int = 0
+    elixir_profile: str = "Medium Cycle"
+    explanations: list[str] = []
+
+
 class BattleDetailResponse(BaseModel):
     index: int
     won: bool
@@ -180,6 +192,8 @@ class BattleDetailResponse(BaseModel):
     opponent_key_cards: list[KeyCardEntry] = []
     low_impact_cards: list[KeyCardEntry] = []
     tactical_matchup: TacticalMatchupResponse | None = None
+    user_elixir: ElixirEfficiencyResponse | None = None
+    opponent_elixir: ElixirEfficiencyResponse | None = None
 
 
 class OpponentEntry(BaseModel):
