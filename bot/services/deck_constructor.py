@@ -1,14 +1,24 @@
-"""Сборка колод вокруг 4 выбранных карт — адаптер к deck_builder."""
+"""Сборка колод вокруг 4 выбранных карт — адаптер к deck_builder.
+
+Stage 1: полная сборка вокруг зафиксированного Core(4).
+Stage 2 (fallback): Core Conflict Analysis — только если нет качественных колод.
+"""
 
 from __future__ import annotations
 
 from bot.services.card_icons import deck_card_info_from_parsed, normalize_deck_upgrades
 from bot.services.card_matchups import calculate_deck_synergy
+from bot.services.card_names_ru import card_name_ru
 from bot.services.card_registry import build_deck_share_link, get_card_info
 from bot.services.counter_engine import _get_arena_pool
 from bot.services.deck_analyzer import analyze_deck
 from bot.services.deck_builder import build_multiple_decks
 from bot.services.deck_builder.balance import is_attack_win
+from bot.services.deck_builder.core_conflict import (
+    analyze_core_conflict,
+    evaluation_score,
+    filter_quality_results,
+)
 from bot.services.meta_analyzer import _guess_category
 
 _SLOT_EVO = {0, 2}
@@ -98,6 +108,7 @@ def _build_deck_entry(
     synergy_notes: list[str],
     balanced: bool = True,
     score_breakdown: dict | None = None,
+    is_alternative: bool = False,
 ) -> dict | None:
     core_names = [c["name"] for c in core_parsed]
     if len(deck_names) != 8 or len(set(deck_names)) != 8:
@@ -128,6 +139,8 @@ def _build_deck_entry(
     category = _category_from_archetype(archetype)
     total = score_breakdown.get("total", 0) if score_breakdown else 0
     desc = f"Синергия {round(synergy_score, 0):.0f}% · баланс {round(total, 0):.0f} · эликсир {stats.avg_elixir}"
+    if is_alternative:
+        desc = "Альтернатива (ядро без конфликтующей карты) · " + desc
 
     return {
         "id": id_offset,
@@ -138,61 +151,60 @@ def _build_deck_entry(
         "synergy_notes": synergy_notes[:4],
         "avg_elixir": stats.avg_elixir,
         "deck_link": build_deck_share_link(deck_names),
-        "type": "constructor",
+        "type": "constructor_alt" if is_alternative else "constructor",
         "category": category,
         "description": desc,
         "archetype": archetype,
         "confidence": round(confidence, 1),
         "balanced": balanced,
         "score_breakdown": score_breakdown,
+        "is_alternative": is_alternative,
     }
 
 
-def build_constructor_decks(
-    slots: list[dict],
-    arena_id: int | None = None,
-    trophies: int | None = None,
+def _enrich_with_recommendation(
+    entry: dict,
+    deck_names: list[str],
     *,
-    limit: int = 6,
+    pool: set[str],
+    archetype: str,
+    builder_score: float | None,
+    synergy_notes: list[str],
 ) -> dict:
-    core_parsed = _parsed_core_slots(slots)
-    if len(core_parsed) != 4:
-        return {"decks": [], "core": []}
-
-    core_names = [c["name"] for c in core_parsed]
-    pool = _get_arena_pool(arena_id, trophies)
-    pool.update(core_names)
-
     from bot.services.recommendation_engine import DeckOrigin, RecommendationEngine
 
-    built = build_multiple_decks(core_names, pool, limit=limit)
-    # Builder никогда не отдаёт незавершённый вариант. Если ни один шаблон не
-    # прошёл gate, делаем одну детерминированную пересборку Required Roles.
-    if not built:
-        from bot.services.deck_builder.builder import build_deck_from_core
+    rec = RecommendationEngine.analyze(
+        deck_names,
+        pool=pool,
+        apply_swaps=False,
+        archetype=archetype,
+        origin=DeckOrigin.BUILDER,
+        builder_score=builder_score,
+        synergy_notes=synergy_notes,
+    )
+    entry["improvements"] = []
+    entry["game_plan"] = rec.game_plan.to_dict()
+    entry["recommendation"] = rec.to_public_dict()
+    return entry
 
-        try:
-            built = [build_deck_from_core(core_names, pool=pool)]
-        except ValueError:
-            built = []
+
+def _entries_from_results(
+    built,
+    core_parsed: list[dict],
+    pool: set[str],
+    *,
+    limit: int,
+    id_start: int = 7000,
+    is_alternative: bool = False,
+) -> list[dict]:
     decks: list[dict] = []
-    deck_id = 7000
-
+    deck_id = id_start
     for result in built:
         if not any(is_attack_win(c) for c in result.deck):
             continue
         synergy_score, synergy_notes = calculate_deck_synergy(result.deck)
         builder_score = (
             result.score_breakdown.total if result.score_breakdown else None
-        )
-        rec = RecommendationEngine.analyze(
-            result.deck,
-            pool=pool,
-            apply_swaps=False,
-            archetype=result.archetype,
-            origin=DeckOrigin.BUILDER,
-            builder_score=builder_score,
-            synergy_notes=synergy_notes,
         )
         entry = _build_deck_entry(
             core_parsed,
@@ -205,18 +217,104 @@ def build_constructor_decks(
             synergy_notes=synergy_notes,
             balanced=result.balanced,
             score_breakdown=result.score_breakdown.as_dict() if result.score_breakdown else None,
+            is_alternative=is_alternative,
         )
         if entry:
-            # Constructor не показывает альтернативы к только что выбранным картам.
-            entry["improvements"] = []
-            entry["game_plan"] = rec.game_plan.to_dict()
-            entry["recommendation"] = rec.to_public_dict()
+            _enrich_with_recommendation(
+                entry,
+                result.deck,
+                pool=pool,
+                archetype=result.archetype,
+                builder_score=builder_score,
+                synergy_notes=synergy_notes,
+            )
             decks.append(entry)
             deck_id += 1
+        if len(decks) >= limit:
+            break
+    return _dedupe_constructor_entries(decks)
 
-    decks = _dedupe_constructor_entries(decks)
-    decks.sort(key=lambda d: -d.get("total_score", 0))
+
+def build_constructor_decks(
+    slots: list[dict],
+    arena_id: int | None = None,
+    trophies: int | None = None,
+    *,
+    limit: int = 6,
+) -> dict:
+    core_parsed = _parsed_core_slots(slots)
+    empty = {
+        "core": [],
+        "decks": [],
+        "core_conflict": None,
+        "alternative_deck": None,
+    }
+    if len(core_parsed) != 4:
+        return empty
+
+    core_names = [c["name"] for c in core_parsed]
+    pool = _get_arena_pool(arena_id, trophies)
+    pool.update(core_names)
+
+    # --- Stage 1: полная сборка вокруг зафиксированного Core(4) ---
+    built = build_multiple_decks(core_names, pool, limit=limit)
+    if not built:
+        from bot.services.deck_builder.builder import build_deck_from_core
+
+        try:
+            built = [build_deck_from_core(core_names, pool=pool)]
+        except ValueError:
+            built = []
+
+    quality = filter_quality_results(built)
+    baseline_score = max((evaluation_score(r) for r in built), default=0.0)
+
+    if quality:
+        decks = _entries_from_results(quality, core_parsed, pool, limit=limit)
+        decks.sort(key=lambda d: -d.get("total_score", 0))
+        return {
+            "core": [deck_card_info_from_parsed(c, slot=c.get("slot", i)) for i, c in enumerate(core_parsed)],
+            "decks": decks[:limit],
+            "core_conflict": None,
+            "alternative_deck": None,
+        }
+
+    # --- Stage 2: Core Conflict Analysis (только fallback) ---
+    conflict = analyze_core_conflict(
+        core_names,
+        pool=pool,
+        baseline_score=baseline_score,
+    )
+
+    core_conflict_payload = None
+    alternative_deck = None
+    if conflict is not None:
+        reduced_parsed = [c for c in core_parsed if c["name"] != conflict.conflicting_card]
+        alt_entries = _entries_from_results(
+            [conflict.alternative_result],
+            reduced_parsed,
+            pool,
+            limit=1,
+            id_start=7900,
+            is_alternative=True,
+        )
+        if alt_entries:
+            alternative_deck = alt_entries[0]
+            core_conflict_payload = {
+                "conflicting_card": conflict.conflicting_card,
+                "conflicting_card_ru": card_name_ru(conflict.conflicting_card),
+                "reason": conflict.reason,
+                "baseline_score": conflict.baseline_score,
+                "alternative_score": conflict.alternative_score,
+                "quality_gain": conflict.quality_gain,
+                "message": conflict.message,
+                "drop_scores": conflict.drop_scores,
+            }
+
+    # Слабые Stage-1 сборки не отдаём как основную рекомендацию.
     return {
         "core": [deck_card_info_from_parsed(c, slot=c.get("slot", i)) for i, c in enumerate(core_parsed)],
-        "decks": decks[:limit],
+        "decks": [],
+        "core_conflict": core_conflict_payload,
+        "alternative_deck": alternative_deck,
     }

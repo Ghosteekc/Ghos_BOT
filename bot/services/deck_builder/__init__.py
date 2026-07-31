@@ -18,11 +18,15 @@ __all__ = [
     "BuildResult",
     "DeckDatabase",
     "ScoreBreakdown",
+    "analyze_core_conflict",
     "build_deck_from_core",
     "build_multiple_decks",
     "compute_score_breakdown",
+    "filter_quality_results",
     "get_database",
     "hard_constraint_issues",
+    "is_quality_result",
+    "MIN_QUALITY_TOTAL",
     "soft_balance_issues",
 ]
 
@@ -36,4 +40,13 @@ def __getattr__(name: str):
         from bot.services.deck_builder import builder as _builder
 
         return getattr(_builder, name)
+    if name in {
+        "analyze_core_conflict",
+        "filter_quality_results",
+        "is_quality_result",
+        "MIN_QUALITY_TOTAL",
+    }:
+        from bot.services.deck_builder import core_conflict as _conflict
+
+        return getattr(_conflict, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

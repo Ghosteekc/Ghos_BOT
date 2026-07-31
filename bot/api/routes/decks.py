@@ -10,6 +10,7 @@ from bot.api.schemas import (
     ConstructorRequest,
     ConstructorResponse,
     ConstructorDeckEntry,
+    CoreConflictInfo,
     CounterDeckResponse,
     CustomizeResponse,
     DeckCardInfo,
@@ -467,30 +468,35 @@ async def deck_constructor(
     slots = [{"name": s.name.strip(), "slot": s.slot} for s in body.slots]
     result = build_constructor_decks(slots, user.arena_id, trophies)
 
+    def _deck_entry(d: dict) -> ConstructorDeckEntry:
+        return ConstructorDeckEntry(
+            id=d["id"],
+            name=d["name"],
+            cards=[DeckCardInfo(**c) for c in d["cards"]],
+            synergy_score=d.get("synergy_score", 0),
+            synergy_notes=d.get("synergy_notes", []),
+            avg_elixir=d.get("avg_elixir", 0),
+            deck_link=d.get("deck_link"),
+            description=d.get("description", ""),
+            type=d.get("type", "constructor"),
+            category=d.get("category", "custom"),
+            archetype=d.get("archetype", ""),
+            confidence=d.get("confidence", 0),
+            balanced=d.get("balanced", True),
+            score_breakdown=d.get("score_breakdown"),
+            improvements=d.get("improvements") or [],
+            game_plan=d.get("game_plan"),
+            recommendation=d.get("recommendation"),
+            is_alternative=bool(d.get("is_alternative")),
+        )
+
+    alt = result.get("alternative_deck")
+    conflict = result.get("core_conflict")
     return ConstructorResponse(
         core=[DeckCardInfo(**c) for c in result["core"]],
-        decks=[
-            ConstructorDeckEntry(
-                id=d["id"],
-                name=d["name"],
-                cards=[DeckCardInfo(**c) for c in d["cards"]],
-                synergy_score=d.get("synergy_score", 0),
-                synergy_notes=d.get("synergy_notes", []),
-                avg_elixir=d.get("avg_elixir", 0),
-                deck_link=d.get("deck_link"),
-                description=d.get("description", ""),
-                type="constructor",
-                category=d.get("category", "custom"),
-                archetype=d.get("archetype", ""),
-                confidence=d.get("confidence", 0),
-                balanced=d.get("balanced", True),
-                score_breakdown=d.get("score_breakdown"),
-                improvements=d.get("improvements") or [],
-                game_plan=d.get("game_plan"),
-                recommendation=d.get("recommendation"),
-            )
-            for d in result["decks"]
-        ],
+        decks=[_deck_entry(d) for d in result["decks"]],
+        core_conflict=CoreConflictInfo(**conflict) if conflict else None,
+        alternative_deck=_deck_entry(alt) if alt else None,
     )
 
 

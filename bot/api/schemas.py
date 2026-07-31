@@ -271,11 +271,25 @@ class ConstructorDeckEntry(BaseModel):
     improvements: list[dict] = []
     game_plan: dict | None = None
     recommendation: dict | None = None
+    is_alternative: bool = False
+
+
+class CoreConflictInfo(BaseModel):
+    conflicting_card: str
+    conflicting_card_ru: str = ""
+    reason: str = ""
+    baseline_score: float = 0.0
+    alternative_score: float = 0.0
+    quality_gain: float = 0.0
+    message: str = ""
+    drop_scores: dict[str, float] = {}
 
 
 class ConstructorResponse(BaseModel):
     core: list[DeckCardInfo]
     decks: list[ConstructorDeckEntry]
+    core_conflict: CoreConflictInfo | None = None
+    alternative_deck: ConstructorDeckEntry | None = None
 
 
 class StatsDeckEntry(BaseModel):

@@ -632,8 +632,8 @@ def build_deck_from_core(
     """
     from bot.services.deck_builder.constructor_decision import prepare_constructor_decision
 
-    if len(core) != 4 or len(set(core)) != 4:
-        raise ValueError("Нужно ровно 4 уникальные карты")
+    if len(core) not in (3, 4) or len(set(core)) != len(core):
+        raise ValueError("Нужно 3 или 4 уникальные карты")
 
     db = db or get_database()
     if pool is None:
@@ -691,8 +691,15 @@ def build_multiple_decks(
     *,
     limit: int = 6,
 ) -> list[BuildResult]:
-    """Несколько вариантов. Порядок: Intent → GamePlan → шаблоны → сборка."""
+    """Несколько вариантов. Порядок: Intent → GamePlan → шаблоны → сборка.
+
+    Публичный конструктор передаёт ровно 4 карты Core.
+    Leave-one-out Core Conflict Analysis может собирать вокруг 3 карт.
+    """
     from bot.services.deck_builder.constructor_decision import prepare_constructor_decision
+
+    if len(core) not in (3, 4) or len(set(core)) != len(core):
+        raise ValueError("Нужно 3 или 4 уникальные карты")
 
     db = get_database()
     if pool is None:
