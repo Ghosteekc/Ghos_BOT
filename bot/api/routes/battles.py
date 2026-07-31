@@ -6,6 +6,8 @@ from bot.api.deps import require_linked_player, require_subscription
 from bot.services.battle_opponent import resolve_opponent_fields
 from bot.api.schemas import (
     BattleDetailResponse,
+    TacticalDangerCard,
+    TacticalMatchupResponse,
     BattleHistoryClearResponse,
     BattleListResponse,
     BattleSummary,
@@ -160,6 +162,23 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
     def _key_cards(items) -> list[KeyCardEntry]:
         return [KeyCardEntry(name=k.name, name_ru=k.name_ru, note=k.note) for k in items]
 
+    tactical = None
+    if analysis.tactical_matchup is not None:
+        tm = analysis.tactical_matchup
+        tactical = TacticalMatchupResponse(
+            early_game=tm.early_game,
+            mid_game=tm.mid_game,
+            late_game=tm.late_game,
+            pressure_points=tm.pressure_points,
+            critical_interactions=tm.critical_interactions,
+            danger_cards=[
+                TacticalDangerCard(name=d.name, name_ru=d.name_ru, reason=d.reason)
+                for d in tm.danger_cards
+            ],
+            best_openings=tm.best_openings,
+            worst_mistakes=tm.worst_mistakes,
+        )
+
     return BattleDetailResponse(
         index=index,
         won=analysis.won,
@@ -184,6 +203,7 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
         user_key_cards=_key_cards(analysis.user_key_cards),
         opponent_key_cards=_key_cards(analysis.opponent_key_cards),
         low_impact_cards=_key_cards(analysis.low_impact_cards),
+        tactical_matchup=tactical,
     )
 
 

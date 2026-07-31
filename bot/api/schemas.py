@@ -140,6 +140,23 @@ class KeyCardEntry(BaseModel):
     note: str = ""
 
 
+class TacticalDangerCard(BaseModel):
+    name: str
+    name_ru: str = ""
+    reason: str = ""
+
+
+class TacticalMatchupResponse(BaseModel):
+    early_game: list[str] = []
+    mid_game: list[str] = []
+    late_game: list[str] = []
+    pressure_points: list[str] = []
+    critical_interactions: list[str] = []
+    danger_cards: list[TacticalDangerCard] = []
+    best_openings: list[str] = []
+    worst_mistakes: list[str] = []
+
+
 class BattleDetailResponse(BaseModel):
     index: int
     won: bool
@@ -162,6 +179,7 @@ class BattleDetailResponse(BaseModel):
     user_key_cards: list[KeyCardEntry] = []
     opponent_key_cards: list[KeyCardEntry] = []
     low_impact_cards: list[KeyCardEntry] = []
+    tactical_matchup: TacticalMatchupResponse | None = None
 
 
 class OpponentEntry(BaseModel):
