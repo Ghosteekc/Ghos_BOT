@@ -26,6 +26,7 @@ from bot.services.deck_analyzer import (
 )
 from bot.services.elixir_efficiency import ElixirEfficiencyAnalyzer, ElixirEfficiencyReport
 from bot.services.match_difficulty import MatchDifficultyAnalyzer, MatchDifficultyReport
+from bot.services.match_plan import MatchPlanBuilder, MatchPlanReport
 from bot.services.tactical_matchup import TacticalMatchupAnalyzer, TacticalMatchupReport
 
 TOWER_SPELLS = {"Fireball", "Rocket", "Lightning", "Poison", "Earthquake", "Freeze"}
@@ -81,6 +82,7 @@ class EnhancedBattleAnalysis(BattleAnalysis):
     user_elixir: ElixirEfficiencyReport | None = None
     opponent_elixir: ElixirEfficiencyReport | None = None
     match_difficulty: MatchDifficultyReport | None = None
+    match_plan: MatchPlanReport | None = None
 
 
 def _generic_counters(threat: str) -> list[str]:
@@ -447,6 +449,7 @@ def analyze_battle_enhanced(
     user_elixir = ElixirEfficiencyAnalyzer.analyze(user_deck)
     opponent_elixir = ElixirEfficiencyAnalyzer.analyze(opp_deck)
     match_difficulty = MatchDifficultyAnalyzer.analyze(user_deck, opp_deck)
+    match_plan = MatchPlanBuilder.build(user_deck, opp_deck, tactical=tactical)
 
     return EnhancedBattleAnalysis(
         won=base.won,
@@ -467,4 +470,5 @@ def analyze_battle_enhanced(
         user_elixir=user_elixir if len(user_deck) >= 8 else None,
         opponent_elixir=opponent_elixir if len(opp_deck) >= 8 else None,
         match_difficulty=match_difficulty if len(user_deck) >= 8 and len(opp_deck) >= 8 else None,
+        match_plan=match_plan if match_plan.has_content() else None,
     )

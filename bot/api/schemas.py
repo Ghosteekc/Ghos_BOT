@@ -176,6 +176,25 @@ class MatchDifficultyResponse(BaseModel):
     factors: dict[str, int] = {}
 
 
+class MatchPlanSaveCard(BaseModel):
+    name: str
+    name_ru: str = ""
+    reason: str = ""
+
+
+class MatchGamePlanPhasesResponse(BaseModel):
+    phase_1: list[str] = []
+    phase_2: list[str] = []
+    phase_3: list[str] = []
+
+
+class MatchPlanResponse(BaseModel):
+    game_plan: MatchGamePlanPhasesResponse = MatchGamePlanPhasesResponse()
+    avoid: list[str] = []
+    save_cards: list[MatchPlanSaveCard] = []
+    win_condition_window: str = ""
+
+
 class BattleDetailResponse(BaseModel):
     index: int
     won: bool
@@ -202,6 +221,7 @@ class BattleDetailResponse(BaseModel):
     user_elixir: ElixirEfficiencyResponse | None = None
     opponent_elixir: ElixirEfficiencyResponse | None = None
     match_difficulty: MatchDifficultyResponse | None = None
+    match_plan: MatchPlanResponse | None = None
 
 
 class OpponentEntry(BaseModel):

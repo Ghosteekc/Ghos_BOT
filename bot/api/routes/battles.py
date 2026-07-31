@@ -10,6 +10,9 @@ from bot.api.schemas import (
     TacticalMatchupResponse,
     ElixirEfficiencyResponse,
     MatchDifficultyResponse,
+    MatchGamePlanPhasesResponse,
+    MatchPlanResponse,
+    MatchPlanSaveCard,
     BattleHistoryClearResponse,
     BattleListResponse,
     BattleSummary,
@@ -231,6 +234,23 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
                 factors=analysis.match_difficulty.factors,
             )
             if analysis.match_difficulty is not None
+            else None
+        ),
+        match_plan=(
+            MatchPlanResponse(
+                game_plan=MatchGamePlanPhasesResponse(
+                    phase_1=analysis.match_plan.game_plan.phase_1,
+                    phase_2=analysis.match_plan.game_plan.phase_2,
+                    phase_3=analysis.match_plan.game_plan.phase_3,
+                ),
+                avoid=analysis.match_plan.avoid,
+                save_cards=[
+                    MatchPlanSaveCard(name=s.name, name_ru=s.name_ru, reason=s.reason)
+                    for s in analysis.match_plan.save_cards
+                ],
+                win_condition_window=analysis.match_plan.win_condition_window,
+            )
+            if analysis.match_plan is not None
             else None
         ),
     )
