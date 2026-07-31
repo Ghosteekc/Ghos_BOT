@@ -169,6 +169,13 @@ class ElixirEfficiencyResponse(BaseModel):
     explanations: list[str] = []
 
 
+class MatchDifficultyResponse(BaseModel):
+    difficulty: int = 50
+    rating: str = "Равный"
+    reasons: list[str] = []
+    factors: dict[str, int] = {}
+
+
 class BattleDetailResponse(BaseModel):
     index: int
     won: bool
@@ -194,6 +201,7 @@ class BattleDetailResponse(BaseModel):
     tactical_matchup: TacticalMatchupResponse | None = None
     user_elixir: ElixirEfficiencyResponse | None = None
     opponent_elixir: ElixirEfficiencyResponse | None = None
+    match_difficulty: MatchDifficultyResponse | None = None
 
 
 class OpponentEntry(BaseModel):

@@ -9,6 +9,7 @@ from bot.api.schemas import (
     TacticalDangerCard,
     TacticalMatchupResponse,
     ElixirEfficiencyResponse,
+    MatchDifficultyResponse,
     BattleHistoryClearResponse,
     BattleListResponse,
     BattleSummary,
@@ -222,6 +223,16 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
         tactical_matchup=tactical,
         user_elixir=_elixir(analysis.user_elixir),
         opponent_elixir=_elixir(analysis.opponent_elixir),
+        match_difficulty=(
+            MatchDifficultyResponse(
+                difficulty=analysis.match_difficulty.difficulty,
+                rating=analysis.match_difficulty.rating,
+                reasons=analysis.match_difficulty.reasons,
+                factors=analysis.match_difficulty.factors,
+            )
+            if analysis.match_difficulty is not None
+            else None
+        ),
     )
 
 
