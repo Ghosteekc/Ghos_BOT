@@ -1,4 +1,5 @@
 import logging
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -223,8 +224,10 @@ async def home_dashboard(
             if cached is None:
                 cached = _stats_from_battles(loaded, user.player_tag)
             if cached and cached.total > 0:
-                chart_battles = await get_battles_for_winrate_chart(user.player_tag, days=14)
-                trophy_battles = await get_battles_for_trophy_chart(user.player_tag, loaded)
+                chart_battles, trophy_battles = await asyncio.gather(
+                    get_battles_for_winrate_chart(user.player_tag, days=14),
+                    get_battles_for_trophy_chart(user.player_tag, loaded),
+                )
                 stats = _build_stats_overview(
                     cached,
                     loaded,

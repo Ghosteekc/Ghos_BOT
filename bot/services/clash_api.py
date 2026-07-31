@@ -229,7 +229,8 @@ class ClashRoyaleClient:
             async with session.get(url, timeout=req_timeout) as resp:
                 response_text = await resp.text()
                 duration_ms = int((time.monotonic() - started) * 1000)
-                logger.info(
+                log_fn = logger.warning if resp.status >= 400 or duration_ms >= 2500 else logger.debug
+                log_fn(
                     "CR API GET %s status=%s duration_ms=%s attempt=%s/%s",
                     path,
                     resp.status,
@@ -318,7 +319,7 @@ class ClashRoyaleClient:
         data = await self._request(f"/players/{encode_tag(tag)}")
         if not isinstance(data, dict):
             raise ClashRoyaleAPIError("Некорректный ответ профиля игрока.", 500)
-        logger.info("CR API player fetched tag=%s name=%s", normalized, data.get("name", "?"))
+        logger.debug("CR API player fetched tag=%s name=%s", normalized, data.get("name", "?"))
         return data
 
     async def fetch_battlelog_raw(self, tag: str) -> list:
@@ -326,7 +327,7 @@ class ClashRoyaleClient:
         data = await self._request(f"/players/{encode_tag(tag)}/battlelog")
         if not isinstance(data, list):
             raise ClashRoyaleAPIError("Некорректный ответ журнала боёв.", 500)
-        logger.info("CR API battlelog fetched tag=%s battles=%s", normalized, len(data))
+        logger.debug("CR API battlelog fetched tag=%s battles=%s", normalized, len(data))
         return data
 
     async def get_battlelog(self, tag: str) -> list:

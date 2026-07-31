@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from bot.config import settings
+from bot.services.card_data import get_card_elixir
 from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed, merge_deck_variants, normalize_deck_upgrades
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
@@ -151,17 +153,34 @@ async def _refresh_meta() -> MetaCache:
     deck_stats: dict[frozenset[str], dict] = defaultdict(
         lambda: {"wins": 0, "total": 0, "variants": []},
     )
+    _FETCH_CONCURRENCY = 4
 
     try:
         players, source = await _collect_player_tags(client)
-        for player in players:
+        started = time.monotonic()
+        sem = asyncio.Semaphore(_FETCH_CONCURRENCY)
+
+        async def fetch_battles(player: dict) -> tuple[str, list] | None:
             tag = player.get("tag") or ""
             if not tag:
+                return None
+            async with sem:
+                try:
+                    battles = await client.get_battlelog(tag)
+                except ClashRoyaleAPIError:
+                    return None
+            return tag, battles
+
+        fetched = await asyncio.gather(
+            *[fetch_battles(p) for p in players],
+            return_exceptions=True,
+        )
+        ok = 0
+        for result in fetched:
+            if not isinstance(result, tuple):
                 continue
-            try:
-                battles = await client.get_battlelog(tag)
-            except ClashRoyaleAPIError:
-                continue
+            tag, battles = result
+            ok += 1
             tag_norm = tag.upper()
             for battle in battles:
                 if not _is_competitive_battle(battle, tag_norm):
@@ -178,7 +197,14 @@ async def _refresh_meta() -> MetaCache:
                 if team.get("crowns", 0) > opponent.get("crowns", 0):
                     bucket["wins"] += 1
                 bucket["variants"].append(parsed)
-            await asyncio.sleep(0.15)
+
+        logger.info(
+            "Meta battlelogs fetched %d/%d in %.1fs (concurrency=%d)",
+            ok,
+            len(players),
+            time.monotonic() - started,
+            _FETCH_CONCURRENCY,
+        )
     except ClashRoyaleAPIError as e:
         logger.warning("Meta refresh failed: %s", e)
     finally:

@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from bot.services.battle_day_stats import build_last_results, build_most_used_cards, build_winrate_by_day, compute_daily_trophy_change
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -415,8 +416,11 @@ async def list_arena_decks(
     user: User = Depends(require_linked_player),
     session: AsyncSession = Depends(get_db),
 ) -> ArenaDecksResponse:
-    battles = await _get_battles(user)
-    trophies, arena_name, arena_id = await _live_player_arena(user, session)
+    battles, arena_info = await asyncio.gather(
+        _get_battles(user),
+        _live_player_arena(user, session),
+    )
+    trophies, arena_name, arena_id = arena_info
 
     data = await get_arena_popular_decks(
         battles,

@@ -81,24 +81,38 @@ async def _sync_all_once_locked(*, stop_event: asyncio.Event | None = None) -> d
         return results
 
     client = ClashRoyaleClient()
-    try:
-        for user in users:
-            if stop_event and stop_event.is_set():
-                logger.info("Battle sync interrupted: shutdown requested")
-                break
-            tag = normalize_tag(user.player_tag)
+    # Лёгкий параллелизм: быстрее обход, без шторма CR API.
+    concurrency = min(3, max(1, len(users)))
+    sem = asyncio.Semaphore(concurrency)
+    started = time.monotonic()
+
+    async def sync_one(user: User) -> tuple[str, int]:
+        tag = normalize_tag(user.player_tag)
+        if stop_event and stop_event.is_set():
+            return tag, 0
+        async with sem:
             try:
                 new = await sync_user_battles(user, client=client)
                 if new:
                     logger.info("Synced %s: %d new battles", user.player_tag, new)
-                results[tag] = new
+                return tag, new
             except Exception:
                 logger.exception("Error syncing %s", user.player_tag)
-                results[tag] = 0
-            await asyncio.sleep(1)
+                return tag, 0
+
+    try:
+        fetched = await asyncio.gather(*[sync_one(u) for u in users])
+        for tag, new in fetched:
+            results[tag] = new
     finally:
         await client.close()
 
+    logger.info(
+        "Battle sync users done: %d accounts in %.1fs (concurrency=%d)",
+        len(users),
+        time.monotonic() - started,
+        concurrency,
+    )
     return results
 
 

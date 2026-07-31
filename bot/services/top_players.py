@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 _refresh_lock = asyncio.Lock()
 CACHE_VERSION = 6
 DEFAULT_LIMIT = 10
-_FETCH_CONCURRENCY = 5
+_FETCH_CONCURRENCY = 6
 
 _SKIP_BATTLE_TYPES = frozenset({
     "friendly", "clanmate", "warday", "boatbattle", "challenge", "tournament",
@@ -216,6 +217,7 @@ async def _refresh_top_players(limit: int = DEFAULT_LIMIT) -> TopPlayersCache:
     await ensure_cards_loaded()
     client = ClashRoyaleClient()
     entries: list[dict] = []
+    started = time.monotonic()
 
     try:
         ranked = await _fetch_path_of_legend_rankings(client, limit)
@@ -243,6 +245,14 @@ async def _refresh_top_players(limit: int = DEFAULT_LIMIT) -> TopPlayersCache:
     entries.sort(key=lambda p: p.get("rank", 999))
     if not entries:
         logger.warning("Top players cache empty after refresh")
+    else:
+        logger.info(
+            "Top players ready: %d/%d in %.1fs (concurrency=%d)",
+            len(entries),
+            limit,
+            time.monotonic() - started,
+            _FETCH_CONCURRENCY,
+        )
     return TopPlayersCache(
         players=entries,
         updated_at=datetime.now(timezone.utc),
