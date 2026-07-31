@@ -220,6 +220,9 @@ SYNERGIES: dict[str, list[str]] = {
     "Battle Ram": ["Bandit", "Dark Prince", "Royal Ghost", "Zap", "Fireball"],
     "Skeleton King": ["Graveyard", "Giant Skeleton", "Tornado", "Arrows"],
     "Archer Queen": ["P.E.K.K.A", "Giant", "Royal Giant", "Skeleton Army"],
+    "Tornado": ["Executioner", "Magic Archer", "Baby Dragon", "Bowler", "Ice Wizard"],
+    "Executioner": ["Tornado", "Knight", "Ice Spirit", "The Log"],
+    "Magic Archer": ["Tornado", "Knight", "Ice Spirit", "The Log", "Poison"],
 }
 
 ARENA_CARD_POOL: dict[str, list[str]] = {

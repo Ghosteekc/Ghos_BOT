@@ -43,8 +43,8 @@ SPECIAL_CARD_ENABLERS: dict[str, frozenset[str]] = {
         "Goblin Hut",
     }),
     "Tornado": frozenset({
-        "Executioner", "Wizard", "Sparky", "Inferno Dragon", "Baby Dragon",
-        "Bowler", "Electro Wizard", "Royal Delivery",
+        "Executioner", "Magic Archer", "Wizard", "Sparky", "Inferno Dragon",
+        "Baby Dragon", "Bowler", "Electro Wizard", "Royal Delivery",
     }),
     "Void": frozenset(),
     "Vines": frozenset(),

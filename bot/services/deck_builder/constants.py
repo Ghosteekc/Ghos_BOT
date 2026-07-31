@@ -88,6 +88,8 @@ KNOWN_SYNERGY_PAIRS: dict[frozenset[str], int] = {
     frozenset({"Royal Giant", "Fisherman"}): 91,
     frozenset({"Mega Knight", "Inferno Dragon"}): 90,
     frozenset({"Ice Spirit", "Musketeer"}): 85,
+    frozenset({"Tornado", "Executioner"}): 96,
+    frozenset({"Tornado", "Magic Archer"}): 96,
 }
 
 SYNERGY_STRONG = 88

@@ -825,6 +825,32 @@ def _solve_gap(
     return solution
 
 
+def _tornado_pierce_partners(deck: list[str]) -> list[str]:
+    """Карты, которым Tornado даёт прострел по линии."""
+    partners: list[str] = []
+    if "Magic Archer" in deck:
+        partners.append("Magic Archer")
+    if "Executioner" in deck:
+        partners.append("Executioner")
+    return partners
+
+
+def _tornado_pierce_advantage(partners: list[str]) -> str | None:
+    if not partners:
+        return None
+    names = " и ".join(_card_ru(p) for p in partners)
+    if len(partners) == 1:
+        return (
+            f"Позволяет {_card_ru(partners[0])} простреливать вражеских юнитов и башню"
+        )
+    return f"Позволяет {names} простреливать вражеских юнитов и башню"
+
+
+_TORNADO_KING_TOWER_ADVANTAGE = (
+    "Способно стягивать на ГЗ нетяжёлые вражеские карты (кроме карт с ускорением)"
+)
+
+
 def build_deck_coaching(
     intent: DeckIntent,
     game_plan: GamePlan,
@@ -854,6 +880,14 @@ def build_deck_coaching(
         if line not in strengths:
             strengths.append(line)
 
+    tornado_partners = _tornado_pierce_partners(deck)
+    pierce = _tornado_pierce_advantage(tornado_partners)
+    tornado_extras: list[str] = []
+    if "Tornado" in deck:
+        if pierce:
+            tornado_extras.append(pierce)
+        tornado_extras.append(_TORNADO_KING_TOWER_ADVANTAGE)
+
     tips: list[str] = []
     if game_plan.when_to_attack:
         tips.append(game_plan.when_to_attack)
@@ -865,6 +899,11 @@ def build_deck_coaching(
         tips.append(f"Играйте в стиле «{intent.play_style}» от сильных обменов.")
 
     combos = list(game_plan.core_combinations[:4])
+    if "Tornado" in deck and tornado_partners:
+        for partner in tornado_partners:
+            combo_line = f"Tornado + {partner}"
+            if combo_line not in combos and f"{partner} + Tornado" not in combos:
+                combos.insert(0, combo_line)
     role_labels = {
         "win_condition": "главная win-condition",
         "big_spell": "закрывает добивание и защиту",
@@ -887,16 +926,36 @@ def build_deck_coaching(
         role_text = [role_labels[role] for role in roles if role in role_labels]
         combo = next((line for line in combos if card in line), "")
         reason = role_text[0] if role_text else "поддерживает общий план колоды"
+        synergy = combo or "Работает в связке с ключевыми картами колоды."
+
+        if card == "Tornado":
+            advantages = [_TORNADO_KING_TOWER_ADVANTAGE]
+            if pierce:
+                advantages.insert(0, pierce)
+                role_text = list(role_text)
+                role_text.insert(0, "доп. преимущество: прострел с лучником/палачом")
+            reason = ". ".join(advantages) + "."
+            if pierce:
+                synergy = (
+                    f"Tornado + {' / '.join(_card_ru(p) for p in tornado_partners)}: {pierce}."
+                )
+            else:
+                synergy = _TORNADO_KING_TOWER_ADVANTAGE + "."
+
         card_choices.append({
             "card": card,
             "roles": role_text[:3],
-            "reason": reason[:1].upper() + reason[1:] + ".",
-            "synergy": combo or "Работает в связке с ключевыми картами колоды.",
+            "reason": reason[:1].upper() + reason[1:] if reason else reason,
+            "synergy": synergy,
         })
+
+    # Преимущества Tornado важнее generic-строк — всегда оставляем в strengths.
+    base_cap = max(0, 6 - len(tornado_extras))
+    merged_strengths = [s for s in strengths if s not in tornado_extras][:base_cap] + tornado_extras
     return DeckCoaching(
-        strengths=strengths[:5],
+        strengths=merged_strengths,
         play_style=intent.play_style,
-        key_combinations=combos,
+        key_combinations=combos[:5],
         usage_tips=tips[:4],
         card_choices=card_choices,
     )
