@@ -41,6 +41,28 @@ logger = logging.getLogger(__name__)
 _MIN_CANDIDATE_VARIANTS = 36
 _MAX_TEMPLATE_CANDIDATES = 48
 
+# Если в core несколько атакующих карт, это фиксированный приоритет именно
+# для Builder. Он не меняет глобальный DeckIntent/Recommendation.
+_PRIMARY_WIN_PRIORITY = (
+    "Lava Hound",
+    "Hog Rider",
+    "Balloon",
+    "Goblin Barrel",
+    "Royal Giant",
+    "Graveyard",
+    "X-Bow",
+    "Mortar",
+    "Goblin Giant",
+    "Ram Rider",
+    "Battle Ram",
+    "Wall Breakers",
+    "Miner",
+    "Mighty Miner",
+)
+_FAST_CYCLE_WINS = frozenset({
+    "Hog Rider", "Goblin Barrel", "X-Bow", "Mortar", "Wall Breakers", "Miner",
+})
+
 
 @dataclass
 class BuildResult:
@@ -75,6 +97,15 @@ def _detect_archetype(core: list[str]) -> str:
     from bot.services.deck_builder.archetype_detect import detect_archetype_from_cards
 
     return detect_archetype_from_cards(core)
+
+
+def _core_primary_win(core: list[str]) -> str | None:
+    """Выбранный пользователем win condition — якорь всей Builder-сборки."""
+    core_set = set(core)
+    for card in _PRIMARY_WIN_PRIORITY:
+        if card in core_set:
+            return card
+    return next((card for card in core if card in WIN_CONDITIONS), None)
 
 
 def _pair_synergy(db: DeckDatabase, a: str, b: str) -> int:
@@ -234,6 +265,7 @@ def _validate_variant(
     decision,
     *,
     archetype: str | None = None,
+    primary_anchor: str | None = None,
 ):
     """Единый gate: Builder возвращает только стабильные варианты."""
     from bot.services.deck_builder.validation import validate_builder_variant
@@ -249,6 +281,7 @@ def _validate_variant(
         required_roles=decision.required_roles,
         mandatory_cards=decision.mandatory_cards,
         pair_synergy=lambda a, b: _pair_synergy(db, a, b),
+        primary_anchor=primary_anchor,
     )
 
 
@@ -421,6 +454,7 @@ def _candidate_pool(
     db: DeckDatabase,
     pool: set[str],
     decision,
+    primary_anchor: str | None,
 ) -> list[tuple[list[str], ScoredDeck | None, str]]:
     """Собрать минимум 30 различных сырых вариантов до валидации.
 
@@ -434,6 +468,16 @@ def _candidate_pool(
         limit=_MAX_TEMPLATE_CANDIDATES,
         decision=decision,
     )
+    # Шаблон с пользовательским якорем предпочтительнее, но шаблоны другого
+    # архетипа не запрещены: финальное решение остаётся за validation/score.
+    if primary_anchor:
+        ranked.sort(
+            key=lambda source: (
+                primary_anchor not in source.record.cards,
+                -source.score,
+                -source.confidence,
+            ),
+        )
     raw: list[tuple[list[str], ScoredDeck | None, str]] = []
     seen: set[str] = set()
 
@@ -545,6 +589,7 @@ def _select_diverse_results(results: list[BuildResult], limit: int) -> list[Buil
 
 def _debug_builder(
     decision,
+    primary_anchor: str | None,
     candidates: list[tuple[list[str], ScoredDeck | None, str]],
     rejected: list[tuple[str, list[str]]],
     accepted: list[BuildResult],
@@ -553,7 +598,8 @@ def _debug_builder(
     if os.getenv("DECK_BUILDER_DEBUG", "").strip().lower() not in {"1", "true", "yes", "on"}:
         return
     logger.info(
-        "DeckBuilder: archetype_hypothesis=%s game_plan=%s raw_candidates=%d accepted=%d rejected=%d",
+        "DeckBuilder: primary_anchor=%s archetype_hypothesis=%s game_plan=%s raw_candidates=%d accepted=%d rejected=%d",
+        primary_anchor,
         decision.archetype,
         decision.game_plan.how_to_win,
         len(candidates),
@@ -597,13 +643,21 @@ def build_deck_from_core(
     # 1–2) Intent + GamePlan
     decision = prepare_constructor_decision(core, detect_archetype=_detect_archetype)
     archetype = decision.archetype
+    primary_anchor = _core_primary_win(core)
 
-    candidates = _candidate_pool(core, db, pool, decision)
+    candidates = _candidate_pool(core, db, pool, decision, primary_anchor)
     accepted: list[BuildResult] = []
     rejected: list[tuple[str, list[str]]] = []
     for trial, source, reason in candidates:
         final_archetype = _candidate_archetype(trial, archetype)
-        validation = _validate_variant(trial, core, db, decision, archetype=final_archetype)
+        validation = _validate_variant(
+            trial,
+            core,
+            db,
+            decision,
+            archetype=final_archetype,
+            primary_anchor=primary_anchor,
+        )
         if not validation.stable:
             rejected.append((reason, validation.issues))
             continue
@@ -622,7 +676,7 @@ def build_deck_from_core(
         ))
 
     accepted.sort(key=lambda result: -_result_rank(result, decision))
-    _debug_builder(decision, candidates, rejected, accepted)
+    _debug_builder(decision, primary_anchor, candidates, rejected, accepted)
     if not accepted:
         raise ValueError(
             "Builder не смог построить стабильную колоду: "
@@ -647,12 +701,20 @@ def build_multiple_decks(
 
     decision = prepare_constructor_decision(core, detect_archetype=_detect_archetype)
     archetype = decision.archetype
-    candidates = _candidate_pool(core, db, pool, decision)
+    primary_anchor = _core_primary_win(core)
+    candidates = _candidate_pool(core, db, pool, decision, primary_anchor)
     results: list[BuildResult] = []
     rejected: list[tuple[str, list[str]]] = []
     for deck, source, reason in candidates:
         final_archetype = _candidate_archetype(deck, archetype)
-        validation = _validate_variant(deck, core, db, decision, archetype=final_archetype)
+        validation = _validate_variant(
+            deck,
+            core,
+            db,
+            decision,
+            archetype=final_archetype,
+            primary_anchor=primary_anchor,
+        )
         if not validation.stable:
             rejected.append((reason, validation.issues))
             continue
@@ -671,7 +733,7 @@ def build_multiple_decks(
 
     results = _dedupe_build_results(results)
     results.sort(key=lambda result: -_result_rank(result, decision))
-    _debug_builder(decision, candidates, rejected, results)
+    _debug_builder(decision, primary_anchor, candidates, rejected, results)
     return _select_diverse_results(results, limit)
 
 

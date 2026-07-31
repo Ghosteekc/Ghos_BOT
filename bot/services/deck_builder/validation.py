@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from bot.services.deck_builder.balance import ScoreBreakdown, compute_score_breakdown
 from bot.services.deck_builder.constants import (
@@ -21,10 +21,14 @@ from bot.services.deck_builder.constants import (
 )
 from bot.services.deck_builder.loader import DeckDatabase
 from bot.services.deck_builder.win_plan_check import WinPlanCheck, evaluate_win_plan
+from bot.services.deck_game_plan import build_game_plan
 from bot.services.deck_intent import DeckIntent
 
 _COMBO_WIN_PAIRS = frozenset({
     frozenset({"Lava Hound", "Balloon"}),
+})
+_FAST_CYCLE_WINS = frozenset({
+    "Hog Rider", "Goblin Barrel", "X-Bow", "Mortar", "Wall Breakers", "Miner",
 })
 
 
@@ -62,6 +66,7 @@ def validate_builder_variant(
     required_roles: frozenset[str],
     mandatory_cards: frozenset[str],
     pair_synergy,
+    primary_anchor: str | None = None,
 ) -> BuilderValidation:
     """Проверить готовую колоду по обязательному checklist Builder.
 
@@ -76,9 +81,11 @@ def validate_builder_variant(
         archetype,
         pair_synergy=pair_synergy,
     )
-    # Intent от core — полезная гипотеза генерации, но не контракт готового
-    # варианта. Win plan должен оцениваться в контексте финального архетипа.
-    win_plan = evaluate_win_plan(deck, db, archetype)
+    # Если пользователь положил win condition в core, это не просто одна из
+    # карт: принудительно проверяем план именно вокруг неё.
+    plan_intent = replace(intent, archetype=archetype, primary_win=primary_anchor) if primary_anchor else None
+    win_plan = evaluate_win_plan(deck, db, archetype, intent=plan_intent)
+    game_plan = build_game_plan(deck, archetype=archetype, intent=plan_intent)
     has_ground_defense = any(
         db.get_card(card)
         and (
@@ -123,9 +130,28 @@ def validate_builder_variant(
         if db.get_card(card) and "win_condition" in db.get_card(card).roles
     }
     allows_combo_wins = any(pair <= wins for pair in _COMBO_WIN_PAIRS)
+    selected_core_wins = wins <= set(core)
     hard_issues = set(breakdown.hard_issues)
-    if allows_combo_wins:
+    if allows_combo_wins or selected_core_wins:
         hard_issues.discard("too_many_wins")
+    anchor_present = not primary_anchor or primary_anchor in deck
+    anchor_is_primary = not primary_anchor or win_plan.primary_card == primary_anchor
+    anchor_plan_matches = (
+        not primary_anchor
+        or (
+            game_plan.primary_threat.startswith(primary_anchor)
+            and bool(game_plan.key_cards)
+            and game_plan.key_cards[0] == primary_anchor
+        )
+    )
+    anchor_pressure = (
+        not primary_anchor
+        or (
+            cycle_n >= 2
+            if primary_anchor in _FAST_CYCLE_WINS
+            else win_plan.constant_pressure and win_plan.counterattack
+        )
+    )
 
     checks = {
         "balance": (
@@ -140,6 +166,9 @@ def validate_builder_variant(
             and breakdown.defense >= 30.0
         ),
         "win_condition": win_plan.primary_win,
+        "primary_anchor": anchor_present and anchor_is_primary,
+        "anchor_pressure": anchor_pressure,
+        "anchor_game_plan": anchor_plan_matches,
         "win_support": has_win_support,
         "air_defense": breakdown.anti_air >= 50.0,
         "ground_defense": has_ground_defense,
