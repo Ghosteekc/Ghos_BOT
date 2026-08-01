@@ -32,6 +32,15 @@ from bot.services.tactical_matchup import TacticalMatchupAnalyzer, TacticalMatch
 TOWER_SPELLS = {"Fireball", "Rocket", "Lightning", "Poison", "Earthquake", "Freeze"}
 CHIP_CARDS = {"Royal Giant", "Mortar", "X-Bow", "Goblin Drill", "Miner"}
 
+# Чип/дальний саппорт: бьёт башни и вынуждает Log/Arrows.
+TOWER_CHIP_SUPPORT = frozenset({
+    "Princess", "Dart Goblin", "Firecracker", "Magic Archer", "Flying Machine",
+})
+
+# Mini-tank без реального урона по башням (кайт).
+_DEFENSIVE_MINI_TANKS = frozenset({"Ice Golem"})
+
+
 # TODO(card-profile): AIR_CARDS / SPLASH_CARDS дублируют CardProfile roles — не удалять.
 AIR_CARDS = {
     "Minions", "Minion Horde", "Baby Dragon", "Mega Minion", "Inferno Dragon",
@@ -114,26 +123,28 @@ def _damage_score(
 ) -> float:
     """Оценка вероятного урона по башням.
 
-    Приоритет: win-condition → тяжёлые танки / DPS на контрпуше →
-    big-spell chip. Малые заклинания (Arrows/Log/Zap) не считаются угрозой башням.
+    Приоритет: win-condition → тяжёлые танки → chip-support (Princess) →
+    mini-tank / DPS → big-spell. Малые спеллы и Ice Golem не угроза башням.
     """
     score = 0.0
+
+    if card in _DEFENSIVE_MINI_TANKS:
+        return 0.0
 
     if card in WIN_CONDITIONS or card_has_role(card, "win_condition"):
         score += 10.0
     elif card in CHIP_CARDS:
         score += 9.0
     elif card_has_role(card, "tank"):
-        # Mega Knight / P.E.K.K.A и т.п. — сами доходят до башни.
         score += 8.0
+    elif card in TOWER_CHIP_SUPPORT:
+        # Princess / Dart Goblin / Firecracker — чип и bait на малый спелл.
+        score += 7.2
     elif card_has_role(card, "mini_tank"):
-        # Mini P.E.K.K.A / Knight — типичный урон башне на контрпуше.
         score += 7.5
     elif card_has_role(card, "dps") and get_card_elixir(card) >= 4:
-        # Тяжёлый DPS без mini_tank (Prince / Lumberjack), не стеклянный support.
         score += 6.5
     elif card in TOWER_SPELLS:
-        # Только big spells, которые бьют по башне; не small spells.
         score += 5.0 + 0.5 * min(crowns, 3)
 
     synergies = deck
@@ -143,6 +154,10 @@ def _damage_score(
         score += 1.5
     if card == "Golem" and "Night Witch" in synergies:
         score += 2.0
+    if card == "Princess" and any(
+        c in synergies for c in ("Royal Giant", "Hog Rider", "Goblin Barrel")
+    ):
+        score += 0.8
 
     if is_winner:
         score += 1.5
@@ -418,7 +433,15 @@ def analyze_battle_enhanced(
         KeyCardInsight(
             name=c,
             name_ru=card_name_ru(c),
-            note="Главная угроза по башням" if i == 0 else "Вспомогательная угроза",
+            note=(
+                "Главная угроза по башням"
+                if i == 0
+                else (
+                    "Чип по башням / вынуждает малый спелл"
+                    if c in TOWER_CHIP_SUPPORT
+                    else "Вспомогательная угроза"
+                )
+            ),
         )
         for i, (c, s) in enumerate(opp_ranked[:3])
         if s >= 5

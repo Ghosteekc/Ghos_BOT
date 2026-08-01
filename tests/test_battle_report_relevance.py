@@ -44,6 +44,30 @@ def test_opponent_tower_threats_prefer_win_condition_over_small_spell():
     )
     key_names = [c.name for c in analysis.opponent_key_cards]
     assert "Arrows" not in key_names
+    # Dart Goblin — чип, но ниже Barrel / MK / Mini PEKKA → не в топ-3.
     assert "Dart Goblin" not in key_names
     assert key_names == ["Skeleton Barrel", "Mega Knight", "Mini P.E.K.K.A"]
     assert set(find_opponent_threats(opp)) == {"Skeleton Barrel"}
+
+
+def test_princess_is_tower_threat_in_rg_cycle():
+    """Princess чипит башни и bait'ит Log — должна быть в угрозах, Ice Golem нет."""
+    user = [
+        "Hog Rider", "Ice Golem", "Cannon", "Musketeer",
+        "Ice Spirit", "Skeletons", "The Log", "Fireball",
+    ]
+    opp = [
+        "Tesla", "Electro Spirit", "Royal Giant", "Bats",
+        "Princess", "The Log", "Ice Golem", "Fire Spirit",
+    ]
+    analysis = analyze_battle_enhanced(
+        {"name": "Me", "tag": "#ME", "crowns": 0, "cards": [{"name": n} for n in user]},
+        {"name": "Opp", "tag": "#OP", "crowns": 1, "cards": [{"name": n} for n in opp]},
+        duration=180,
+    )
+    key_names = [c.name for c in analysis.opponent_key_cards]
+    assert key_names[0] == "Royal Giant"
+    assert "Princess" in key_names
+    assert "Ice Golem" not in key_names
+    princess = next(c for c in analysis.opponent_key_cards if c.name == "Princess")
+    assert "чип" in princess.note.lower() or "спелл" in princess.note.lower()
