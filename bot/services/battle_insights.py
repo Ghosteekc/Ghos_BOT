@@ -2,7 +2,7 @@
 
 from collections import Counter
 
-from bot.services.battle_report import analyze_battle_enhanced
+from bot.services.battle_report import analyze_battle_list_item
 from bot.services.clash_api import normalize_tag
 from bot.services.deck_analyzer import extract_deck
 
@@ -21,7 +21,7 @@ def build_battle_insight(battle: dict, player_tag: str) -> dict | None:
 
     duration = int(battle.get("gameDuration") or 0)
     try:
-        analysis = analyze_battle_enhanced(team, opponent, duration=duration)
+        analysis = analyze_battle_list_item(team, opponent, duration=duration)
     except Exception:
         return None
 

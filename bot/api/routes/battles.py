@@ -1,3 +1,4 @@
+import asyncio
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -29,7 +30,7 @@ from bot.services.battle_service import (
 )
 from bot.services.battle_session_cache import set_session_battles
 from bot.services.battle_time import battle_time_from_record, battle_times_equal, format_battle_played_at
-from bot.services.battle_report import analyze_battle_enhanced
+from bot.services.battle_report import analyze_battle_enhanced, analyze_battle_list_item
 from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_analyzer import analyze_deck, calculate_matchup_score
@@ -88,7 +89,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
     duration = int(battle.get("gameDuration") or 0)
     top_reason: str | None = None
     try:
-        analysis = analyze_battle_enhanced(team, opponent, duration=duration)
+        analysis = analyze_battle_list_item(team, opponent, duration=duration)
         top_reason = analysis.outcome_summary or (analysis.reasons[0] if analysis.reasons else None)
     except Exception:
         top_reason = None
@@ -114,6 +115,10 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
     )
 
 
+def _build_summaries(battles: list) -> list[BattleSummary]:
+    return [_build_battle_summary(i, battle) for i, battle in enumerate(battles)]
+
+
 @router.get("", response_model=BattleListResponse)
 async def list_battles(user: User = Depends(require_subscription)) -> BattleListResponse:
     battles = await load_and_persist(user)
@@ -122,7 +127,7 @@ async def list_battles(user: User = Depends(require_subscription)) -> BattleList
 
     _set_battle_cache(user, battles)
 
-    summaries = [_build_battle_summary(i, battle) for i, battle in enumerate(battles[:BATTLE_LOG_LIMIT])]
+    summaries = await asyncio.to_thread(_build_summaries, battles[:BATTLE_LOG_LIMIT])
 
     stats = await get_cached_stats(user.player_tag)
     return BattleListResponse(
@@ -265,7 +270,7 @@ async def battle_detail_by_time(
     battles = await _load_user_battles(user)
     for i, battle in enumerate(battles):
         if battle_times_equal(_battle_timestamp(battle), raw):
-            return _build_battle_detail(i, battle)
+            return await asyncio.to_thread(_build_battle_detail, i, battle)
     raise http_error("E004", status=404)
 
 
@@ -274,4 +279,4 @@ async def battle_detail(index: int, user: User = Depends(require_subscription)) 
     battles = await _load_user_battles(user)
     if index < 0 or index >= len(battles):
         raise http_error("E004", status=404)
-    return _build_battle_detail(index, battles[index])
+    return await asyncio.to_thread(_build_battle_detail, index, battles[index])

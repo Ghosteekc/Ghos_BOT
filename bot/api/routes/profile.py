@@ -15,7 +15,7 @@ from bot.api.schemas import (
 )
 from bot.models.database import User
 from bot.api.routes.decks import _build_stats_overview, _stats_from_battles
-from bot.api.routes.battles import _build_battle_summary
+from bot.api.routes.battles import _build_summaries
 from bot.services.battle_day_stats import compute_daily_trophy_change
 from bot.services.battle_cache_reader import get_battles_for_trophy_chart, get_battles_for_winrate_chart
 from bot.services.battle_service import (
@@ -237,5 +237,5 @@ async def home_dashboard(
                     trophy_battles=trophy_battles or loaded,
                 )
 
-    summaries = [_build_battle_summary(i, b) for i, b in enumerate(battles[:BATTLE_LOG_LIMIT])]
+    summaries = await asyncio.to_thread(_build_summaries, battles[:BATTLE_LOG_LIMIT])
     return HomeResponse(profile=profile, battles=summaries, stats=stats)

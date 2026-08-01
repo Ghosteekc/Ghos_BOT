@@ -377,10 +377,26 @@ def _build_reasons(
     return reasons
 
 
+def analyze_battle_list_item(
+    user_team: dict,
+    opponent_team: dict,
+    duration: int = 0,
+) -> EnhancedBattleAnalysis:
+    """Лёгкий разбор для списков (/battles, /home, insights) — без tactical/plan."""
+    return analyze_battle_enhanced(
+        user_team,
+        opponent_team,
+        duration=duration,
+        include_matchup_modules=False,
+    )
+
+
 def analyze_battle_enhanced(
     user_team: dict,
     opponent_team: dict,
     duration: int = 0,
+    *,
+    include_matchup_modules: bool = True,
 ) -> EnhancedBattleAnalysis:
     base = analyze_battle(user_team, opponent_team)
     user_deck = base.user_deck
@@ -468,11 +484,17 @@ def analyze_battle_enhanced(
         duration=duration,
     )
 
-    tactical = TacticalMatchupAnalyzer.analyze(user_deck, opp_deck)
-    user_elixir = ElixirEfficiencyAnalyzer.analyze(user_deck)
-    opponent_elixir = ElixirEfficiencyAnalyzer.analyze(opp_deck)
-    match_difficulty = MatchDifficultyAnalyzer.analyze(user_deck, opp_deck)
-    match_plan = MatchPlanBuilder.build(user_deck, opp_deck, tactical=tactical)
+    tactical = None
+    user_elixir = None
+    opponent_elixir = None
+    match_difficulty = None
+    match_plan = None
+    if include_matchup_modules:
+        tactical = TacticalMatchupAnalyzer.analyze(user_deck, opp_deck)
+        user_elixir = ElixirEfficiencyAnalyzer.analyze(user_deck)
+        opponent_elixir = ElixirEfficiencyAnalyzer.analyze(opp_deck)
+        match_difficulty = MatchDifficultyAnalyzer.analyze(user_deck, opp_deck)
+        match_plan = MatchPlanBuilder.build(user_deck, opp_deck, tactical=tactical)
 
     return EnhancedBattleAnalysis(
         won=base.won,
@@ -489,9 +511,15 @@ def analyze_battle_enhanced(
         opponent_key_cards=opponent_key_cards,
         low_impact_cards=low_impact,
         crown_score=crown_score,
-        tactical_matchup=tactical if tactical.has_content() else None,
-        user_elixir=user_elixir if len(user_deck) >= 8 else None,
-        opponent_elixir=opponent_elixir if len(opp_deck) >= 8 else None,
-        match_difficulty=match_difficulty if len(user_deck) >= 8 and len(opp_deck) >= 8 else None,
-        match_plan=match_plan if match_plan.has_content() else None,
+        tactical_matchup=tactical if tactical is not None and tactical.has_content() else None,
+        user_elixir=user_elixir if user_elixir is not None and len(user_deck) >= 8 else None,
+        opponent_elixir=(
+            opponent_elixir if opponent_elixir is not None and len(opp_deck) >= 8 else None
+        ),
+        match_difficulty=(
+            match_difficulty
+            if match_difficulty is not None and len(user_deck) >= 8 and len(opp_deck) >= 8
+            else None
+        ),
+        match_plan=match_plan if match_plan is not None and match_plan.has_content() else None,
     )

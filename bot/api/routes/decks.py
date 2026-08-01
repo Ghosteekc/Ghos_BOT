@@ -666,7 +666,13 @@ async def battle_insights(user: User = Depends(require_subscription)) -> Insight
         return InsightsResponse(insights=[], patterns=[], sample_size=0, wins=0, losses=0)
 
     try:
-        report = build_insights_report(battles, user.player_tag or "", limit=7, losses_only=True)
+        report = await asyncio.to_thread(
+            build_insights_report,
+            battles,
+            user.player_tag or "",
+            7,
+            losses_only=True,
+        )
     except Exception:
         report = {"insights": [], "patterns": [], "sample_size": 0, "wins": 0, "losses": 0}
     return InsightsResponse(**report)
