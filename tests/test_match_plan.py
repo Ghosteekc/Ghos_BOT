@@ -31,8 +31,13 @@ def test_hog_vs_tesla_plan_is_specific():
     assert "Хог" in mistakes and "Тесла" in mistakes
 
     save_names = {s.name for s in plan.save_cards}
-    assert "Fireball" in save_names  # Flying Machine у врага
-    assert any("Летучка" in s.reason or "Flying" in s.reason for s in plan.save_cards if s.name == "Fireball")
+    assert "Fireball" in save_names  # Flying Machine / Witch у врага
+    fb_reasons = [s.reason for s in plan.save_cards if s.name == "Fireball"]
+    assert fb_reasons
+    assert any(
+        "Летучка" in r or "Flying" in r or "Ведьм" in r
+        for r in fb_reasons
+    )
 
     phases = plan.game_plan.phase_1 + plan.game_plan.phase_2 + plan.game_plan.phase_3
     assert phases or plan.win_condition_window
@@ -113,3 +118,33 @@ def test_plan_phases_do_not_repeat_window_topic():
     assert hog_tesla == []
     # Нет точных дублей внутри плана.
     assert len(phases) == len(set(phases))
+
+
+def test_save_fireball_barbarians_over_witch():
+    my = _deck([
+        "Hog Rider", "Ice Golem", "Musketeer", "Cannon",
+        "Ice Spirit", "Skeletons", "The Log", "Fireball",
+    ])
+    enemy = _deck([
+        "Giant", "Witch", "Barbarians", "Mega Minion",
+        "Zap", "Bats", "Mini P.E.K.K.A", "Poison",
+    ])
+    plan = MatchPlanBuilder.build(my, enemy)
+    fb = next(s for s in plan.save_cards if s.name == "Fireball")
+    assert "Варвар" in fb.reason
+    assert "Ведьм" in fb.reason
+
+
+def test_guards_vs_ronin_not_in_avoid_as_no_counter():
+    my = _deck([
+        "Hog Rider", "Executioner", "Tornado", "Guards",
+        "Ice Spirit", "Skeletons", "The Log", "Fireball",
+    ])
+    enemy = _deck([
+        "Ronin", "Witch", "Mega Minion", "Tesla",
+        "Zap", "Bats", "Mini P.E.K.K.A", "Poison",
+    ])
+    plan = MatchPlanBuilder.build(my, enemy)
+    avoid_joined = " ".join(plan.avoid)
+    assert "нет счётчика" not in avoid_joined.lower()
+    assert not any("Ронин" in x and "счётчик" in x.lower() for x in plan.avoid)

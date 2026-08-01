@@ -116,9 +116,24 @@ def _role_counter_tier(counter_card: str, target: str) -> str | None:
             return "partial"
         return None
 
-    if is_point_target_threat(target) or target in {"Golem", "Giant", "Electro Giant", "P.E.K.K.A"}:
+    if is_point_target_threat(target) or target in {
+        "Golem", "Giant", "Electro Giant", "P.E.K.K.A", "Ronin",
+    }:
         if _ROLE_ANTI_TANK in roles:
             return "partial"
+        # Дальний DPS / воздух / спам держат ближнего Ronin.
+        if target == "Ronin":
+            if (
+                _ROLE_AIR in roles
+                or "air_defense" in roles
+                or _ROLE_ANTI_SWARM in roles
+                or _ROLE_SPLASH in roles
+                or "ranged" in roles
+                or "air" in roles
+            ):
+                return "partial"
+            if is_spam_card(counter_card):
+                return "partial"
         return None
 
     if is_building(target):

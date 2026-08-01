@@ -15,6 +15,7 @@ from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_builder.archetype_detect import detect_archetype_from_cards
 from bot.services.deck_game_plan import GamePlan, build_game_plan
 from bot.services.deck_intent import DeckIntentEngine
+from bot.services.spell_hold import FIREBALL_HOLD_PRIORITY, pick_fireball_hold
 from bot.services.tactical_matchup import TacticalMatchupAnalyzer, TacticalMatchupReport
 
 _BRIDGE_WINS = frozenset({
@@ -29,11 +30,7 @@ _VALUE_SPELLS = frozenset({
     "Fireball", "Poison", "Lightning", "Rocket", "Earthquake",
 })
 _SPELL_HOLD: dict[str, tuple[str, ...]] = {
-    "Fireball": (
-        "Flying Machine", "Three Musketeers", "Archer Queen", "Firecracker",
-        "Musketeer", "Wizard", "Witch", "Magic Archer", "Dart Goblin",
-        "Mother Witch", "Zappies",
-    ),
+    "Fireball": FIREBALL_HOLD_PRIORITY,
     "Poison": (
         "Graveyard", "Goblin Barrel", "Skeleton Barrel", "Furnace",
         "Goblin Hut", "Barbarian Hut", "Witch", "Night Witch", "Tombstone",
@@ -183,8 +180,13 @@ def _build_save_cards(my: list[str], enemy: list[str]) -> list[SaveCard]:
     """Карты для руки — отдельный UI, без текстовых дублей фаз."""
     out: list[SaveCard] = []
 
+    if "Fireball" in my:
+        focus, reason = pick_fireball_hold(my, enemy)
+        if focus:
+            _save_card(out, "Fireball", reason)
+
     for spell, targets in _SPELL_HOLD.items():
-        if spell not in my:
+        if spell == "Fireball" or spell not in my:
             continue
         present = [t for t in targets if t in enemy]
         if present:
@@ -201,7 +203,7 @@ def _build_save_cards(my: list[str], enemy: list[str]) -> list[SaveCard]:
             or answer in _DEF_BUILDINGS
             or answer in _VALUE_SPELLS
             or card_has_role(answer, "anti_tank")
-            or answer in {"Tornado", "Mighty Miner", "Inferno Dragon"}
+            or answer in {"Tornado", "Mighty Miner", "Inferno Dragon", "Guards"}
         ):
             _save_card(out, answer, f"Ответ на {_ru(threat)}.")
 

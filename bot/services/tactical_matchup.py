@@ -24,6 +24,7 @@ from bot.services.deck_builder.archetype_detect import detect_archetype_from_car
 from bot.services.deck_builder.constants import KNOWN_SYNERGY_PAIRS, SYNERGY_STRONG
 from bot.services.deck_game_plan import GamePlan, build_game_plan
 from bot.services.deck_intent import DeckIntentEngine
+from bot.services.spell_hold import FIREBALL_HOLD_PRIORITY, pick_fireball_hold
 
 # Большие спеллы, которыми держат ценность до ключевой цели.
 _VALUE_SPELLS = frozenset({
@@ -32,11 +33,7 @@ _VALUE_SPELLS = frozenset({
 
 # Приоритет целей (раньше = важнее держать спелл).
 _SPELL_HOLD_TARGETS: dict[str, tuple[str, ...]] = {
-    "Fireball": (
-        "Flying Machine", "Three Musketeers", "Archer Queen", "Firecracker",
-        "Musketeer", "Wizard", "Witch", "Magic Archer", "Dart Goblin",
-        "Mother Witch", "Zappies",
-    ),
+    "Fireball": FIREBALL_HOLD_PRIORITY,
     "Poison": (
         "Graveyard", "Goblin Barrel", "Skeleton Barrel", "Furnace",
         "Goblin Hut", "Barbarian Hut", "Witch", "Night Witch", "Tombstone",
@@ -226,14 +223,20 @@ def _mentions_pair(text: str, a: str, b: str) -> bool:
 
 
 def _spell_hold_rules(user: list[str], opp: list[str], out: TacticalMatchupReport) -> None:
+    # Fireball — отдельная логика приоритета (варвары > ведьма и т.п.).
+    if "Fireball" in user:
+        focus, reason = pick_fireball_hold(user, opp)
+        if focus:
+            _add(out.critical_interactions, f"Не трать {_ru('Fireball')}: {reason}")
+            _add(out.worst_mistakes, f"Ранний {_ru('Fireball')} до {_ru(focus)} — потеря ценности.")
+
     for spell, targets in _SPELL_HOLD_TARGETS.items():
-        if spell not in user:
+        if spell == "Fireball" or spell not in user:
             continue
         valid = [t for t in targets if t in opp and _spell_answers_target(spell, t)]
         if not valid:
             continue
         focus = valid[0]
-        # Одно место: ключевое взаимодействие. Ошибка — отдельная секция (инверсия).
         _add(out.critical_interactions, f"Не трать {_ru(spell)} до появления {_ru(focus)}.")
         _add(out.worst_mistakes, f"Ранний {_ru(spell)} до {_ru(focus)} — потеря ценности.")
         if focus == "Graveyard" and spell == "Poison":
@@ -302,7 +305,7 @@ def _hold_answer_for_win(user: list[str], opp: list[str], out: TacticalMatchupRe
             continue
         answer = answers[0]
         if is_building(answer) or answer in _DEFENSIVE_BUILDINGS or card_has_role(answer, "anti_tank") or answer in {
-            "Inferno Dragon", "Tornado", "Mighty Miner",
+            "Inferno Dragon", "Tornado", "Mighty Miner", "Guards",
         }:
             # Одно место — critical, без зеркала в mid.
             _add(out.critical_interactions, f"Против {_ru(threat)} держи {_ru(answer)}.")

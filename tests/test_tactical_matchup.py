@@ -14,13 +14,49 @@ def test_fireball_hold_for_flying_machine():
         "Ice Spirit", "Skeletons", "The Log", "Fireball",
     ])
     opp = _team([
-        "Royal Hogs", "Flying Machine", "Royal Recruits", "Zappies",
+        "Giant", "Flying Machine", "Royal Recruits", "Zappies",
         "Heal Spirit", "The Log", "Barbarian Barrel", "Earthquake",
     ])
     report = TacticalMatchupAnalyzer.analyze(user, opp)
     joined = " ".join(report.critical_interactions + report.worst_mistakes)
     assert "Летучка" in joined
     assert "Не трать" in joined and "Фаербол" in joined
+
+
+def test_fireball_prefers_barbarians_over_witch():
+    """Пак (варвары) важнее ведьмы — FB на варваров, ведьму другим ответом."""
+    user = _team([
+        "Hog Rider", "Ice Golem", "Musketeer", "Cannon",
+        "Ice Spirit", "Skeletons", "The Log", "Fireball",
+    ])
+    opp = _team([
+        "Giant", "Witch", "Barbarians", "Mega Minion",
+        "Zap", "Bats", "Mini P.E.K.K.A", "Poison",
+    ])
+    report = TacticalMatchupAnalyzer.analyze(user, opp)
+    joined = " ".join(report.critical_interactions + report.worst_mistakes)
+    assert "Фаербол" in joined
+    assert "Варвар" in joined
+    assert "Ведьм" in joined
+
+
+def test_guards_counter_ronin_not_danger():
+    """Стражи — счётчик на Ронина; не пишем «нет счётчика»."""
+    user = _team([
+        "Hog Rider", "Executioner", "Tornado", "Guards",
+        "Ice Spirit", "Skeletons", "The Log", "Fireball",
+    ])
+    opp = _team([
+        "Ronin", "Witch", "Mega Minion", "Tesla",
+        "Zap", "Bats", "Mini P.E.K.K.A", "Poison",
+    ])
+    report = TacticalMatchupAnalyzer.analyze(user, opp)
+    danger_ronin = [d for d in report.danger_cards if d.name == "Ronin"]
+    assert danger_ronin == []
+    strong, _ = __import__(
+        "bot.services.card_matchups", fromlist=["counters_in_deck"]
+    ).counters_in_deck("Ronin", user)
+    assert "Guards" in strong
 
 
 def test_no_fireball_hold_without_target():

@@ -169,7 +169,13 @@ COUNTERS: dict[str, list[str]] = {
     "Prince": ["Skeleton Army", "Goblin Gang", "Tombstone", "Barbarians", "Ronin"],
     "Rune Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "Cannon"],
     "Boss Bandit": ["Inferno Tower", "P.E.K.K.A", "Skeleton Army", "Knight", "Ronin"],
-    "Ronin": ["Skeleton Army", "Goblin Gang", "Minions", "Musketeer", "Wizard", "Mega Minion"],
+    "Ronin": [
+        "Guards", "Skeleton Army", "Goblin Gang", "Barbarians",
+        "Minions", "Minion Horde", "Bats", "Baby Dragon", "Inferno Dragon",
+        "Musketeer", "Archers", "Wizard", "Executioner", "Electro Wizard",
+        "Hunter", "Princess", "Mega Minion", "Dart Goblin", "Flying Machine",
+        "Inferno Tower", "Tesla", "Cannon",
+    ],
     "Witch": ["Valkyrie", "Knight", "Prince", "Mini P.E.K.K.A", "Baby Dragon", "Poison", "Fireball"],
     "Mother Witch": ["Valkyrie", "Fireball", "Poison", "Wizard", "Mega Minion"],
     "Firecracker": ["The Log", "Arrows", "Fireball", "Zap", "Barbarian Barrel"],
@@ -258,6 +264,7 @@ POINT_TARGET_THREATS = {
     "P.E.K.K.A", "Mini P.E.K.K.A", "Prince", "Hog Rider", "Bandit", "Sparky",
     "Inferno Dragon", "Lumberjack", "Golden Knight", "Mighty Miner", "Monk",
     "Mega Knight", "Dark Prince", "Elite Barbarians", "Boss Bandit", "Rune Giant",
+    "Ronin",
 }
 
 POINT_TARGET_COUNTERS = {
@@ -303,11 +310,30 @@ OFFENSE_COUNTER_ALLOWED: dict[str, frozenset[str]] = {
 
 # Ручные правки поверх DeckShop (кого карта реально контрит)
 MANUAL_COUNTERS_STRONG: dict[str, frozenset[str]] = {
-    "Guards": frozenset({"P.E.K.K.A", "Mini P.E.K.K.A"}),
+    "Guards": frozenset({"P.E.K.K.A", "Mini P.E.K.K.A", "Ronin", "Prince", "Dark Prince"}),
     "Little Prince": frozenset({
         "Mega Knight", "Mini P.E.K.K.A", "P.E.K.K.A", "Prince", "Dark Prince",
-        "Knight", "Valkyrie", "Bandit", "Mega Minion", "Barbarians",
+        "Knight", "Valkyrie", "Bandit", "Mega Minion", "Barbarians", "Ronin",
     }),
+    # Стрелки / воздух / спам vs Ronin (ближний чемпион).
+    "Musketeer": frozenset({"Ronin"}),
+    "Archers": frozenset({"Ronin"}),
+    "Wizard": frozenset({"Ronin"}),
+    "Executioner": frozenset({"Ronin"}),
+    "Electro Wizard": frozenset({"Ronin"}),
+    "Hunter": frozenset({"Ronin"}),
+    "Princess": frozenset({"Ronin"}),
+    "Mega Minion": frozenset({"Ronin"}),
+    "Minions": frozenset({"Ronin"}),
+    "Minion Horde": frozenset({"Ronin"}),
+    "Bats": frozenset({"Ronin"}),
+    "Baby Dragon": frozenset({"Ronin"}),
+    "Inferno Dragon": frozenset({"Ronin"}),
+    "Dart Goblin": frozenset({"Ronin"}),
+    "Flying Machine": frozenset({"Ronin"}),
+    "Skeleton Army": frozenset({"Ronin"}),
+    "Goblin Gang": frozenset({"Ronin"}),
+    "Barbarians": frozenset({"Ronin"}),
 }
 
 MANUAL_COUNTERS_PARTIAL: dict[str, frozenset[str]] = {
