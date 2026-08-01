@@ -380,30 +380,11 @@ def _synergy_tier_pair(a: str, b: str) -> str | None:
 
 
 def calculate_deck_synergy(cards: list[str]) -> tuple[float, list[str]]:
-    """Оценка внутренней синергии колоды 0–100 и короткие строки на русском."""
-    if len(cards) < 2:
-        return 50.0, []
+    """Оценка внутренней синергии колоды 0–100 и короткие строки на русском.
 
-    total = 0.0
-    pairs = 0
-    highlights: list[str] = []
-    seen_highlight_keys: set[tuple[str, str]] = set()
+    Адаптер к DeckSynergyEvaluation: core + roles + gameplan − conflicts.
+    """
+    from bot.services.deck_synergy import evaluate_deck_synergy
 
-    for i, a in enumerate(cards):
-        for b in cards[i + 1 :]:
-            if not is_valid_synergy_pair(a, b):
-                continue
-            tier = _synergy_tier_pair(a, b)
-            pairs += 1
-            if tier == "strong":
-                total += 1.0
-                key = tuple(sorted((a, b)))
-                if key not in seen_highlight_keys and len(highlights) < 6:
-                    seen_highlight_keys.add(key)
-                    left, right = sorted((a, b))
-                    highlights.append(f"{ru(left)} + {ru(right)}")
-            elif tier == "partial":
-                total += 0.35
-
-    score = (total / pairs) * 100.0 if pairs else 50.0
-    return round(score, 1), highlights
+    evaluation = evaluate_deck_synergy(cards)
+    return evaluation.score, evaluation.notes
