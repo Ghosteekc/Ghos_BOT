@@ -26,15 +26,16 @@ def test_hog_vs_tesla_plan_is_specific():
     assert "Хог" in plan.win_condition_window
     assert "Тесла" in plan.win_condition_window or "после" in plan.win_condition_window.lower()
 
-    avoid_text = " ".join(plan.avoid)
-    assert "Хог" in avoid_text or "Тесла" in avoid_text or "Фаербол" in avoid_text
+    # Инверсия окна — в тактических ошибках, не дублируется в avoid плана.
+    mistakes = " ".join(tactical.worst_mistakes)
+    assert "Хог" in mistakes and "Тесла" in mistakes
 
     save_names = {s.name for s in plan.save_cards}
     assert "Fireball" in save_names  # Flying Machine у врага
     assert any("Летучка" in s.reason or "Flying" in s.reason for s in plan.save_cards if s.name == "Fireball")
 
     phases = plan.game_plan.phase_1 + plan.game_plan.phase_2 + plan.game_plan.phase_3
-    assert phases
+    assert phases or plan.win_condition_window
 
 
 def test_golem_plan_differs_from_hog():
@@ -85,3 +86,30 @@ def test_graveyard_poison_save():
     assert "Poison" in save_names
     joined = " ".join(plan.avoid + plan.game_plan.phase_2)
     assert "Кладбище" in joined or "Яд" in joined or plan.win_condition_window
+
+
+def test_plan_phases_do_not_repeat_window_topic():
+    my = _deck([
+        "Hog Rider", "Executioner", "Tornado", "Valkyrie",
+        "Ice Spirit", "Skeletons", "The Log", "Fireball",
+    ])
+    enemy = _deck([
+        "Royal Giant", "Flying Machine", "Fisherman", "Tesla",
+        "Hunter", "Electro Spirit", "The Log", "Earthquake",
+    ])
+    plan = MatchPlanBuilder.build(my, enemy)
+    assert plan.win_condition_window
+    phases = (
+        plan.game_plan.phase_1
+        + plan.game_plan.phase_2
+        + plan.game_plan.phase_3
+        + plan.avoid
+    )
+    # Hog+Tesla тема живёт в окне атаки — не повторяем в фазах/avoid.
+    hog_tesla = [
+        x for x in phases
+        if "Хог" in x and "Тесла" in x
+    ]
+    assert hog_tesla == []
+    # Нет точных дублей внутри плана.
+    assert len(phases) == len(set(phases))

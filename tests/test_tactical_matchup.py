@@ -48,9 +48,11 @@ def test_executioner_tornado_vs_bait():
         "Inferno Tower", "The Log", "Knight", "Ice Spirit",
     ])
     report = TacticalMatchupAnalyzer.analyze(user, opp)
-    joined = " ".join(report.critical_interactions + report.mid_game)
+    joined = " ".join(report.critical_interactions)
     assert "Палач" in joined and "Торнадо" in joined
     assert "ключевая защита" in joined
+    # Не дублируем ту же связку в mid.
+    assert not any("Палач" in x and "Торнадо" in x for x in report.mid_game)
 
 
 def test_hog_after_building_spent():
@@ -63,10 +65,37 @@ def test_hog_after_building_spent():
         "Zap", "Bats", "Mini P.E.K.K.A", "Poison",
     ])
     report = TacticalMatchupAnalyzer.analyze(user, opp)
-    joined = " ".join(report.best_openings + report.early_game + report.worst_mistakes)
-    assert "Хог" in joined
-    assert "Тесла" in joined
-    assert "после траты" in joined
+    openings = " ".join(report.best_openings)
+    assert "Хог" in openings and "Тесла" in openings and "после траты" in openings
+    # Одна тема — не в early и pressure одновременно.
+    assert not any("после траты" in x for x in report.early_game)
+    assert not any("Тесла" in x for x in report.pressure_points)
+
+
+def test_no_cross_bucket_duplicates():
+    user = _team([
+        "Hog Rider", "Executioner", "Tornado", "Valkyrie",
+        "Ice Spirit", "Skeletons", "The Log", "Fireball",
+    ])
+    opp = _team([
+        "Royal Giant", "Flying Machine", "Fisherman", "Tesla",
+        "Royal Ghost", "Hunter", "The Log", "Earthquake",
+    ])
+    report = TacticalMatchupAnalyzer.analyze(user, opp)
+    buckets = [
+        report.early_game,
+        report.mid_game,
+        report.late_game,
+        report.pressure_points,
+        report.critical_interactions,
+        report.best_openings,
+    ]
+    # Точные дубликаты строк между секциями запрещены.
+    seen: set[str] = set()
+    for bucket in buckets:
+        for line in bucket:
+            assert line not in seen, f"Дубль между секциями: {line}"
+            seen.add(line)
 
 
 def test_poison_hold_vs_graveyard():

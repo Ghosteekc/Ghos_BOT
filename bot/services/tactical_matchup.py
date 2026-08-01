@@ -218,6 +218,13 @@ def _add(bucket: list[str], line: str, *, limit: int = 6) -> None:
         bucket.append(line)
 
 
+def _mentions_pair(text: str, a: str, b: str) -> bool:
+    """True, если в тексте уже есть обе карты пары (RU или EN)."""
+    low = text.lower()
+    tokens = {_ru(a).lower(), a.lower(), _ru(b).lower(), b.lower()}
+    return sum(1 for t in tokens if t and t in low) >= 2
+
+
 def _spell_hold_rules(user: list[str], opp: list[str], out: TacticalMatchupReport) -> None:
     for spell, targets in _SPELL_HOLD_TARGETS.items():
         if spell not in user:
@@ -226,11 +233,10 @@ def _spell_hold_rules(user: list[str], opp: list[str], out: TacticalMatchupRepor
         if not valid:
             continue
         focus = valid[0]
-        line = f"Не трать {_ru(spell)} до появления {_ru(focus)}."
-        _add(out.critical_interactions, line)
+        # Одно место: ключевое взаимодействие. Ошибка — отдельная секция (инверсия).
+        _add(out.critical_interactions, f"Не трать {_ru(spell)} до появления {_ru(focus)}.")
         _add(out.worst_mistakes, f"Ранний {_ru(spell)} до {_ru(focus)} — потеря ценности.")
         if focus == "Graveyard" and spell == "Poison":
-            _add(out.mid_game, f"Против {_ru(focus)} держи {_ru(spell)}.")
             _add(out.late_game, f"В дабл-эликсире {_ru(focus)} опаснее — {_ru(spell)} в руке.")
 
 
@@ -241,12 +247,10 @@ def _defense_combo_rules(user: list[str], opp: list[str], out: TacticalMatchupRe
         if not context_ok(opp):
             continue
         a, b = sorted(pair)
-        # Требуем известную синергию ИЛИ классическое Tornado-splash комбо.
         if not (_pair_is_known(a, b) or "Tornado" in pair):
             continue
-        text = template.format(a=_ru(a), b=_ru(b))
-        _add(out.critical_interactions, text)
-        _add(out.mid_game, text)
+        # Только critical_interactions — не дублируем в mid.
+        _add(out.critical_interactions, template.format(a=_ru(a), b=_ru(b)))
 
 
 def _building_vs_bridge_rules(user: list[str], opp: list[str], out: TacticalMatchupReport) -> None:
@@ -255,10 +259,8 @@ def _building_vs_bridge_rules(user: list[str], opp: list[str], out: TacticalMatc
         return
     for win in (c for c in user if c in _BRIDGE_WINS):
         bld = opp_buildings[0]
-        line = f"{_ru(win)} лучше пускать после траты {_ru(bld)}."
-        _add(out.best_openings, line)
-        _add(out.early_game, line)
-        _add(out.pressure_points, f"Давление {_ru(win)} при отсутствии {_ru(bld)} у соперника.")
+        # Позитив — openings; инверсия — mistakes. Не в early/pressure.
+        _add(out.best_openings, f"{_ru(win)} лучше пускать после траты {_ru(bld)}.")
         _add(out.worst_mistakes, f"Пускать {_ru(win)} в готовое {_ru(bld)} — проигрышный обмен.")
 
 
@@ -281,13 +283,12 @@ def _bait_rules(user: list[str], opp: list[str], out: TacticalMatchupReport) -> 
     if not others:
         return
     secondary = others[0]
-    line = (
+    # Только pressure — не mid + critical одновременно.
+    _add(
+        out.pressure_points,
         f"После траты {_ru(spell)} соперника дави {_ru(secondary)} "
-        f"(связка с {_ru(primary)})."
+        f"(связка с {_ru(primary)}).",
     )
-    _add(out.pressure_points, line)
-    _add(out.mid_game, line)
-    _add(out.critical_interactions, f"{_ru(primary)} / {_ru(secondary)} vs {_ru(spell)}.")
 
 
 def _hold_answer_for_win(user: list[str], opp: list[str], out: TacticalMatchupReport) -> None:
@@ -297,28 +298,28 @@ def _hold_answer_for_win(user: list[str], opp: list[str], out: TacticalMatchupRe
         if not answers:
             continue
         if threat == "Graveyard" and "Poison" in user:
-            line = f"Против {_ru(threat)} держи {_ru('Poison')}."
-            _add(out.critical_interactions, line)
-            _add(out.mid_game, line)
+            _add(out.critical_interactions, f"Против {_ru(threat)} держи {_ru('Poison')}.")
             continue
         answer = answers[0]
         if is_building(answer) or answer in _DEFENSIVE_BUILDINGS or card_has_role(answer, "anti_tank") or answer in {
             "Inferno Dragon", "Tornado", "Mighty Miner",
         }:
+            # Одно место — critical, без зеркала в mid.
             _add(out.critical_interactions, f"Против {_ru(threat)} держи {_ru(answer)}.")
-            _add(out.mid_game, f"Ответ на {_ru(threat)} — {_ru(answer)}.")
 
 
 def _danger_cards(user: list[str], opp: list[str], out: TacticalMatchupReport) -> None:
     for threat in opp:
         if is_pure_spell(threat) and threat not in WIN_CONDITIONS:
             continue
+        # Только реальные угрозы (WC/tank), не здания-контры вроде Tesla.
         if not (
             threat in WIN_CONDITIONS
             or card_has_role(threat, "win_condition")
             or card_has_role(threat, "tank")
-            or threat in COUNTERS
         ):
+            continue
+        if is_building(threat) or threat in _DEFENSIVE_BUILDINGS:
             continue
         strong, partial = counters_in_deck(threat, user)
         if strong:
@@ -352,7 +353,10 @@ def _phase_from_plans(
 
     if user_primary and user_primary in _BRIDGE_WINS:
         if opp_bld:
-            _add(out.early_game, f"Ранняя игра: не форсируй {_ru(user_primary)} в готовое здание.")
+            # Не дублируем openings «после траты здания».
+            already = any(_mentions_pair(x, user_primary, opp_bld[0]) for x in out.best_openings)
+            if not already:
+                _add(out.early_game, f"Ранняя игра: не форсируй {_ru(user_primary)} в готовое здание.")
         else:
             _add(out.early_game, f"Ранняя игра: цикл к {_ru(user_primary)} — соперник без здания.")
     if opp_primary and opp_primary in _BRIDGE_WINS and user_bld:
@@ -366,12 +370,20 @@ def _phase_from_plans(
         strong, partial = counters_in_deck(opp_primary, user)
         ans = strong or partial
         if ans:
-            _add(out.mid_game, f"Мид: готовь {_ru(ans[0])} к пушу {_ru(opp_primary)}.")
+            # Не дублируем critical «держи answer».
+            already = any(_mentions_pair(x, ans[0], opp_primary) for x in out.critical_interactions)
+            if not already:
+                _add(out.mid_game, f"Мид: готовь {_ru(ans[0])} к пушу {_ru(opp_primary)}.")
     if user_plan.core_combinations:
         combo = user_plan.core_combinations[0]
         parts = [p.strip() for p in combo.split(" + ")]
         if len(parts) >= 2 and all(p in user for p in parts[:2]):
-            _add(out.mid_game, f"Ключевая связка мида: {_combo_ru(combo)}.")
+            # Не повторять ту же пару, что уже в critical как защита.
+            already = any(
+                _mentions_pair(x, parts[0], parts[1]) for x in out.critical_interactions
+            )
+            if not already:
+                _add(out.mid_game, f"Ключевая связка мида: {_combo_ru(combo)}.")
 
     if user_primary and user_primary in _BEATDOWN_TANKS | _SIEGE:
         _add(out.late_game, f"Дабл-эликсир: усиливай давление через {_ru(user_primary)}.")
@@ -394,7 +406,7 @@ def _openings_from_cycle(user: list[str], opp: list[str], out: TacticalMatchupRe
             out.best_openings,
             f"Открытие: {_ru(cheap[0])} → цикл к {_ru(win)} (у соперника нет здания).",
         )
-    if "Ice Spirit" in user:
+    elif "Ice Spirit" in user:
         _add(out.best_openings, f"Открытие циклом с {_ru('Ice Spirit')} к {_ru(win)}.")
 
 
@@ -422,6 +434,9 @@ def _pressure_from_plans(
             if spam:
                 _add(out.pressure_points, f"Спам ({_ru(spam)}) давит слабость соперника к рою.")
         if "здание" in low:
+            # Только если здания реально нет — иначе это дубль Hog/Tesla openings.
+            if _deck_def_buildings(opp):
+                continue
             tool = next((c for c in user if c in _BRIDGE_WINS | _SIEGE), None)
             if tool:
                 _add(out.pressure_points, f"{_ru(tool)} сильнее — у соперника нет здания.")

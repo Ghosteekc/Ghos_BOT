@@ -2,6 +2,7 @@
 
 Входы: my_deck, enemy_deck, GamePlan обеих сторон, TacticalMatchupAnalyzer.
 Без общих советов: каждая строка следует из пересечения составов / тактики.
+Одна тема — одно место (дедуп по фазам / avoid / окну атаки).
 """
 
 from __future__ import annotations
@@ -72,9 +73,53 @@ def _buildings(deck: list[str]) -> list[str]:
     return [c for c in deck if c in _DEF_BUILDINGS or is_building(c)]
 
 
-def _add(bucket: list[str], line: str, *, limit: int = 5) -> None:
-    if line and line not in bucket and len(bucket) < limit:
-        bucket.append(line)
+def _topic_key(text: str) -> frozenset[str]:
+    """Грубый ключ темы для дедупа перефразов."""
+    stop = {
+        "после", "траты", "готовое", "лучше", "пускать", "пускай", "не", "в", "на",
+        "или", "когда", "здание", "кулдауне", "давление", "при", "отсутствии",
+        "у", "соперника", "проигрышный", "обмен", "финиш", "цикл", "к",
+        "моменты", "без", "ранний", "игра", "мид", "держи", "против", "ответ",
+        "ключевая", "защита", "сильная", "от", "связка", "набирай", "выгодной",
+        "игнорируй", "только", "слабый", "риск", "пробить", "окно", "атаки",
+        "берег", "береги", "выше", "ценность", "конце", "под",
+    }
+    raw = (
+        text.lower()
+        .replace("—", " ")
+        .replace("-", " ")
+        .replace(".", " ")
+        .replace(",", " ")
+        .replace(":", " ")
+        .replace("(", " ")
+        .replace(")", " ")
+    )
+    return frozenset(t for t in raw.split() if len(t) > 2 and t not in stop)
+
+
+def _overlaps(a: frozenset[str], b: frozenset[str]) -> bool:
+    """Дубль, если ≥2 значимых токена совпали (одна карта ≠ одна тема)."""
+    if not a or not b:
+        return False
+    return len(a & b) >= 2
+
+
+def _add_unique_topic(
+    bucket: list[str],
+    line: str,
+    seen: list[frozenset[str]],
+    *,
+    limit: int = 5,
+) -> None:
+    if not line or len(bucket) >= limit:
+        return
+    key = _topic_key(line)
+    if any(_overlaps(key, s) for s in seen):
+        return
+    if line in bucket:
+        return
+    bucket.append(line)
+    seen.append(key)
 
 
 @dataclass
@@ -134,21 +179,16 @@ def _save_card(out: list[SaveCard], name: str, reason: str, *, limit: int = 5) -
     out.append(SaveCard(name=name, name_ru=_ru(name), reason=reason))
 
 
-def _build_save_cards(
-    my: list[str],
-    enemy: list[str],
-    tactical: TacticalMatchupReport,
-) -> list[SaveCard]:
+def _build_save_cards(my: list[str], enemy: list[str]) -> list[SaveCard]:
+    """Карты для руки — отдельный UI, без текстовых дублей фаз."""
     out: list[SaveCard] = []
 
     for spell, targets in _SPELL_HOLD.items():
         if spell not in my:
             continue
         present = [t for t in targets if t in enemy]
-        if not present:
-            continue
-        focus = present[0]
-        _save_card(out, spell, f"Держи до появления {_ru(focus)}.")
+        if present:
+            _save_card(out, spell, f"Держи до появления {_ru(present[0])}.")
 
     for threat in _wins(enemy)[:2]:
         strong, partial = counters_in_deck(threat, my)
@@ -165,7 +205,6 @@ def _build_save_cards(
         ):
             _save_card(out, answer, f"Ответ на {_ru(threat)}.")
 
-    # Защитные комбо: Tornado / splash
     if "Tornado" in my and any(
         c in my for c in ("Executioner", "Wizard", "Baby Dragon", "Bowler", "Valkyrie")
     ):
@@ -173,15 +212,6 @@ def _build_save_cards(
             c in enemy for c in ("Balloon", "Graveyard", "Goblin Barrel", "Minion Horde")
         ):
             _save_card(out, "Tornado", "Ключ защитной связки в этом матчапе.")
-
-    # Из тактики: «держи X»
-    for line in tactical.critical_interactions + tactical.mid_game:
-        if "держи" not in line.lower():
-            continue
-        for card in my:
-            if _ru(card) in line and card not in {s.name for s in out}:
-                _save_card(out, card, line)
-                break
 
     return out
 
@@ -191,22 +221,21 @@ def _build_avoid(
     enemy: list[str],
     tactical: TacticalMatchupReport,
     my_plan: GamePlan,
-    enemy_plan: GamePlan,
+    seen: list[frozenset[str]],
 ) -> list[str]:
     avoid: list[str] = []
-    for line in tactical.worst_mistakes:
-        _add(avoid, line)
 
-    my_win = _primary_win(my)
-    enemy_bld = _buildings(enemy)
-    if my_win and my_win in _BRIDGE_WINS and enemy_bld:
-        _add(avoid, f"Не пускай {_ru(my_win)} в готовое {_ru(enemy_bld[0])}.")
+    for line in tactical.worst_mistakes:
+        _add_unique_topic(avoid, line, seen)
 
     enemy_win = _primary_win(enemy)
     if enemy_win and enemy_win in _BEATDOWN:
-        _add(avoid, f"Не отдавай эликсир впустую перед пушем {_ru(enemy_win)}.")
+        _add_unique_topic(
+            avoid,
+            f"Не отдавай эликсир впустую перед пушем {_ru(enemy_win)}.",
+            seen,
+        )
 
-    # Bait: не тратить малый спелл на первую bait-угрозу, если есть бочка
     if "Goblin Barrel" in enemy:
         small = next(
             (
@@ -221,15 +250,19 @@ def _build_avoid(
             if c in {"Princess", "Goblin Gang", "Dart Goblin", "Skeleton Barrel"}
         ]
         if small and bait_else:
-            _add(
+            _add_unique_topic(
                 avoid,
                 f"Не трать {_ru(small)} на {_ru(bait_else[0])} до {_ru('Goblin Barrel')}.",
+                seen,
             )
 
     for danger in tactical.danger_cards[:2]:
-        _add(avoid, f"Не игнорируй {_ru(danger.name)} — {danger.reason}")
+        _add_unique_topic(
+            avoid,
+            f"Не игнорируй {_ru(danger.name)} — {danger.reason}",
+            seen,
+        )
 
-    # Слабости нашего плана, которые враг может наказать
     for w in my_plan.critical_weaknesses[:2]:
         if "воздух" in w.lower() and any(
             c in enemy for c in ("Balloon", "Lava Hound", "Minion Horde", "Flying Machine")
@@ -238,10 +271,10 @@ def _build_avoid(
                 c for c in enemy
                 if c in ("Balloon", "Lava Hound", "Minion Horde", "Flying Machine")
             )
-            _add(avoid, f"Не оставайся без ответа на {_ru(air)}.")
+            _add_unique_topic(avoid, f"Не оставайся без ответа на {_ru(air)}.", seen)
         if "здание" in w.lower() and any(c in enemy for c in _BRIDGE_WINS | _SIEGE):
             tool = next(c for c in enemy if c in _BRIDGE_WINS | _SIEGE)
-            _add(avoid, f"Без здания не зевай {_ru(tool)}.")
+            _add_unique_topic(avoid, f"Без здания не зевай {_ru(tool)}.", seen)
 
     return avoid
 
@@ -259,22 +292,17 @@ def _win_condition_window(
     enemy_bld = _buildings(enemy)
     if my_win in _BRIDGE_WINS and enemy_bld:
         return f"{_ru(my_win)} — после траты {_ru(enemy_bld[0])} или когда здание на кулдауне."
-
     if my_win in _BRIDGE_WINS and not enemy_bld:
         return f"{_ru(my_win)} — с первых минут, как только цикл собран (у соперника нет здания)."
-
     if my_win in _BEATDOWN:
         return f"{_ru(my_win)} — после выгодной защиты, набор сзади в плюсе по эликсиру."
-
     if my_win in _SIEGE:
         return f"{_ru(my_win)} — когда соперник в минусе или его контрпуш отбит."
-
     if my_win == "Graveyard":
         spell = next((c for c in my if c in {"Poison", "Freeze", "Barbarian Barrel"}), None)
         if spell:
             return f"{_ru(my_win)} — в паре с {_ru(spell)} после стопа пуша соперника."
         return f"{_ru(my_win)} — после стопа пуша, на танк или в плюсе."
-
     if my_win == "Goblin Barrel":
         small = next(
             (c for c in enemy if c in {"The Log", "Zap", "Arrows", "Barbarian Barrel"}),
@@ -284,15 +312,11 @@ def _win_condition_window(
             return f"{_ru(my_win)} — после траты {_ru(small)} соперника на bait."
         return f"{_ru(my_win)} — в сплите со второй bait-угрозой."
 
-    # Из тактических openings
     for line in tactical.best_openings:
         if _ru(my_win) in line or my_win in line:
             return line
-
-    # Только если when_to_attack опирается на реальный primary в колоде
     if my_plan.when_to_attack and my_win in my:
         return f"{_ru(my_win)}: {my_plan.when_to_attack}"
-
     return f"Атакуй {_ru(my_win)}, когда ответ соперника потрачен или ты в плюсе."
 
 
@@ -301,26 +325,37 @@ def _phase_1(
     enemy: list[str],
     tactical: TacticalMatchupReport,
     my_win: str | None,
+    seen: list[frozenset[str]],
 ) -> list[str]:
     phase: list[str] = []
-    for line in tactical.best_openings[:2]:
-        _add(phase, line)
     for line in tactical.early_game[:3]:
-        _add(phase, line)
+        _add_unique_topic(phase, line, seen)
+    if not phase:
+        for line in tactical.best_openings[:2]:
+            _add_unique_topic(phase, line, seen)
 
     enemy_win = _primary_win(enemy)
     my_bld = _buildings(my)
     if enemy_win and enemy_win in _BRIDGE_WINS and my_bld:
-        _add(phase, f"В старте держи {_ru(my_bld[0])} готовым к {_ru(enemy_win)}.")
-
+        _add_unique_topic(
+            phase,
+            f"В старте держи {_ru(my_bld[0])} готовым к {_ru(enemy_win)}.",
+            seen,
+        )
     if my_win and my_win in _BEATDOWN:
-        _add(phase, f"Ранняя игра — дешёвые обмены, не форсируй {_ru(my_win)}.")
-
+        _add_unique_topic(
+            phase,
+            f"Ранняя игра — дешёвые обмены, не форсируй {_ru(my_win)}.",
+            seen,
+        )
     if not phase and my_win:
         cheap = [c for c in my if get_card_elixir(c) <= 2 and c != my_win]
         if cheap:
-            _add(phase, f"Открой циклом через {_ru(cheap[0])}, готовь {_ru(my_win)}.")
-
+            _add_unique_topic(
+                phase,
+                f"Открой циклом через {_ru(cheap[0])}, готовь {_ru(my_win)}.",
+                seen,
+            )
     return phase
 
 
@@ -331,17 +366,14 @@ def _phase_2(
     my_plan: GamePlan,
     enemy_plan: GamePlan,
     my_win: str | None,
+    seen: list[frozenset[str]],
 ) -> list[str]:
     phase: list[str] = []
-    for line in tactical.mid_game[:3]:
-        _add(phase, line)
+    # Только mid + уникальный pressure. Critical остаётся в тактике / save_cards.
+    for line in tactical.mid_game[:4]:
+        _add_unique_topic(phase, line, seen)
     for line in tactical.pressure_points[:2]:
-        _add(phase, line)
-    for line in tactical.critical_interactions[:2]:
-        if line not in phase:
-            # Только actionable mid tips
-            if any(k in line.lower() for k in ("держи", "защита", "после", "дави", "связка")):
-                _add(phase, line)
+        _add_unique_topic(phase, line, seen)
 
     for w in enemy_plan.critical_weaknesses[:2]:
         low = w.lower()
@@ -355,21 +387,32 @@ def _phase_2(
                 None,
             )
             if air:
-                _add(phase, f"Преимущество: дави {_ru(air)} в слабую ПВО.")
-        if "здание" in low and my_win and my_win in _BRIDGE_WINS | _SIEGE:
-            _add(phase, f"Преимущество: {_ru(my_win)} без здания у соперника.")
+                _add_unique_topic(phase, f"Преимущество: дави {_ru(air)} в слабую ПВО.", seen)
+        if "здание" in low and my_win and my_win in _BRIDGE_WINS | _SIEGE and not _buildings(enemy):
+            _add_unique_topic(
+                phase,
+                f"Преимущество: {_ru(my_win)} без здания у соперника.",
+                seen,
+            )
         if "спам" in low:
             spam = next((c for c in my if card_has_role(c, "swarm")), None)
             if spam:
-                _add(phase, f"Преимущество: {_ru(spam)} против слабого anti-swarm.")
+                _add_unique_topic(
+                    phase,
+                    f"Преимущество: {_ru(spam)} против слабого anti-swarm.",
+                    seen,
+                )
 
     if my_plan.core_combinations:
         combo = my_plan.core_combinations[0]
         parts = [p.strip() for p in combo.split(" + ")]
         if len(parts) >= 2 and all(p in my for p in parts[:2]):
             left, right = _ru(parts[0]), _ru(parts[1])
-            _add(phase, f"Набирай связку {left} + {right} после выгодной защиты.")
-
+            _add_unique_topic(
+                phase,
+                f"Набирай связку {left} + {right} после выгодной защиты.",
+                seen,
+            )
     return phase
 
 
@@ -378,31 +421,36 @@ def _phase_3(
     enemy: list[str],
     tactical: TacticalMatchupReport,
     my_win: str | None,
+    seen: list[frozenset[str]],
 ) -> list[str]:
     phase: list[str] = []
     for line in tactical.late_game[:3]:
-        _add(phase, line)
+        _add_unique_topic(phase, line, seen)
 
     if my_win and my_win in _BEATDOWN | _SIEGE:
-        _add(phase, f"Дабл-эликсир: закрывай через усиленный пуш {_ru(my_win)}.")
-    elif my_win and my_win in _BRIDGE_WINS:
-        enemy_bld = _buildings(enemy)
-        if enemy_bld:
-            _add(
-                phase,
-                f"Финиш: цикл к {_ru(my_win)} в моменты без {_ru(enemy_bld[0])}.",
-            )
-        else:
-            _add(phase, f"Финиш: непрерывный цикл {_ru(my_win)} в дабл-эликсире.")
+        _add_unique_topic(
+            phase,
+            f"Дабл-эликсир: закрывай через усиленный пуш {_ru(my_win)}.",
+            seen,
+        )
+    elif my_win and my_win in _BRIDGE_WINS and not _buildings(enemy):
+        _add_unique_topic(
+            phase,
+            f"Финиш: непрерывный цикл {_ru(my_win)} в дабл-эликсире.",
+            seen,
+        )
 
     for spell in _VALUE_SPELLS:
         if spell not in my:
             continue
         targets = [t for t in _SPELL_HOLD.get(spell, ()) if t in enemy]
         if targets:
-            _add(phase, f"В конце ценность {_ru(spell)} выше — береги под {_ru(targets[0])}.")
+            _add_unique_topic(
+                phase,
+                f"В конце ценность {_ru(spell)} выше — береги под {_ru(targets[0])}.",
+                seen,
+            )
             break
-
     return phase
 
 
@@ -437,17 +485,33 @@ class MatchPlanBuilder:
         )
 
         my_win = _primary_win(my)
-        report = MatchPlanReport(
+        window = _win_condition_window(my, enemy, tactical, my_plan)
+
+        # Темы тактики/окна не повторяем в фазах плана.
+        seen: list[frozenset[str]] = []
+        if window:
+            seen.append(_topic_key(window))
+        for line in tactical.critical_interactions:
+            seen.append(_topic_key(line))
+        for line in tactical.best_openings:
+            seen.append(_topic_key(line))
+
+        phase_1 = _phase_1(my, enemy, tactical, my_win, seen)
+        phase_2 = _phase_2(my, enemy, tactical, my_plan, enemy_plan, my_win, seen)
+        phase_3 = _phase_3(my, enemy, tactical, my_win, seen)
+        # Avoid: worst_mistakes ок, но без перекрытия с окном/фазами.
+        avoid = _build_avoid(my, enemy, tactical, my_plan, seen)
+
+        return MatchPlanReport(
             game_plan=MatchGamePlanPhases(
-                phase_1=_phase_1(my, enemy, tactical, my_win),
-                phase_2=_phase_2(my, enemy, tactical, my_plan, enemy_plan, my_win),
-                phase_3=_phase_3(my, enemy, tactical, my_win),
+                phase_1=phase_1,
+                phase_2=phase_2,
+                phase_3=phase_3,
             ),
-            avoid=_build_avoid(my, enemy, tactical, my_plan, enemy_plan),
-            save_cards=_build_save_cards(my, enemy, tactical),
-            win_condition_window=_win_condition_window(my, enemy, tactical, my_plan),
+            avoid=avoid,
+            save_cards=_build_save_cards(my, enemy),
+            win_condition_window=window,
         )
-        return report
 
 
 def build_match_plan(
