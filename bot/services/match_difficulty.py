@@ -441,94 +441,41 @@ def _archetype_factor(user: list[str], opp: list[str]) -> list[_Factor]:
     return factors
 
 
+def _card_role_factors(user: list[str], opp: list[str]) -> list[_Factor]:
+    """Ролевые пробелы, влияющие на общий MatchupEvaluation."""
+    factors: list[_Factor] = []
+    if any(c in _BEATDOWN or card_has_role(c, "tank") for c in opp):
+        if not any(card_has_role(c, "anti_tank") for c in user):
+            factors.append(_Factor(
+                "card_roles",
+                9,
+                "Нет anti-tank роли против тяжёлых танков соперника.",
+            ))
+    if any(card_has_role(c, "swarm") for c in opp) or any(
+        c in {"Skeleton Army", "Goblin Gang", "Minion Horde", "Bats"} for c in opp
+    ):
+        if not any(card_has_role(c, "splash") or card_has_role(c, "anti_swarm") for c in user):
+            factors.append(_Factor(
+                "card_roles",
+                8,
+                "Нет splash / anti-swarm против роя соперника.",
+            ))
+    return factors
+
+
 class MatchDifficultyAnalyzer:
-    """Индекс сложности матчапа с точки зрения колоды пользователя."""
+    """Совместимый адаптер к единому MatchupEvaluation."""
 
     @staticmethod
     def analyze(user_deck: list[str], opponent_deck: list[str]) -> MatchDifficultyReport:
-        if len(user_deck) < 8 or len(opponent_deck) < 8:
-            return MatchDifficultyReport()
+        from bot.services.matchup_evaluation import evaluate_matchup
 
-        user = list(user_deck)
-        opp = list(opponent_deck)
-
-        all_factors = (
-            _wc_counter_pressure(user, opp)
-            + _building_factor(user, opp)
-            + _air_factor(user, opp)
-            + _cycle_pressure_factor(user, opp)
-            + _spell_advantage_factor(user, opp)
-            + _archetype_factor(user, opp)
-        )
-
-        score = 50.0
-        reasons: list[str] = []
-        factor_scores: dict[str, float] = {
-            "counter_database": 0.0,
-            "win_condition_interaction": 0.0,
-            "building_availability": 0.0,
-            "air_control": 0.0,
-            "cycle_speed": 0.0,
-            "pressure": 0.0,
-            "spell_advantage": 0.0,
-            "archetypes": 0.0,
-            "card_roles": 0.0,
-        }
-
-        # card_roles: лёгкий вклад по отсутствию anti_tank / splash при нужде
-        if any(c in _BEATDOWN or card_has_role(c, "tank") for c in opp):
-            if not any(card_has_role(c, "anti_tank") for c in user):
-                all_factors.append(_Factor(
-                    "card_roles",
-                    9,
-                    "Нет anti-tank роли против тяжёлых танков соперника.",
-                ))
-        if any(card_has_role(c, "swarm") for c in opp) or any(
-            c in {"Skeleton Army", "Goblin Gang", "Minion Horde", "Bats"} for c in opp
-        ):
-            if not any(card_has_role(c, "splash") or card_has_role(c, "anti_swarm") for c in user):
-                all_factors.append(_Factor(
-                    "card_roles",
-                    8,
-                    "Нет splash / anti-swarm против роя соперника.",
-                ))
-
-        for f in all_factors:
-            score += f.delta
-            factor_scores[f.key] = factor_scores.get(f.key, 0.0) + f.delta
-            if f.reason and f.reason not in reasons and abs(f.delta) >= 6:
-                reasons.append(f.reason)
-
-        difficulty = _clamp(score)
-        rating = _rating_for(difficulty)
-
-        # Причины должны объяснять оценку, а не противоречить ей.
-        reason_delta = {f.reason: f.delta for f in all_factors if f.reason}
-        if difficulty >= 60:
-            reasons = [r for r in reasons if reason_delta.get(r, 0) > 0]
-        elif difficulty <= 39:
-            reasons = [r for r in reasons if reason_delta.get(r, 0) < 0]
-
-        # Не оставлять высокий/низкий rating без причин.
-        if difficulty >= 60 and not reasons:
-            reasons.append("Структурный перевес соперника по контрам и темпу.")
-        if difficulty <= 39 and not reasons:
-            reasons.append("Структурный перевес вашей колоды в этом матчапе.")
-
-        hard_first = sorted(
-            reasons,
-            key=lambda r: 0 if reason_delta.get(r, 0) > 0 else 1,
-        )
-
-        factors_out = {
-            k: _clamp(50 + v) for k, v in factor_scores.items()
-        }
-
+        evaluation = evaluate_matchup(user_deck, opponent_deck)
         return MatchDifficultyReport(
-            difficulty=difficulty,
-            rating=rating,
-            reasons=hard_first[:6],
-            factors=factors_out,
+            difficulty=evaluation.difficulty,
+            rating=evaluation.rating,
+            reasons=evaluation.reasons,
+            factors=evaluation.factors,
         )
 
 

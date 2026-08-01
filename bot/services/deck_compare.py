@@ -5,13 +5,13 @@ from __future__ import annotations
 from bot.services.card_data import card_counters_for_spell, is_pure_spell
 from bot.services.card_matchups import (
     calculate_deck_synergy,
-    calculate_matchup_score,
     counters_in_deck,
     ru,
     ru_list,
     targets_countered_by,
 )
 from bot.services.deck_analyzer import analyze_deck
+from bot.services.matchup_evaluation import evaluate_matchup
 
 
 def _note(card: str, tone: str, text: str) -> dict:
@@ -218,8 +218,8 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict:
         "reference_worse": _dedupe(ref_worse),
         "user_card_notes": user_notes,
         "reference_card_notes": ref_notes,
-        "matchup_score": calculate_matchup_score(user_cards, ref_cards),
-        "opponent_matchup_score": calculate_matchup_score(ref_cards, user_cards),
+        "matchup_score": float(evaluate_matchup(user_cards, ref_cards).score),
+        "opponent_matchup_score": float(evaluate_matchup(ref_cards, user_cards).score),
         "user_synergy_score": user_syn_score,
         "reference_synergy_score": ref_syn_score,
         "user_synergy_notes": user_syn_notes,

@@ -33,7 +33,7 @@ from bot.services.battle_time import battle_time_from_record, battle_times_equal
 from bot.services.battle_report import analyze_battle_enhanced, analyze_battle_list_item
 from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed
 from bot.services.card_names_ru import card_name_ru
-from bot.services.deck_analyzer import analyze_deck, calculate_matchup_score
+from bot.services.deck_analyzer import analyze_deck
 from bot.user_errors import http_error
 
 router = APIRouter(prefix="/api/battles", tags=["battles"])
@@ -88,9 +88,11 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
     user_stats = analyze_deck(user_deck)
     duration = int(battle.get("gameDuration") or 0)
     top_reason: str | None = None
+    matchup_score = 50.0
     try:
         analysis = analyze_battle_list_item(team, opponent, duration=duration)
         top_reason = analysis.outcome_summary or (analysis.reasons[0] if analysis.reasons else None)
+        matchup_score = analysis.matchup_score
     except Exception:
         top_reason = None
     opp_name, opp_tag = resolve_opponent_fields(opponent)
@@ -102,7 +104,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         opponent_trophies=opponent.get("startingTrophies") or opponent.get("trophyChange") or 0,
         won=won,
         trophy_change=int(team.get("trophyChange") or 0),
-        matchup_score=round(calculate_matchup_score(user_deck, opp_deck), 1),
+        matchup_score=round(matchup_score, 1),
         duration=int(battle.get("gameDuration") or 0),
         avg_elixir=user_stats.avg_elixir,
         user_deck=user_deck,

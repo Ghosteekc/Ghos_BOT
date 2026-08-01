@@ -13,9 +13,9 @@ from bot.services.card_profile import get_card_profile
 
 # TODO(card-profile): локальные anti_air / splash sets дублируют CardProfile roles.
 # Не менять алгоритм analyze_deck — только помечено для будущей миграции.
-from bot.services.card_matchups import calculate_matchup_score as _deckshop_matchup_score
 from bot.services.card_matchups import counters_in_deck, ru, ru_list
 from bot.services.clash_api import normalize_tag
+from bot.services.matchup_evaluation import MatchupEvaluation, evaluate_matchup
 
 
 @dataclass
@@ -39,6 +39,7 @@ class BattleAnalysis:
     trophy_change: int
     reasons: list[str]
     matchup_score: float
+    matchup_evaluation: MatchupEvaluation
     counter_cards_missing: list[str]
     opponent_threats: list[str]
 
@@ -80,8 +81,8 @@ def find_opponent_threats(opponent_deck: list[str]) -> list[str]:
 
 
 def calculate_matchup_score(user_deck: list[str], opponent_deck: list[str]) -> float:
-    """Оценка матчапа 0–100 по локальным контрам DeckShop."""
-    return _deckshop_matchup_score(user_deck, opponent_deck)
+    """Единый score сложности матчапа: выше = сложнее для user_deck."""
+    return float(evaluate_matchup(user_deck, opponent_deck).score)
 
 
 def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
@@ -92,7 +93,8 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
     won = crowns_user > crowns_opp
     trophy_change = user_team.get("trophyChange", 0)
 
-    matchup_score = calculate_matchup_score(user_deck, opponent_deck)
+    matchup = evaluate_matchup(user_deck, opponent_deck)
+    matchup_score = float(matchup.score)
     threats = find_opponent_threats(opponent_deck)
     reasons = []
     missing_counters = []
@@ -154,10 +156,8 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
             f"Стражи держат P.E.K.K.A, Хог и подобных",
         )
 
-    if matchup_score >= 60 and won:
-        reasons.insert(0, f"📊 Благоприятный матчап ({matchup_score:.0f}/100)")
-    elif matchup_score < 40 and not won:
-        reasons.insert(0, f"📊 Неблагоприятный матчап ({matchup_score:.0f}/100)")
+    reasons.insert(0, f"📊 Матчап: {matchup_score:.0f}/100 — {matchup.rating}.")
+    reasons.extend(f"Матчап: {reason}" for reason in matchup.reasons[:3])
 
     return BattleAnalysis(
         won=won,
@@ -167,6 +167,7 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
         trophy_change=trophy_change,
         reasons=reasons,
         matchup_score=matchup_score,
+        matchup_evaluation=matchup,
         counter_cards_missing=list(set(missing_counters)),
         opponent_threats=threats,
     )

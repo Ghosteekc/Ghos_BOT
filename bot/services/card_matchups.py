@@ -21,7 +21,6 @@ from bot.services.card_data import (
     OFFENSE_COUNTER_ALLOWED,
     SYNERGIES,
     card_counters_for_spell,
-    get_card_elixir,
     is_building,
     is_offense_win_condition,
     is_point_target_threat,
@@ -359,34 +358,14 @@ def synergy_partners(
 
 
 def calculate_matchup_score(defender_deck: list[str], attacker_deck: list[str]) -> float:
-    """0–100: насколько defender_deck отвечает на карты attacker_deck."""
-    if not attacker_deck:
-        return 50.0
+    """Совместимый адаптер к единому MatchupEvaluation.
 
-    points = 0.0
-    for threat in attacker_deck:
-        strong, partial = counters_in_deck(threat, defender_deck)
-        if strong:
-            points += 1.0
-        elif partial:
-            points += 0.45
-        else:
-            points += 0.0
+    Исторически функция считала покрытие контрами отдельно и использовала
+    обратную семантику. Теперь число означает сложность для defender_deck.
+    """
+    from bot.services.matchup_evaluation import evaluate_matchup
 
-    base = (points / len(attacker_deck)) * 100.0
-
-    def _avg(cards: list[str]) -> float:
-        xs = [get_card_elixir(c) for c in cards]
-        return sum(xs) / len(xs) if xs else 0.0
-
-    def_avg = _avg(defender_deck)
-    att_avg = _avg(attacker_deck)
-    if def_avg > att_avg + 1.0:
-        base -= 8
-    elif def_avg < att_avg - 0.5:
-        base += 4
-
-    return round(max(0.0, min(100.0, base)), 1)
+    return float(evaluate_matchup(defender_deck, attacker_deck).score)
 
 
 def _synergy_tier_pair(a: str, b: str) -> str | None:

@@ -25,8 +25,9 @@ from bot.services.deck_analyzer import (
     find_opponent_threats,
 )
 from bot.services.elixir_efficiency import ElixirEfficiencyAnalyzer, ElixirEfficiencyReport
-from bot.services.match_difficulty import MatchDifficultyAnalyzer, MatchDifficultyReport
+from bot.services.match_difficulty import MatchDifficultyReport
 from bot.services.match_plan import MatchPlanBuilder, MatchPlanReport
+from bot.services.matchup_evaluation import rating_for
 from bot.services.tactical_matchup import TacticalMatchupAnalyzer, TacticalMatchupReport
 
 TOWER_SPELLS = {"Fireball", "Rocket", "Lightning", "Poison", "Earthquake", "Freeze"}
@@ -276,18 +277,21 @@ def _build_outcome_summary(
     if not won and not user_stats.spells and opp_stats.spells:
         return "Поражение: у соперника было преимущество в заклинаниях."
 
-    if not won and matchup_score < 40 and opp_top_ru:
+    if not won and matchup_score >= 61 and opp_top_ru:
         return (
-            f"Поражение: неблагоприятный матчап ({matchup_score:.0f}/100). "
+            f"Поражение: сложный матчап ({matchup_score:.0f}/100, {rating_for(round(matchup_score))}). "
             f"Ключевая угроза — «{opp_top_ru}»."
         )
 
     if not won and opp_top_ru:
         return f"Поражение: «{opp_top_ru}» соперника, вероятно, нанесла больше всего урона башням."
 
-    if won and matchup_score >= 60 and threats:
+    if won and matchup_score <= 40 and threats:
         threat_ru = card_name_ru(threats[0])
-        return f"Победа: удачный матчап ({matchup_score:.0f}/100), удалось контрить «{threat_ru}»."
+        return (
+            f"Победа: лёгкий матчап ({matchup_score:.0f}/100, "
+            f"{rating_for(round(matchup_score))}), удалось контрить «{threat_ru}»."
+        )
 
     if won and user_stats.spells and not opp_stats.spells:
         return "Победа: контроль поля заклинаниями и давление по башням."
@@ -316,10 +320,10 @@ def _build_reasons(
 ) -> list[str]:
     reasons: list[str] = [outcome_summary]
 
-    if analysis.matchup_score >= 60 and analysis.won:
-        reasons.append(f"Матчап: {analysis.matchup_score:.0f}/100 — благоприятный.")
-    elif analysis.matchup_score < 40 and not analysis.won:
-        reasons.append(f"Матчап: {analysis.matchup_score:.0f}/100 — неблагоприятный.")
+    reasons.append(
+        f"Матчап: {analysis.matchup_score:.0f}/100 — "
+        f"{rating_for(round(analysis.matchup_score))}."
+    )
 
     if crown_score:
         reasons.append(f"Счёт по коронам: {crown_score}.")
@@ -493,7 +497,13 @@ def analyze_battle_enhanced(
         tactical = TacticalMatchupAnalyzer.analyze(user_deck, opp_deck)
         user_elixir = ElixirEfficiencyAnalyzer.analyze(user_deck)
         opponent_elixir = ElixirEfficiencyAnalyzer.analyze(opp_deck)
-        match_difficulty = MatchDifficultyAnalyzer.analyze(user_deck, opp_deck)
+        evaluation = base.matchup_evaluation
+        match_difficulty = MatchDifficultyReport(
+            difficulty=evaluation.difficulty,
+            rating=evaluation.rating,
+            reasons=evaluation.reasons,
+            factors=evaluation.factors,
+        )
         match_plan = MatchPlanBuilder.build(user_deck, opp_deck, tactical=tactical)
 
     return EnhancedBattleAnalysis(
@@ -504,6 +514,7 @@ def analyze_battle_enhanced(
         trophy_change=base.trophy_change,
         reasons=reasons,
         matchup_score=base.matchup_score,
+        matchup_evaluation=base.matchup_evaluation,
         counter_cards_missing=base.counter_cards_missing,
         opponent_threats=base.opponent_threats,
         outcome_summary=outcome_summary,
