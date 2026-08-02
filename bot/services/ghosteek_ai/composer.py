@@ -79,16 +79,19 @@ def _compose_card(data: dict[str, Any]) -> str:
 
 
 def _compose_mechanic(data: dict[str, Any]) -> str:
-    title = str(data.get("title") or "Механика")
+    ready = data.get("answer")
+    if isinstance(ready, str) and ready.strip():
+        return assert_coach_voice(ready.strip())
+    title = str(data.get("title") or "Термин")
     summary = str(data.get("summary") or "")
-    tips = data.get("tips") or []
-    tip = tips[0] if tips else "Применяй это в следующем бою осознанно — один навык за раз."
-    return coach_reply(
-        f"{title}: коротко — вот суть.",
-        why=summary,
-        action=str(tips[1]) if len(tips) > 1 else "Тренируй это в дружеских или в ladder без паники.",
-        tip=str(tip),
-    )
+    example = str(data.get("example") or "")
+    tip = str(data.get("tip") or "")
+    lines = [f"{title} — {summary}"]
+    if example:
+        lines.append(f"Пример: {example}")
+    if tip:
+        lines.append(tip)
+    return assert_coach_voice("\n\n".join(lines))
 
 
 def _compose_coach(data: dict[str, Any]) -> str:

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from bot.services.card_data import CARD_META
 from bot.services.card_names_ru import CARD_NAMES_RU, CARD_NAMES_SHORT
+from bot.services.ghosteek_ai.knowledge_base import resolve_mechanic_key
 
 # Intent → сервис (этап 1)
 INTENT_BUILD_DECK = "build_deck"  # Builder
@@ -127,21 +128,9 @@ _UNSUPPORTED_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Механики Knowledge Base: (aliases…) → key
-_MECHANIC_ALIASES: list[tuple[tuple[str, ...], str]] = [
-    (("positive elixir trade", "позитивн", "плюс по эликсир", "+elixir", "эликсир трейд"), "positive_elixir_trade"),
-    (("negative elixir trade", "негативн", "минус по эликсир"), "negative_elixir_trade"),
-    (("elixir trade", "trade эликсир", "обмен эликсир"), "elixir_trade"),
-    (("dual lane", "две линии", "давление на две", "double lane"), "dual_lane_pressure"),
-    (("bridge spam", "бридж спам", "спам с моста"), "bridge_spam"),
-    (("cycle", "цикл колоды", "быстрый цикл", "card cycle"), "cycle"),
-    (("beatdown", "битдаун"), "beatdown"),
-    (("control", "контроль"), "control"),
-    (("bait", "бейт", "log bait"), "bait"),
-    (("spell cycle", "спелл цикл"), "spell_cycle"),
-    (("kiting", "кайт", "kite"), "kiting"),
-    (("tank", "танк"), "tank"),
-]
+# Механики Knowledge Base — резолв через единый словарь алиасов
+def _match_mechanic(low: str) -> str | None:
+    return resolve_mechanic_key(low)
 
 
 def extract_cards_from_text(text: str, *, limit: int = 16) -> list[str]:
@@ -169,13 +158,6 @@ def extract_cards_from_text(text: str, *, limit: int = 16) -> list[str]:
                     return found
             start = idx + 1
     return found
-
-
-def _match_mechanic(low: str) -> str | None:
-    for aliases, key in _MECHANIC_ALIASES:
-        if any(a in low for a in aliases):
-            return key
-    return None
 
 
 def detect_intent(message: str, *, context_cards: list[str] | None = None) -> DetectedIntent:
@@ -230,12 +212,24 @@ def detect_intent(message: str, *, context_cards: list[str] | None = None) -> De
     mechanic = _match_mechanic(low)
     if mechanic and any(
         k in low
-        for k in ("что такое", "что значит", "объясни", "означает", "что есть", "what is", "mechanic")
+        for k in (
+            "что такое",
+            "что значит",
+            "объясни",
+            "означает",
+            "что есть",
+            "what is",
+            "mechanic",
+            "термин",
+        )
     ):
         return _out(INTENT_EXPLAIN_MECHANIC, mechanic_query=mechanic)
-    if mechanic and re.search(r"\b(cycle|bait|beatdown|bridge\s*spam|elixir\s*trade)\b", low):
-        # Короткие EN-термины без глагола — тоже Knowledge Base
-        if not any(k in low for k in ("собери", "разбер", "улучш", "матчап", "против", "апнуть")):
+    # Короткий запрос одним термином: «Cycle», «Overcommit», «Tempo»
+    if mechanic and len(low.split()) <= 4:
+        if not any(
+            k in low
+            for k in ("собери", "разбер", "улучш", "матчап", "против", "апнуть", "колод", "бой")
+        ):
             return _out(INTENT_EXPLAIN_MECHANIC, mechanic_query=mechanic)
 
     # --- Game Coach ---

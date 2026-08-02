@@ -31,7 +31,11 @@ from bot.services.ghosteek_ai.intents import (
     SERVICE_BY_INTENT,
     DetectedIntent,
 )
-from bot.services.ghosteek_ai.knowledge_base import list_mechanic_titles, lookup_mechanic
+from bot.services.ghosteek_ai.knowledge_base import (
+    format_mechanic_answer,
+    list_mechanic_titles,
+    lookup_mechanic,
+)
 from bot.services.ghosteek_ai.voice import coach_reply
 from bot.services.matchup_evaluation import evaluate_matchup
 from bot.services.recommendation_engine import RecommendationEngine
@@ -175,15 +179,15 @@ def _route_card_info(name: str | None) -> dict[str, Any]:
 def _route_mechanic(key: str | None) -> dict[str, Any]:
     entry = lookup_mechanic(key)
     if entry is None:
-        titles = ", ".join(list_mechanic_titles()[:6])
+        titles = ", ".join(list_mechanic_titles(limit=8))
         return _payload(
             INTENT_EXPLAIN_MECHANIC,
             ok=False,
             error=coach_reply(
-                "Этой механики в базе пока нет.",
-                why=f"Могу объяснить, например: {titles}.",
-                action="Напиши термин точнее — разберём.",
-                tip="Формулировка «что такое cycle» работает лучше всего.",
+                "Этого термина в словаре пока нет.",
+                why="Не буду выдумывать определение.",
+                action=f"Могу объяснить, например: {titles}.",
+                tip="Напиши точное название — Cycle, Tempo, Overcommit и т.д.",
             ),
         )
     return _payload(
@@ -193,7 +197,9 @@ def _route_mechanic(key: str | None) -> dict[str, Any]:
             "key": entry.key,
             "title": entry.title,
             "summary": entry.summary,
-            "tips": list(entry.tips),
+            "example": entry.example,
+            "tip": entry.tip,
+            "answer": format_mechanic_answer(entry),
         },
     )
 

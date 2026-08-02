@@ -120,13 +120,48 @@ async def test_clarify_asks_not_guesses():
     assert "как ии" not in result.answer.lower()
 
 
+@pytest.mark.parametrize(
+    "phrase,key_substr",
+    [
+        ("что такое Cycle", "цикл"),
+        ("что такое Beatdown", "танк"),
+        ("что такое Bridge Spam", "мост"),
+        ("что такое Split Push", "лини"),
+        ("что такое Positive Elixir Trade", "меньше"),
+        ("что такое Tempo", "ритм"),
+        ("что такое Counterpush", "защит"),
+        ("что такое Win Condition", "башн"),
+        ("что такое Mini Tank", "танк"),
+        ("что такое Reset", "сброс"),
+        ("что такое Overcommit", "много"),
+        ("что такое Spell Cycle", "спелл"),
+        ("что такое Lane Control", "лини"),
+        ("что такое Pressure", "давлен"),
+        ("что такое Support Card", "поддерж"),
+        ("что такое Kiting", "оттяг"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_explain_mechanic_from_knowledge_base():
-    result = await ask_ghosteek_ai("что такое cycle", _user())
+async def test_knowledge_base_terms_are_short_with_examples(phrase: str, key_substr: str):
+    result = await ask_ghosteek_ai(phrase, _user())
     assert result.intent == INTENT_EXPLAIN_MECHANIC
-    assert result.sources.get("service") == "Knowledge Base"
-    assert "цикл" in result.answer.lower() or "cycle" in result.answer.lower()
-    assert "\n\n" in result.answer  # структура тренера: абзацы
+    assert result.sources.get("ok") is True
+    low = result.answer.lower()
+    assert key_substr in low or "пример" in low
+    assert "пример" in low
+    # без воды: не больше ~8 предложений
+    sentences = [s for s in result.answer.replace("\n", " ").split(".") if s.strip()]
+    assert len(sentences) <= 8
+
+
+@pytest.mark.asyncio
+async def test_unknown_mechanic_is_honest():
+    result = await ask_ghosteek_ai("что такое quantum elixir singularity", _user())
+    assert result.intent == INTENT_EXPLAIN_MECHANIC
+    assert result.sources.get("ok") is False
+    low = result.answer.lower()
+    assert "нет" in low or "пока" in low
+    assert "выдум" in low or "cycle" in low or "tempo" in low
 
 
 @pytest.mark.asyncio
