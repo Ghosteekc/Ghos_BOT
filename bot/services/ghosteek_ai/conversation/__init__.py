@@ -1,7 +1,4 @@
-"""Session Context — совместимость со старым import path.
-
-Реализация: Conversation Manager + MemoryProvider.
-"""
+"""Conversation package."""
 
 from bot.services.ghosteek_ai.conversation.manager import (
     AiSessionContext,

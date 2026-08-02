@@ -1,42 +1,21 @@
-"""Публичный API Ghosteek AI."""
+"""Публичный API Ghosteek AI — AI Orchestrator pipeline."""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from bot.models.database import User
-from bot.services.ghosteek_ai.composer import compose_answer
-from bot.services.ghosteek_ai.constraints import enforce_answer
+from bot.services.ghosteek_ai.context.builder import ContextBuilder
+from bot.services.ghosteek_ai.conversation.manager import ConversationManager
+from bot.services.ghosteek_ai.generator.response import generate_response
 from bot.services.ghosteek_ai.intents import detect_intent
-from bot.services.ghosteek_ai.router import route_intent
-from bot.services.ghosteek_ai.session_context import (
-    get_or_create_session,
-    merge_request_context,
-    update_session_from_payload,
-)
+from bot.services.ghosteek_ai.models import GhosteekAiAction, GhosteekAiResponse
+from bot.services.ghosteek_ai.planner.planner import Planner
+from bot.services.ghosteek_ai.safety.layer import SafetyLayer
+from bot.services.ghosteek_ai.tools.base import ToolCaller, get_default_registry
 
-
-@dataclass
-class GhosteekAiAction:
-    type: str
-    path: str
-
-
-@dataclass
-class GhosteekAiResponse:
-    intent: str
-    answer: str
-    sources: dict[str, Any] = field(default_factory=dict)
-    actions: list[GhosteekAiAction] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "intent": self.intent,
-            "answer": self.answer,
-            "sources": self.sources,
-            "actions": [asdict(a) for a in self.actions],
-        }
+_REGISTRY = get_default_registry()
+_CALLER = ToolCaller(_REGISTRY)
 
 
 async def ask_ghosteek_ai(
@@ -45,58 +24,96 @@ async def ask_ghosteek_ai(
     *,
     context: dict[str, Any] | None = None,
 ) -> GhosteekAiResponse:
-    session = get_or_create_session(user.telegram_id)
-    ctx = merge_request_context(session, context)
+    """
+    Orchestrator pipeline:
+
+    Conversation Manager
+      → Intent Detection
+      → Planner
+      → bootstrap AIContext
+      → ToolCaller (tools ↔ AIContext)
+      → Response Generator
+      → Safety Layer
+      → Response
+    """
+    session = ConversationManager.get_or_create(user.telegram_id)
+    ConversationManager.add_user_message(session, message)
+
+    req_ctx = ConversationManager.merge_request_context(session, context)
 
     context_cards: list[str] = []
-    if isinstance(ctx.get("cards"), list):
-        context_cards = [c for c in ctx["cards"] if isinstance(c, str)]
+    if isinstance(req_ctx.get("cards"), list):
+        context_cards = [c for c in req_ctx["cards"] if isinstance(c, str)]
 
     detected = detect_intent(message, context_cards=context_cards)
-
-    # Follow-up: «а что заменить?» без карт в тексте — берём колоду из сессии
-    if detected.intent in {"improve_deck", "analyze_deck", "matchup", "game_coach"}:
-        if len(detected.cards) < 8 and len(session.last_deck) >= 8:
-            detected.cards = list(session.last_deck)
-        if detected.intent == "matchup" and len(detected.opponent_cards) < 8:
-            if len(session.last_opponent_deck) >= 8:
-                detected.opponent_cards = list(session.last_opponent_deck)
-
-    # Follow-up по тому же бою
-    if detected.intent == "last_battle" and session.last_battle_index is not None:
-        low = (message or "").lower()
-        if any(k in low for k in ("этот бой", "тот бой", "ещё раз", "подробнее", "а что с боем")):
-            ctx["battle_index"] = session.last_battle_index
-
-    payload = await route_intent(detected, user, context=ctx)
-    intent = str(payload.get("intent") or detected.intent)
-    service = payload.get("service") or detected.service
-
-    update_session_from_payload(
-        session,
-        intent=intent,
-        service=str(service) if service else None,
-        payload=payload,
+    detected = ConversationManager.apply_followup_enrichment(
+        session, detected, message, req_ctx
     )
 
-    answer = enforce_answer(compose_answer(payload), intent=intent)
+    plan = Planner.plan(detected)
+    tool_args = dict(plan.tools[0].args) if plan.tools else {}
+
+    ai_context = ContextBuilder.bootstrap(
+        user=user,
+        plan=plan,
+        conversation=session,
+        request_context=req_ctx,
+        raw_message=message,
+        tool_args=tool_args,
+    )
+
+    tool_results = await _CALLER.execute_plan(plan, ai_context)
+    tool_names = [tr.tool for tr in tool_results]
+
+    raw_answer = generate_response(ai_context)
+    answer = SafetyLayer.apply(raw_answer, ai_context)
+
+    intent_name = ai_context.intent.request
+    ConversationManager.update_from_ai_context(
+        session,
+        intent=intent_name,
+        service=ai_context.intent.service,
+        data=ai_context.data,
+        ok=ai_context.ok,
+        active_topic=intent_name,
+        tools=tool_names,
+    )
+    ConversationManager.add_assistant_message(session, answer, intent=intent_name)
+    ConversationManager.save(user.telegram_id, session)
+
     actions = [
         GhosteekAiAction(type=a.get("type", "navigate"), path=a.get("path", "/"))
-        for a in (payload.get("actions") or [])
+        for a in ai_context.actions
         if isinstance(a, dict) and a.get("path")
     ]
-    # Не отдаём игроку сырой constraints-текст с жаргоном — только флаг
+
     sources = {
-        "intent": intent,
-        "service": service,
-        "ok": payload.get("ok"),
-        "data": payload.get("data") or {},
+        "intent": intent_name,
+        "service": ai_context.intent.service,
+        "ok": ai_context.ok,
+        "data": ai_context.data or {},
         "persona": "coach",
         "constraints": True,
         "session": session.to_public(),
+        "tools": tool_names,
+        "error_code": ai_context.error_code,
+        "memory": {
+            "has_summary": bool(session.summary),
+            "summary_preview": session.to_public().get("summary_preview", ""),
+            "questions": list(session.last_questions[-5:]),
+            "recent_count": len(session.messages),
+        },
+        "ai_context": {
+            "player": ai_context.player.to_dict(),
+            "arena": ai_context.arena.to_dict(),
+            "has_deck": len(ai_context.deck.cards) >= 8,
+            "has_battle": bool(ai_context.battle.raw or ai_context.battle.battle_index is not None),
+            "has_summary": bool(ai_context.conversation.summary),
+        },
     }
+
     return GhosteekAiResponse(
-        intent=intent,
+        intent=intent_name,
         answer=answer,
         sources=sources,
         actions=actions,

@@ -379,3 +379,176 @@ async def test_session_clears_on_ttl_and_explicit_clear():
     session.last_deck = list(HOG_CYCLE)
     sc.clear_session(user.telegram_id)
     assert sc.get_session(user.telegram_id) is None
+
+
+@pytest.mark.asyncio
+async def test_memory_stores_questions_answers_and_tools():
+    from bot.services.ghosteek_ai.session_context import clear_session, get_session
+
+    user = _user()
+    clear_session(user.telegram_id)
+
+    await ask_ghosteek_ai("что такое Tempo?", user)
+    await ask_ghosteek_ai("Как апнуть кубки?", user)
+
+    session = get_session(user.telegram_id)
+    assert session is not None
+    assert len(session.last_questions) >= 2
+    assert "Tempo" in session.last_questions[0] or "tempo" in session.last_questions[0].lower()
+    assert session.user_count() >= 2
+    assert session.assistant_count() >= 2
+    assert "knowledge" in session.last_tools or "game_coach" in session.last_tools
+    assert session.last_intent in {INTENT_GAME_COACH, INTENT_EXPLAIN_MECHANIC}
+    mem = session.memory_context()
+    assert "recent_messages" in mem
+    assert len(mem["recent_messages"]) >= 4
+
+    clear_session(user.telegram_id)
+
+
+@pytest.mark.asyncio
+async def test_memory_compresses_into_summary():
+    from bot.services.ghosteek_ai.memory.summary import COMPRESS_AT, maybe_compress
+    from bot.services.ghosteek_ai.models import ConversationMessage
+    from bot.services.ghosteek_ai.session_context import clear_session, get_or_create_session
+
+    user = _user()
+    clear_session(user.telegram_id)
+    session = get_or_create_session(user.telegram_id)
+
+    for i in range(COMPRESS_AT):
+        role = "user" if i % 2 == 0 else "assistant"
+        session.messages.append(
+            ConversationMessage(
+                role=role,
+                content=f"msg-{i} про колоду и Tempo",
+                intent="explain_mechanic" if role == "user" else "explain_mechanic",
+                ts=float(i),
+            )
+        )
+
+    before = len(session.messages)
+    assert maybe_compress(session) is True
+    assert len(session.messages) < before
+    assert session.summary
+    assert "Темы" in session.summary or "История" in session.summary or "Tempo" in session.summary
+
+    clear_session(user.telegram_id)
+
+
+def test_memory_provider_can_be_swapped():
+    from bot.services.ghosteek_ai.memory import (
+        InMemoryMemoryProvider,
+        get_memory_provider,
+        set_memory_provider,
+    )
+    from bot.services.ghosteek_ai.session_context import clear_session, get_or_create_session
+
+    original = get_memory_provider()
+    custom = InMemoryMemoryProvider()
+    set_memory_provider(custom)
+    try:
+        assert get_memory_provider() is custom
+        s = get_or_create_session(999001)
+        s.last_deck = list(HOG_CYCLE)
+        custom.save(999001, s)
+        assert custom.get(999001) is not None
+        clear_session(999001)
+        assert custom.get(999001) is None
+    finally:
+        set_memory_provider(original)
+
+
+def test_every_tool_has_qwen_compatible_schema():
+    from bot.services.ghosteek_ai.tools import get_default_registry
+
+    registry = get_default_registry()
+    assert len(registry.names()) >= 12
+    for name in registry.names():
+        tool = registry.get(name)
+        assert tool is not None
+        assert tool.name == name
+        assert tool.description
+        assert isinstance(tool.input_schema, dict)
+        assert tool.input_schema.get("type") == "object"
+        assert isinstance(tool.output_schema, dict)
+        qwen = tool.to_qwen_function()
+        assert qwen["type"] == "function"
+        assert qwen["function"]["name"] == name
+        assert "parameters" in qwen["function"]
+
+
+def test_planner_selects_by_catalog_name_only():
+    from bot.services.ghosteek_ai.intents import detect_intent
+    from bot.services.ghosteek_ai.planner import INTENT_TOOL_MAP, Planner
+    from bot.services.ghosteek_ai.tools import get_default_registry
+
+    registry = get_default_registry()
+    planner = Planner(registry)
+    for intent, names in INTENT_TOOL_MAP.items():
+        for n in names:
+            assert registry.has(n), f"mapped tool missing: {n}"
+
+    detected = detect_intent("разбери мою колоду")
+    plan = planner.build(detected)
+    assert plan.tools
+    assert plan.tools[0].name == "deck_analysis"
+    assert registry.get(plan.tools[0].name) is not None
+
+
+@pytest.mark.asyncio
+async def test_tool_caller_parses_qwen_tool_calls():
+    from bot.services.ghosteek_ai.context.ai_context import AIContext, IntentContext, PlayerContext
+    from bot.services.ghosteek_ai.tools import ToolCaller, get_default_registry
+    from bot.services.ghosteek_ai.tools.schema import ToolCall
+
+    raw = {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+            "name": "knowledge",
+            "arguments": '{"mechanic_query": "tempo"}',
+        },
+    }
+    call = ToolCall.from_qwen_tool_call(raw)
+    assert call.name == "knowledge"
+    assert call.arguments.get("mechanic_query") == "tempo"
+
+    user = _user()
+    ctx = AIContext(
+        player=PlayerContext(telegram_id=user.telegram_id, tag=user.player_tag),
+        intent=IntentContext(request="explain_mechanic", mechanic_query="tempo"),
+        raw_message="что такое Tempo",
+        _user=user,
+    )
+    caller = ToolCaller(get_default_registry())
+    results = await caller.execute_qwen_tool_calls([raw], ctx)
+    assert len(results) == 1
+    assert results[0].tool == "knowledge"
+    assert results[0].ok is True
+    assert results[0].data.get("key") == "tempo"
+    assert ctx.knowledge.mechanic.get("key") == "tempo"
+
+
+def test_ai_context_has_required_sections():
+    from bot.services.ghosteek_ai.context import AIContext
+
+    ctx = AIContext()
+    for name in (
+        "player",
+        "arena",
+        "deck",
+        "battle",
+        "recommendation",
+        "evaluation",
+        "intent",
+        "game_plan",
+        "session",
+        "conversation",
+        "knowledge",
+        "meta",
+        "history",
+    ):
+        assert hasattr(ctx, name), name
+    public = ctx.to_public_dict()
+    assert "player" in public and "deck" in public and "history" in public
