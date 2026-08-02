@@ -1,4 +1,4 @@
-"""Роутер: intent → существующие сервисы (без новой аналитики)."""
+"""Роутер: intent → существующие сервисы / Knowledge Base / Game Coach."""
 
 from __future__ import annotations
 
@@ -6,27 +6,52 @@ from typing import Any
 
 from bot.models.database import User
 from bot.services.battle_report import analyze_battle_enhanced
-from bot.services.battle_service import get_cached_stats, load_and_persist
+from bot.services.battle_service import load_and_persist
 from bot.services.card_matchups import calculate_deck_synergy
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_profile import get_card_profile
 from bot.services.deck_constructor import build_constructor_decks
+from bot.services.ghosteek_ai.game_coach import (
+    CLIMB_TIPS,
+    decks_for_win_condition,
+    resolve_archetype_deck,
+)
 from bot.services.ghosteek_ai.intents import (
+    CLARIFY_PROMPT,
     INTENT_ANALYZE_DECK,
     INTENT_BUILD_DECK,
     INTENT_CARD_INFO,
+    INTENT_CLARIFY,
+    INTENT_EXPLAIN_MECHANIC,
+    INTENT_GAME_COACH,
     INTENT_IMPROVE_DECK,
     INTENT_LAST_BATTLE,
     INTENT_MATCHUP,
-    INTENT_META,
-    INTENT_STATS,
     INTENT_UNSUPPORTED,
-    INTENT_UNKNOWN,
+    SERVICE_BY_INTENT,
     DetectedIntent,
 )
+from bot.services.ghosteek_ai.knowledge_base import list_mechanic_titles, lookup_mechanic
 from bot.services.matchup_evaluation import evaluate_matchup
-from bot.services.meta_analyzer import get_live_meta_decks
 from bot.services.recommendation_engine import RecommendationEngine
+
+
+def _payload(
+    intent: str,
+    *,
+    ok: bool,
+    data: dict[str, Any] | None = None,
+    error: str | None = None,
+    actions: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "intent": intent,
+        "service": SERVICE_BY_INTENT.get(intent, "Clarify"),
+        "ok": ok,
+        "error": error,
+        "data": data or {},
+        "actions": actions or [],
+    }
 
 
 async def _resolve_player_deck(user: User, fallback: list[str]) -> list[str]:
@@ -65,43 +90,32 @@ async def route_intent(
     *,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Возвращает payload с ключами intent / ok / data / error / actions."""
+    """Возвращает payload: intent / service / ok / data / error / actions."""
     ctx = context or {}
     intent = detected.intent
 
     if intent == INTENT_UNSUPPORTED:
-        return {
-            "intent": intent,
-            "ok": False,
-            "error": (
+        return _payload(
+            intent,
+            ok=False,
+            error=(
                 "Clash Royale не предоставляет эти данные "
-                "(точный урон по картам в бою, эликсир в руке и т.п.). "
-                "Могу разобрать колоду, матчап, последний бой, мету или статистику."
+                "(точный урон по картам в бою, эликсир в руке и т.п.).\n"
+                + CLARIFY_PROMPT
             ),
-            "data": {},
-            "actions": [],
-        }
+        )
 
-    if intent == INTENT_UNKNOWN:
-        return {
-            "intent": intent,
-            "ok": False,
-            "error": (
-                "Не понял запрос. Попробуйте: «разбери мою колоду», «последний бой», "
-                "«что в мете», «мой винрейт», «собери колоду вокруг Хог»."
-            ),
-            "data": {},
-            "actions": [],
-        }
+    if intent == INTENT_CLARIFY:
+        return _payload(intent, ok=False, error=CLARIFY_PROMPT)
 
     if intent == INTENT_LAST_BATTLE:
         return await _route_last_battle(user, ctx)
 
-    if intent == INTENT_STATS:
-        return await _route_stats(user)
+    if intent == INTENT_EXPLAIN_MECHANIC:
+        return _route_mechanic(detected.mechanic_query)
 
-    if intent == INTENT_META:
-        return await _route_meta()
+    if intent == INTENT_GAME_COACH:
+        return await _route_game_coach(user, detected, ctx)
 
     if intent == INTENT_CARD_INFO:
         return _route_card_info(detected.card_query or (detected.cards[0] if detected.cards else None))
@@ -112,188 +126,244 @@ async def route_intent(
     if intent in {INTENT_ANALYZE_DECK, INTENT_IMPROVE_DECK}:
         deck = await _resolve_player_deck(user, detected.cards)
         if len(deck) < 8:
-            return {
-                "intent": intent,
-                "ok": False,
-                "error": (
+            return _payload(
+                intent,
+                ok=False,
+                error=(
                     "Нужна колода из 8 карт. Пришлите названия карт или привяжите тег, "
                     "чтобы взять текущую колоду из профиля."
                 ),
-                "data": {},
-                "actions": [{"type": "navigate", "path": "/decks"}],
-            }
+                actions=[{"type": "navigate", "path": "/decks"}],
+            )
         return _route_deck_recommendation(intent, deck)
 
     if intent == INTENT_MATCHUP:
         return await _route_matchup(user, detected, ctx)
 
-    return {
-        "intent": INTENT_UNKNOWN,
-        "ok": False,
-        "error": "Неизвестный сценарий.",
-        "data": {},
-        "actions": [],
-    }
+    return _payload(INTENT_CLARIFY, ok=False, error=CLARIFY_PROMPT)
 
 
 def _route_card_info(name: str | None) -> dict[str, Any]:
     if not name:
-        return {
-            "intent": INTENT_CARD_INFO,
-            "ok": False,
-            "error": "Укажите карту, например: «что делает Палач».",
-            "data": {},
-            "actions": [],
-        }
+        return _payload(
+            INTENT_CARD_INFO,
+            ok=False,
+            error="Укажите карту, например: «что делает Палач» или «объясни карту Хог».",
+        )
     profile = get_card_profile(name)
-    return {
-        "intent": INTENT_CARD_INFO,
-        "ok": True,
-        "error": None,
-        "data": {
+    return _payload(
+        INTENT_CARD_INFO,
+        ok=True,
+        data={
             "name": name,
             "name_ru": card_name_ru(name),
             "elixir": profile.elixir,
             "card_type": profile.card_type,
             "roles": sorted(profile.roles),
         },
-        "actions": [],
-    }
+    )
+
+
+def _route_mechanic(key: str | None) -> dict[str, Any]:
+    entry = lookup_mechanic(key)
+    if entry is None:
+        titles = ", ".join(list_mechanic_titles()[:8])
+        return _payload(
+            INTENT_EXPLAIN_MECHANIC,
+            ok=False,
+            error=(
+                "Не нашёл эту механику в Knowledge Base. "
+                f"Могу объяснить, например: {titles}…"
+            ),
+        )
+    return _payload(
+        INTENT_EXPLAIN_MECHANIC,
+        ok=True,
+        data={
+            "key": entry.key,
+            "title": entry.title,
+            "summary": entry.summary,
+            "tips": list(entry.tips),
+        },
+    )
 
 
 def _route_deck_recommendation(intent: str, deck: list[str]) -> dict[str, Any]:
     rec = RecommendationEngine.analyze(deck, apply_swaps=intent == INTENT_IMPROVE_DECK)
     synergy_score, synergy_notes = calculate_deck_synergy(deck)
     public = rec.to_public_dict()
-    return {
-        "intent": intent,
-        "ok": True,
-        "error": None,
-        "data": {
+    return _payload(
+        intent,
+        ok=True,
+        data={
             "deck": deck,
             "recommendation": public,
             "synergy_score": synergy_score,
             "synergy_notes": synergy_notes,
         },
-        "actions": [{"type": "navigate", "path": "/decks"}],
-    }
+        actions=[{"type": "navigate", "path": "/decks"}],
+    )
 
 
 def _route_build(core: list[str], user: User) -> dict[str, Any]:
-    if len(core) < 4:
-        return {
-            "intent": INTENT_BUILD_DECK,
-            "ok": False,
-            "error": "Для сборки нужно ядро из 4 карт. Пример: «собери колоду вокруг Хог Терпила Мушкетёр Пушка».",
-            "data": {},
-            "actions": [{"type": "navigate", "path": "/decks"}],
-        }
-    slots = [{"name": n, "slot": i} for i, n in enumerate(core[:4])]
-    result = build_constructor_decks(
-        slots,
-        arena_id=user.arena_id,
-        trophies=user.trophies,
-        limit=3,
+    # 4 карты → конструктор
+    if len(core) >= 4:
+        slots = [{"name": n, "slot": i} for i, n in enumerate(core[:4])]
+        result = build_constructor_decks(
+            slots,
+            arena_id=user.arena_id,
+            trophies=user.trophies,
+            limit=3,
+        )
+        decks = result.get("decks") or []
+        if not decks:
+            return _payload(
+                INTENT_BUILD_DECK,
+                ok=False,
+                error="Конструктор не смог собрать колоду вокруг этого ядра.",
+                data={"core": core[:4]},
+                actions=[{"type": "navigate", "path": "/decks"}],
+            )
+        return _payload(
+            INTENT_BUILD_DECK,
+            ok=True,
+            data={"core": core[:4], "decks": decks[:3], "mode": "constructor"},
+            actions=[{"type": "navigate", "path": "/decks"}],
+        )
+
+    # 1–3 карты: шаблоны META_DECKS по win condition (без новой эвристики сборки)
+    if len(core) >= 1:
+        templates: list[dict] = []
+        seen: set[str] = set()
+        for card in core:
+            for d in decks_for_win_condition(card, limit=3):
+                key = d.get("key") or d.get("name")
+                if key in seen:
+                    continue
+                seen.add(str(key))
+                templates.append(d)
+            if len(templates) >= 3:
+                break
+        if templates:
+            return _payload(
+                INTENT_BUILD_DECK,
+                ok=True,
+                data={
+                    "core": core,
+                    "decks": templates[:3],
+                    "mode": "meta_templates",
+                },
+                actions=[{"type": "navigate", "path": "/decks"}],
+            )
+        return _payload(
+            INTENT_BUILD_DECK,
+            ok=False,
+            error=(
+                f"Нет готовых шаблонов вокруг «{card_name_ru(core[0])}». "
+                "Укажите ядро из 4 карт: «собери колоду вокруг Хог Терпила Мушкетёр Пушка»."
+            ),
+            data={"core": core},
+            actions=[{"type": "navigate", "path": "/decks"}],
+        )
+
+    return _payload(
+        INTENT_BUILD_DECK,
+        ok=False,
+        error=(
+            "Чтобы собрать колоду, укажите win condition или ядро из 4 карт. "
+            "Примеры: «хочу играть через Хога», "
+            "«собери колоду вокруг Хог Терпила Мушкетёр Пушка»."
+        ),
+        actions=[{"type": "navigate", "path": "/decks"}],
     )
-    decks = result.get("decks") or []
-    if not decks:
-        return {
-            "intent": INTENT_BUILD_DECK,
-            "ok": False,
-            "error": "Конструктор не смог собрать колоду вокруг этого ядра.",
-            "data": {"core": core[:4]},
-            "actions": [{"type": "navigate", "path": "/decks"}],
-        }
-    return {
-        "intent": INTENT_BUILD_DECK,
-        "ok": True,
-        "error": None,
-        "data": {
-            "core": core[:4],
-            "decks": decks[:3],
-        },
-        "actions": [{"type": "navigate", "path": "/decks"}],
-    }
 
 
-async def _route_stats(user: User) -> dict[str, Any]:
-    stats = await get_cached_stats(user.player_tag or "")
-    if not stats:
-        return {
-            "intent": INTENT_STATS,
-            "ok": False,
-            "error": "Нет сохранённой статистики боёв. Синхронизируйте историю боёв.",
-            "data": {},
-            "actions": [{"type": "navigate", "path": "/battles"}],
-        }
-    return {
-        "intent": INTENT_STATS,
-        "ok": True,
-        "error": None,
-        "data": {
-            "total": stats.total,
-            "wins": stats.wins,
-            "losses": stats.losses,
-            "winrate": stats.winrate,
-            "win_streak": stats.win_streak,
-            "loss_streak": stats.loss_streak,
-            "top_decks": stats.top_decks[:3],
-        },
-        "actions": [{"type": "navigate", "path": "/analytics"}],
-    }
+async def _route_game_coach(
+    user: User,
+    detected: DetectedIntent,
+    ctx: dict[str, Any],
+) -> dict[str, Any]:
+    topic = detected.coach_topic or "general"
 
+    if topic == "climb":
+        return _payload(
+            INTENT_GAME_COACH,
+            ok=True,
+            data={"topic": "climb", "tips": list(CLIMB_TIPS)},
+            actions=[
+                {"type": "navigate", "path": "/battles"},
+                {"type": "navigate", "path": "/analytics"},
+            ],
+        )
 
-async def _route_meta() -> dict[str, Any]:
-    try:
-        meta = await get_live_meta_decks()
-        decks = list(meta.decks or [])[:5]
-    except Exception:
-        decks = []
-    if not decks:
-        return {
-            "intent": INTENT_META,
-            "ok": False,
-            "error": "Мета сейчас недоступна. Откройте раздел колод или повторите позже.",
-            "data": {},
-            "actions": [{"type": "navigate", "path": "/decks"}],
-        }
-    compact = []
-    for d in decks:
-        if not isinstance(d, dict):
-            continue
-        cards = d.get("cards") or []
-        names: list[str] = []
-        if isinstance(cards, list):
-            for c in cards:
-                if isinstance(c, str):
-                    names.append(c)
-                elif isinstance(c, dict) and c.get("name"):
-                    names.append(c["name"])
-        compact.append({
-            "cards": names[:8],
-            "name": d.get("name") or d.get("title"),
-            "winrate": d.get("winrate"),
-            "usage": d.get("usage") or d.get("usage_rate"),
-        })
-    return {
-        "intent": INTENT_META,
-        "ok": True,
-        "error": None,
-        "data": {"decks": compact},
-        "actions": [{"type": "navigate", "path": "/decks"}],
-    }
+    # vs_advice — эталон из META_DECKS + MatchupEvaluation по колоде игрока
+    arch = resolve_archetype_deck(detected.raw)
+    if arch is None and topic == "vs_advice":
+        return _payload(
+            INTENT_GAME_COACH,
+            ok=False,
+            error=(
+                "Уточните архетип соперника. Примеры: «как играть против Lavaloon», "
+                "«как против Хог 2.6», «как против бейта»."
+            ),
+        )
+
+    if arch is not None:
+        arch_name, opp_deck = arch
+        user_deck = await _resolve_player_deck(user, detected.cards)
+        if len(user_deck) < 8 and isinstance(ctx.get("cards"), list):
+            user_deck = [c for c in ctx["cards"] if isinstance(c, str)][:8]
+        if len(user_deck) < 8:
+            return _payload(
+                INTENT_GAME_COACH,
+                ok=False,
+                error=(
+                    f"Для совета против «{arch_name}» нужна ваша колода из 8 карт "
+                    "(или привязанный тег). Могу также разобрать матчап, если пришлёте обе колоды."
+                ),
+                data={"archetype": arch_name, "opponent_deck": opp_deck},
+                actions=[{"type": "navigate", "path": "/decks/compare"}],
+            )
+        evaluation = evaluate_matchup(user_deck[:8], opp_deck)
+        return _payload(
+            INTENT_GAME_COACH,
+            ok=True,
+            data={
+                "topic": "vs_advice",
+                "archetype": arch_name,
+                "user_deck": user_deck[:8],
+                "opponent_deck": opp_deck,
+                "score": evaluation.score,
+                "rating": evaluation.rating,
+                "reasons": evaluation.reasons,
+                "advantages": evaluation.advantages,
+                "disadvantages": evaluation.disadvantages,
+                "tips": [
+                    "Оценка ниже — из Matchup Analyzer по эталонной колоде архетипа из базы Ghosteek.",
+                    "Полный разбор своего последнего боя — через Battle Analyzer.",
+                ],
+            },
+            actions=[{"type": "navigate", "path": "/decks/compare"}],
+        )
+
+    return _payload(
+        INTENT_GAME_COACH,
+        ok=False,
+        error=(
+            "Уточните совет: «как апнуть кубки?» или «как играть против Lavaloon?»."
+        ),
+    )
 
 
 async def _route_last_battle(user: User, ctx: dict[str, Any]) -> dict[str, Any]:
     battles = await load_and_persist(user)
     if not battles:
-        return {
-            "intent": INTENT_LAST_BATTLE,
-            "ok": False,
-            "error": "Нет истории боёв. Синхронизируйте бои или сыграйте ladder/PvP.",
-            "data": {},
-            "actions": [{"type": "navigate", "path": "/battles"}],
-        }
+        return _payload(
+            INTENT_LAST_BATTLE,
+            ok=False,
+            error="Нет истории боёв. Синхронизируйте бои или сыграйте ladder/PvP.",
+            actions=[{"type": "navigate", "path": "/battles"}],
+        )
 
     index = ctx.get("battle_index")
     if isinstance(index, int) and 0 <= index < len(battles):
@@ -308,12 +378,10 @@ async def _route_last_battle(user: User, ctx: dict[str, Any]) -> dict[str, Any]:
     duration = int(battle.get("gameDuration") or 0)
     analysis = analyze_battle_enhanced(team, opponent, duration=duration)
 
-    path = f"/battles/{battle_index}"
-    return {
-        "intent": INTENT_LAST_BATTLE,
-        "ok": True,
-        "error": None,
-        "data": {
+    return _payload(
+        INTENT_LAST_BATTLE,
+        ok=True,
+        data={
             "battle_index": battle_index,
             "won": analysis.won,
             "opponent_name": analysis.opponent_name,
@@ -339,8 +407,8 @@ async def _route_last_battle(user: User, ctx: dict[str, Any]) -> dict[str, Any]:
                 else None
             ),
         },
-        "actions": [{"type": "navigate", "path": path}],
-    }
+        actions=[{"type": "navigate", "path": f"/battles/{battle_index}"}],
+    )
 
 
 async def _route_matchup(
@@ -353,7 +421,6 @@ async def _route_matchup(
     if len(opp) < 8 and isinstance(ctx.get("opponent_cards"), list):
         opp = [c for c in ctx["opponent_cards"] if isinstance(c, str)]
 
-    # Если нет второй колоды — берём последнего соперника из истории
     if len(opp) < 8:
         battles = await load_and_persist(user)
         if battles:
@@ -364,22 +431,18 @@ async def _route_matchup(
                 user_deck = [c.get("name") for c in team.get("cards", []) if c.get("name")]
 
     if len(user_deck) < 8 or len(opp) < 8:
-        return {
-            "intent": INTENT_MATCHUP,
-            "ok": False,
-            "error": (
-                "Для матчапа нужны две колоды по 8 карт или хотя бы один бой в истории."
-            ),
-            "data": {},
-            "actions": [{"type": "navigate", "path": "/battles"}],
-        }
+        return _payload(
+            INTENT_MATCHUP,
+            ok=False,
+            error="Для матчапа нужны две колоды по 8 карт или хотя бы один бой в истории.",
+            actions=[{"type": "navigate", "path": "/battles"}],
+        )
 
     evaluation = evaluate_matchup(user_deck[:8], opp[:8])
-    return {
-        "intent": INTENT_MATCHUP,
-        "ok": True,
-        "error": None,
-        "data": {
+    return _payload(
+        INTENT_MATCHUP,
+        ok=True,
+        data={
             "user_deck": user_deck[:8],
             "opponent_deck": opp[:8],
             "score": evaluation.score,
@@ -388,5 +451,5 @@ async def _route_matchup(
             "advantages": evaluation.advantages,
             "disadvantages": evaluation.disadvantages,
         },
-        "actions": [{"type": "navigate", "path": "/decks/compare"}],
-    }
+        actions=[{"type": "navigate", "path": "/decks/compare"}],
+    )

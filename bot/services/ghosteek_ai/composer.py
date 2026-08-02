@@ -9,11 +9,11 @@ from bot.services.ghosteek_ai.intents import (
     INTENT_ANALYZE_DECK,
     INTENT_BUILD_DECK,
     INTENT_CARD_INFO,
+    INTENT_EXPLAIN_MECHANIC,
+    INTENT_GAME_COACH,
     INTENT_IMPROVE_DECK,
     INTENT_LAST_BATTLE,
     INTENT_MATCHUP,
-    INTENT_META,
-    INTENT_STATS,
 )
 
 
@@ -36,21 +36,20 @@ def compose_answer(payload: dict[str, Any]) -> str:
             f"Это данные из базы карт Ghosteek; боевые статы CR API не отдаёт."
         )
 
+    if intent == INTENT_EXPLAIN_MECHANIC:
+        lines = [str(data.get("title") or ""), str(data.get("summary") or "")]
+        for tip in (data.get("tips") or [])[:3]:
+            lines.append(f"• {tip}")
+        return "\n".join(line for line in lines if line)
+
+    if intent == INTENT_GAME_COACH:
+        return _compose_coach(data)
+
     if intent in {INTENT_ANALYZE_DECK, INTENT_IMPROVE_DECK}:
         return _compose_recommendation(intent, data)
 
     if intent == INTENT_BUILD_DECK:
         return _compose_build(data)
-
-    if intent == INTENT_STATS:
-        return (
-            f"Статистика по сохранённым боям: {data.get('wins')}W / {data.get('losses')}L, "
-            f"винрейт {data.get('winrate')}% из {data.get('total')} боёв. "
-            f"Серия побед: {data.get('win_streak')}, серия поражений: {data.get('loss_streak')}."
-        )
-
-    if intent == INTENT_META:
-        return _compose_meta(data)
 
     if intent == INTENT_LAST_BATTLE:
         return _compose_last_battle(data)
@@ -59,6 +58,27 @@ def compose_answer(payload: dict[str, Any]) -> str:
         return _compose_matchup(data)
 
     return "Готово."
+
+
+def _compose_coach(data: dict[str, Any]) -> str:
+    topic = data.get("topic")
+    if topic == "climb":
+        lines = ["Советы по кубкам (Game Coach):"]
+        for tip in (data.get("tips") or [])[:5]:
+            lines.append(f"• {tip}")
+        return "\n".join(lines)
+
+    lines = [
+        f"Совет против «{data.get('archetype')}» (Game Coach + Matchup Analyzer):",
+        f"Ваша колода: {_ru_list(data.get('user_deck') or [])}.",
+        f"Эталон соперника: {_ru_list(data.get('opponent_deck') or [])}.",
+        f"Оценка матчапа: {data.get('score')}/100 — {data.get('rating')}.",
+    ]
+    for r in (data.get("reasons") or [])[:4]:
+        lines.append(f"• {r}")
+    for tip in (data.get("tips") or [])[:2]:
+        lines.append(str(tip))
+    return "\n".join(lines)
 
 
 def _compose_recommendation(intent: str, data: dict[str, Any]) -> str:
@@ -105,43 +125,34 @@ def _compose_recommendation(intent: str, data: dict[str, Any]) -> str:
 def _compose_build(data: dict[str, Any]) -> str:
     core = data.get("core") or []
     decks = data.get("decks") or []
-    lines = [f"Ядро: {_ru_list(core, limit=4)}."]
+    mode = data.get("mode")
+    if core:
+        lines = [f"Опора: {_ru_list(core, limit=4)}."]
+    else:
+        lines = ["Варианты колоды:"]
     for i, entry in enumerate(decks[:3], start=1):
         cards = entry.get("cards") or entry.get("card_names") or []
         if isinstance(cards, list) and cards and isinstance(cards[0], dict):
             names = [c.get("name") for c in cards if c.get("name")]
         else:
             names = [c for c in cards if isinstance(c, str)]
+        title = entry.get("name")
         score = entry.get("total_score") or entry.get("synergy_score")
         syn = entry.get("synergy_score")
-        part = f"{i}) {_ru_list(names)}"
+        head = f"{i}) {title}: " if title else f"{i}) "
+        part = f"{head}{_ru_list(names)}"
         if score is not None:
             part += f" — score {score}"
-        if syn is not None:
+        if syn is not None and title is None:
             part += f", синергия {syn}%"
+        desc = entry.get("description")
+        if desc:
+            part += f" — {desc}"
         lines.append(part)
-    lines.append("Варианты собраны конструктором Ghosteek.")
-    return "\n".join(lines)
-
-
-def _compose_meta(data: dict[str, Any]) -> str:
-    decks = data.get("decks") or []
-    lines = ["Топ меты (из meta-сервиса):"]
-    for i, d in enumerate(decks[:5], start=1):
-        cards = d.get("cards") or []
-        names = [c if isinstance(c, str) else c.get("name") for c in cards]
-        names = [n for n in names if n]
-        wr = d.get("winrate")
-        usage = d.get("usage")
-        extra = []
-        if wr is not None:
-            extra.append(f"WR {wr}")
-        if usage is not None:
-            extra.append(f"usage {usage}")
-        suffix = f" ({', '.join(extra)})" if extra else ""
-        title = d.get("name")
-        head = f"{i}) {title}: " if title else f"{i}) "
-        lines.append(f"{head}{_ru_list(names)}{suffix}")
+    if mode == "meta_templates":
+        lines.append("Шаблоны из базы колод Ghosteek (Builder). Для точной сборки укажите 4 карты ядра.")
+    else:
+        lines.append("Варианты собраны конструктором Ghosteek.")
     return "\n".join(lines)
 
 

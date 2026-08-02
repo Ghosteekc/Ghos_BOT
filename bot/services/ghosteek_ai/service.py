@@ -54,6 +54,7 @@ async def ask_ghosteek_ai(
     ]
     sources = {
         "intent": payload.get("intent"),
+        "service": payload.get("service") or detected.service,
         "ok": payload.get("ok"),
         "data": payload.get("data") or {},
     }
