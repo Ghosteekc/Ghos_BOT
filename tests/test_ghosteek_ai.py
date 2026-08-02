@@ -107,9 +107,34 @@ async def test_unsupported_answer_mentions_cr_api():
     result = await ask_ghosteek_ai("сколько эликсира в руке было", _user())
     assert result.intent == INTENT_UNSUPPORTED
     low = result.answer.lower()
-    assert "clash royale" in low or "нет" in low
+    assert "нет" in low or "api" in low or "выдум" in low
     assert "как ии" not in low
     assert "3." not in result.answer
+    assert result.sources.get("constraints")
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "сколько урона нанёс Хог в том бою",
+        "посмотри реплей и скажи",
+        "сколько раз была сыграна карта в бою",
+        "какая карта была в руке на 30 секунде",
+        "точный хп башни после удара",
+    ],
+)
+def test_constraint_unsupported_requests(phrase: str):
+    assert detect_intent(phrase).intent == INTENT_UNSUPPORTED
+
+
+def test_sanitize_blocks_forbidden_replay_claims():
+    from bot.services.ghosteek_ai.constraints import contains_forbidden_claim, sanitize_answer
+
+    bad = "Я видел реплей: карта нанесла 1240 урона и сыграла 5 раз."
+    assert contains_forbidden_claim(bad)
+    cleaned = sanitize_answer(bad)
+    assert "видел реплей" not in cleaned.lower()
+    assert "выдум" in cleaned.lower() or "нет" in cleaned.lower()
 
 
 @pytest.mark.asyncio

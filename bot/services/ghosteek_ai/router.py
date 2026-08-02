@@ -11,6 +11,7 @@ from bot.services.card_matchups import calculate_deck_synergy
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_profile import get_card_profile
 from bot.services.deck_constructor import build_constructor_decks
+from bot.services.ghosteek_ai.constraints import refuse_unsupported
 from bot.services.ghosteek_ai.game_coach import (
     CLIMB_TIPS,
     decks_for_win_condition,
@@ -103,12 +104,7 @@ async def route_intent(
         return _payload(
             intent,
             ok=False,
-            error=coach_reply(
-                "Этих данных у Clash Royale просто нет.",
-                why="Точный урон по картам в бою, эликсир в руке и кадры реплея API не отдаёт.",
-                action="Могу разобрать колоду, матчап, бой или объяснить механику.",
-                tip="Скажи, что именно нужно — подскажу по делу.",
-            ),
+            error=refuse_unsupported(),
         )
 
     if intent == INTENT_CLARIFY:

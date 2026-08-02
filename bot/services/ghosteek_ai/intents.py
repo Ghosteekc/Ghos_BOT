@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 from bot.services.card_data import CARD_META
 from bot.services.card_names_ru import CARD_NAMES_RU, CARD_NAMES_SHORT
+from bot.services.ghosteek_ai.constraints import is_unsupported_request
 from bot.services.ghosteek_ai.knowledge_base import resolve_mechanic_key
 
 # Intent → сервис (этап 1)
@@ -112,21 +112,6 @@ def _build_alias_index() -> list[tuple[str, str]]:
 
 _ALIAS_INDEX = _build_alias_index()
 
-_UNSUPPORTED_RE = re.compile(
-    r"("
-    r"урон\s+по\s+карт|"
-    r"сколько\s+урона|"
-    r"damage\s+per|"
-    r"эликсир(а|у)?\s+в\s+рук|"
-    r"сколько\s+эликсир|"
-    r"elixir\s+in\s+hand|"
-    r"hp\s+башн|"
-    r"точн(ый|ое)\s+хп|"
-    r"кадры\s+боя|"
-    r"replay\s+frame"
-    r")",
-    re.IGNORECASE,
-)
 
 # Механики Knowledge Base — резолв через единый словарь алиасов
 def _match_mechanic(low: str) -> str | None:
@@ -189,7 +174,7 @@ def detect_intent(message: str, *, context_cards: list[str] | None = None) -> De
     if not raw:
         return _out(INTENT_CLARIFY, cards=ctx[:8])
 
-    if _UNSUPPORTED_RE.search(low):
+    if is_unsupported_request(raw):
         return _out(INTENT_UNSUPPORTED, cards=extracted or ctx[:8])
 
     # --- Battle Analyzer ---
