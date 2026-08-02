@@ -288,7 +288,18 @@ def detect_intent(message: str, *, context_cards: list[str] | None = None) -> De
         return _out(INTENT_BUILD_DECK, cards=core)
 
     # --- Recommendation ---
-    if any(k in low for k in ("улучш", "замен", "что помен", "что смен", "фикс колоды")):
+    if any(
+        k in low
+        for k in (
+            "улучш",
+            "замен",
+            "что помен",
+            "что смен",
+            "фикс колоды",
+            "а что замен",
+            "что лучше замен",
+        )
+    ):
         cards = extracted[:8] if len(extracted) >= 4 else (ctx[:8] if ctx else extracted)
         return _out(INTENT_IMPROVE_DECK, cards=cards)
 

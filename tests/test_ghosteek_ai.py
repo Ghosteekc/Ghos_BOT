@@ -238,3 +238,72 @@ def test_compose_does_not_invent_when_ok_false():
     )
     assert "истор" in answer.lower()
     assert "победа" not in answer.lower()
+
+
+@pytest.mark.asyncio
+async def test_session_remembers_deck_for_improve_followup():
+    from bot.services.ghosteek_ai.session_context import clear_session, get_session
+
+    user = _user()
+    clear_session(user.telegram_id)
+
+    with (
+        patch(
+            "bot.services.ghosteek_ai.router._resolve_player_deck",
+            new_callable=AsyncMock,
+            return_value=HOG_CYCLE,
+        ),
+        patch(
+            "bot.services.ghosteek_ai.router.RecommendationEngine.analyze",
+        ) as mock_analyze,
+        patch(
+            "bot.services.ghosteek_ai.router.calculate_deck_synergy",
+            return_value=(70, ["связка Хог"]),
+        ),
+    ):
+        public = {
+            "coaching": {"play_style": "цикл", "strengths": ["темп"], "usage_tips": ["дави"]},
+            "game_plan": {"how_to_win": "Хог", "critical_weaknesses": []},
+            "improvement_plan": {
+                "needed": True,
+                "steps": [{"message": "Замени Skeletons на Ice Spirit для стабильности."}],
+            },
+            "balance_issues": {"messages": []},
+        }
+        rec = MagicMock()
+        rec.to_public_dict.return_value = public
+        mock_analyze.return_value = rec
+
+        first = await ask_ghosteek_ai("разбери мою колоду", user, context={"cards": HOG_CYCLE})
+        assert first.intent == INTENT_ANALYZE_DECK
+        session = get_session(user.telegram_id)
+        assert session is not None
+        assert session.last_deck == HOG_CYCLE
+
+        second = await ask_ghosteek_ai("А что заменить?", user)
+        assert second.intent == INTENT_IMPROVE_DECK
+        assert second.sources.get("ok") is True
+        # Второй вызов с apply_swaps=True и той же колодой из сессии
+        assert mock_analyze.call_count == 2
+        args, kwargs = mock_analyze.call_args
+        assert list(args[0]) == HOG_CYCLE
+        assert kwargs.get("apply_swaps") is True
+
+    clear_session(user.telegram_id)
+
+
+@pytest.mark.asyncio
+async def test_session_clears_on_ttl_and_explicit_clear():
+    from bot.services.ghosteek_ai import session_context as sc
+
+    user = _user()
+    sc.clear_session(user.telegram_id)
+    session = sc.get_or_create_session(user.telegram_id)
+    session.last_deck = list(HOG_CYCLE)
+    session.updated_at = 0  # протухла
+    assert sc.get_session(user.telegram_id) is None
+
+    session = sc.get_or_create_session(user.telegram_id)
+    session.last_deck = list(HOG_CYCLE)
+    sc.clear_session(user.telegram_id)
+    assert sc.get_session(user.telegram_id) is None

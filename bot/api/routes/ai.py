@@ -12,6 +12,7 @@ from bot.api.schemas import (
 )
 from bot.models.database import User
 from bot.services.ghosteek_ai import ask_ghosteek_ai
+from bot.services.ghosteek_ai.session_context import clear_session
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -39,3 +40,10 @@ async def ask_ai(
         sources=result.sources,
         actions=[GhosteekAiAction(type=a.type, path=a.path) for a in result.actions],
     )
+
+
+@router.delete("/session")
+async def clear_ai_session(user: User = Depends(require_subscription)) -> dict:
+    """Очистить Session Context текущего пользователя (конец сессии на /ai)."""
+    clear_session(user.telegram_id)
+    return {"ok": True, "cleared": True}

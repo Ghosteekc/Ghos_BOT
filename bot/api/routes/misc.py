@@ -180,9 +180,11 @@ async def clear_cache(user: User = Depends(get_current_user)) -> dict:
     """
     from bot.services.battle_session_cache import clear_user
     from bot.services.clash_api import normalize_tag
+    from bot.services.ghosteek_ai.session_context import clear_session
 
     tag = normalize_tag(user.player_tag) if user.player_tag else None
     clear_user(user.telegram_id, tag)
+    clear_session(user.telegram_id)
 
     return {"ok": True}
 
@@ -214,6 +216,9 @@ class UnlinkAccountResponse(BaseModel):
 async def unlink_clash_account(user: User = Depends(get_current_user)) -> UnlinkAccountResponse:
     """Unlink Clash Royale tag from the current Telegram user (bot + Mini App)."""
     from bot.services.clash_api import SubscriptionService
+    from bot.services.ghosteek_ai.session_context import clear_session
+
+    clear_session(user.telegram_id)
 
     async with async_session() as session:
         sub_service = SubscriptionService(session)
