@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SubscriptionInfo(BaseModel):
@@ -798,3 +798,27 @@ class SyncResponse(BaseModel):
 class BattleHistoryClearResponse(BaseModel):
     ok: bool = True
     deleted_count: int = 0
+
+
+class GhosteekAiContext(BaseModel):
+    cards: list[str] | None = None
+    opponent_cards: list[str] | None = None
+    battle_index: int | None = None
+    battle_time: str | None = None
+
+
+class GhosteekAiAskRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    context: GhosteekAiContext | None = None
+
+
+class GhosteekAiAction(BaseModel):
+    type: str = "navigate"
+    path: str
+
+
+class GhosteekAiAskResponse(BaseModel):
+    intent: str
+    answer: str
+    sources: dict = Field(default_factory=dict)
+    actions: list[GhosteekAiAction] = Field(default_factory=list)
