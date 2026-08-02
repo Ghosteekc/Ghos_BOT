@@ -23,6 +23,7 @@ from bot.services.ghosteek_ai.intents import (
     detect_intent,
 )
 from bot.services.ghosteek_ai.service import ask_ghosteek_ai
+from bot.services.ghosteek_ai.voice import coach_reply
 
 
 HOG_CYCLE = [
@@ -106,7 +107,8 @@ async def test_unsupported_answer_mentions_cr_api():
     result = await ask_ghosteek_ai("сколько эликсира в руке было", _user())
     assert result.intent == INTENT_UNSUPPORTED
     low = result.answer.lower()
-    assert "clash royale" in low or "не предоставляет" in low
+    assert "clash royale" in low or "нет" in low
+    assert "как ии" not in low
     assert "3." not in result.answer
 
 
@@ -114,8 +116,8 @@ async def test_unsupported_answer_mentions_cr_api():
 async def test_clarify_asks_not_guesses():
     result = await ask_ghosteek_ai("привет", _user())
     assert result.intent == INTENT_CLARIFY
-    assert "Уточните" in result.answer
-    assert "Builder" in result.answer
+    assert "уточн" in result.answer.lower()
+    assert "как ии" not in result.answer.lower()
 
 
 @pytest.mark.asyncio
@@ -123,7 +125,8 @@ async def test_explain_mechanic_from_knowledge_base():
     result = await ask_ghosteek_ai("что такое cycle", _user())
     assert result.intent == INTENT_EXPLAIN_MECHANIC
     assert result.sources.get("service") == "Knowledge Base"
-    assert "цикл" in result.answer.lower() or "Cycle" in result.answer
+    assert "цикл" in result.answer.lower() or "cycle" in result.answer.lower()
+    assert "\n\n" in result.answer  # структура тренера: абзацы
 
 
 @pytest.mark.asyncio
@@ -131,6 +134,7 @@ async def test_game_coach_climb():
     result = await ask_ghosteek_ai("Как апнуть кубки?", _user())
     assert result.intent == INTENT_GAME_COACH
     assert "куб" in result.answer.lower() or "колод" in result.answer.lower()
+    assert "как ии" not in result.answer.lower()
 
 
 @pytest.mark.asyncio
@@ -168,8 +172,30 @@ async def test_analyze_deck_uses_recommendation_engine():
     assert result.intent == INTENT_ANALYZE_DECK
     assert result.sources.get("service") == "Analyzer"
     assert "цикл" in result.answer.lower() or "Хог" in result.answer or "давлени" in result.answer
-    assert "72" in result.answer or "синергия" in result.answer.lower()
+    assert "recommendationengine" not in result.answer.lower()
+    assert "как ии" not in result.answer.lower()
     mock_analyze.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_coach_voice_structure_on_matchup():
+    answer = compose_answer(
+        {
+            "intent": INTENT_MATCHUP,
+            "ok": True,
+            "data": {
+                "rating": "Сложный",
+                "score": 72,
+                "reasons": ["У соперника сильная защита зданиями.", "Твой Hog упирается в Tesla."],
+                "advantages": ["Дави, когда Tesla уже сыграна."],
+                "disadvantages": [],
+            },
+        }
+    )
+    parts = [p for p in answer.split("\n\n") if p.strip()]
+    assert len(parts) >= 3
+    assert "как ии" not in answer.lower()
+    assert "хорошие показатели" not in answer.lower()
 
 
 @pytest.mark.asyncio
@@ -202,9 +228,13 @@ def test_compose_does_not_invent_when_ok_false():
         {
             "intent": INTENT_LAST_BATTLE,
             "ok": False,
-            "error": "Нет истории боёв. Синхронизируйте бои или сыграйте ladder/PvP.",
+            "error": coach_reply(
+                "Истории боёв пока нет.",
+                why="Без боя разбирать нечего.",
+                action="Синхронизируй бои.",
+            ),
             "data": {},
         }
     )
-    assert "Нет истории" in answer
-    assert "матчап" not in answer.lower()
+    assert "истор" in answer.lower()
+    assert "победа" not in answer.lower()

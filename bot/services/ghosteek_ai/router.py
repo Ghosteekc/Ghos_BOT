@@ -32,6 +32,7 @@ from bot.services.ghosteek_ai.intents import (
     DetectedIntent,
 )
 from bot.services.ghosteek_ai.knowledge_base import list_mechanic_titles, lookup_mechanic
+from bot.services.ghosteek_ai.voice import coach_reply
 from bot.services.matchup_evaluation import evaluate_matchup
 from bot.services.recommendation_engine import RecommendationEngine
 
@@ -98,10 +99,11 @@ async def route_intent(
         return _payload(
             intent,
             ok=False,
-            error=(
-                "Clash Royale не предоставляет эти данные "
-                "(точный урон по картам в бою, эликсир в руке и т.п.).\n"
-                + CLARIFY_PROMPT
+            error=coach_reply(
+                "Этих данных у Clash Royale просто нет.",
+                why="Точный урон по картам в бою, эликсир в руке и кадры реплея API не отдаёт.",
+                action="Могу разобрать колоду, матчап, бой или объяснить механику.",
+                tip="Скажи, что именно нужно — подскажу по делу.",
             ),
         )
 
@@ -129,9 +131,11 @@ async def route_intent(
             return _payload(
                 intent,
                 ok=False,
-                error=(
-                    "Нужна колода из 8 карт. Пришлите названия карт или привяжите тег, "
-                    "чтобы взять текущую колоду из профиля."
+                error=coach_reply(
+                    "Нужна колода из 8 карт.",
+                    why="Без состава совет будет пустым.",
+                    action="Пришли названия карт или привяжи тег — возьму текущую колоду из профиля.",
+                    tip="Потом разберём или улучшим уже по факту.",
                 ),
                 actions=[{"type": "navigate", "path": "/decks"}],
             )
@@ -148,7 +152,11 @@ def _route_card_info(name: str | None) -> dict[str, Any]:
         return _payload(
             INTENT_CARD_INFO,
             ok=False,
-            error="Укажите карту, например: «что делает Палач» или «объясни карту Хог».",
+            error=coach_reply(
+                "Какую карту разбираем?",
+                action="Напиши, например: «что делает Палач».",
+                tip="Тогда дам роль и как её обычно ставят в колоду.",
+            ),
         )
     profile = get_card_profile(name)
     return _payload(
@@ -167,13 +175,15 @@ def _route_card_info(name: str | None) -> dict[str, Any]:
 def _route_mechanic(key: str | None) -> dict[str, Any]:
     entry = lookup_mechanic(key)
     if entry is None:
-        titles = ", ".join(list_mechanic_titles()[:8])
+        titles = ", ".join(list_mechanic_titles()[:6])
         return _payload(
             INTENT_EXPLAIN_MECHANIC,
             ok=False,
-            error=(
-                "Не нашёл эту механику в Knowledge Base. "
-                f"Могу объяснить, например: {titles}…"
+            error=coach_reply(
+                "Этой механики в базе пока нет.",
+                why=f"Могу объяснить, например: {titles}.",
+                action="Напиши термин точнее — разберём.",
+                tip="Формулировка «что такое cycle» работает лучше всего.",
             ),
         )
     return _payload(
@@ -220,7 +230,12 @@ def _route_build(core: list[str], user: User) -> dict[str, Any]:
             return _payload(
                 INTENT_BUILD_DECK,
                 ok=False,
-                error="Конструктор не смог собрать колоду вокруг этого ядра.",
+                error=coach_reply(
+                    "Вокруг этого ядра пока не собрал стабильный вариант.",
+                    why="Конструктор не нашёл подходящую сборку.",
+                    action="Попробуй другое ядро из 4 карт или другой win condition.",
+                    tip="Пример: Хог, Терпила, Мушкетёр, Пушка.",
+                ),
                 data={"core": core[:4]},
                 actions=[{"type": "navigate", "path": "/decks"}],
             )
@@ -258,9 +273,11 @@ def _route_build(core: list[str], user: User) -> dict[str, Any]:
         return _payload(
             INTENT_BUILD_DECK,
             ok=False,
-            error=(
-                f"Нет готовых шаблонов вокруг «{card_name_ru(core[0])}». "
-                "Укажите ядро из 4 карт: «собери колоду вокруг Хог Терпила Мушкетёр Пушка»."
+            error=coach_reply(
+                f"Готовых шаблонов вокруг «{card_name_ru(core[0])}» нет.",
+                why="В базе нет подходящей колоды под эту опору.",
+                action="Дай ядро из 4 карт — соберём точнее.",
+                tip="Пример: «собери колоду вокруг Хог Терпила Мушкетёр Пушка».",
             ),
             data={"core": core},
             actions=[{"type": "navigate", "path": "/decks"}],
@@ -269,10 +286,11 @@ def _route_build(core: list[str], user: User) -> dict[str, Any]:
     return _payload(
         INTENT_BUILD_DECK,
         ok=False,
-        error=(
-            "Чтобы собрать колоду, укажите win condition или ядро из 4 карт. "
-            "Примеры: «хочу играть через Хога», "
-            "«собери колоду вокруг Хог Терпила Мушкетёр Пушка»."
+        error=coach_reply(
+            "Чтобы собрать колоду, нужен ориентир.",
+            why="Без win condition или ядра сборка будет гаданием.",
+            action="Напиши «хочу играть через Хога» или 4 карты ядра.",
+            tip="После этого дам готовый вариант под твой стиль.",
         ),
         actions=[{"type": "navigate", "path": "/decks"}],
     )
@@ -302,9 +320,11 @@ async def _route_game_coach(
         return _payload(
             INTENT_GAME_COACH,
             ok=False,
-            error=(
-                "Уточните архетип соперника. Примеры: «как играть против Lavaloon», "
-                "«как против Хог 2.6», «как против бейта»."
+            error=coach_reply(
+                "Против кого готовимся?",
+                why="Нужен конкретный архетип.",
+                action="Напиши, например: «как играть против Lavaloon» или «против Хог 2.6».",
+                tip="Тогда разберём план под твою колоду.",
             ),
         )
 
@@ -317,9 +337,11 @@ async def _route_game_coach(
             return _payload(
                 INTENT_GAME_COACH,
                 ok=False,
-                error=(
-                    f"Для совета против «{arch_name}» нужна ваша колода из 8 карт "
-                    "(или привязанный тег). Могу также разобрать матчап, если пришлёте обе колоды."
+                error=coach_reply(
+                    f"Против «{arch_name}» нужен твой состав.",
+                    why="Без твоей колоды из 8 карт совет будет общим и пустым.",
+                    action="Пришли колоду или привяжи тег.",
+                    tip="Можно также разобрать матчап, если дашь обе колоды.",
                 ),
                 data={"archetype": arch_name, "opponent_deck": opp_deck},
                 actions=[{"type": "navigate", "path": "/decks/compare"}],
@@ -339,8 +361,8 @@ async def _route_game_coach(
                 "advantages": evaluation.advantages,
                 "disadvantages": evaluation.disadvantages,
                 "tips": [
-                    "Оценка ниже — из Matchup Analyzer по эталонной колоде архетипа из базы Ghosteek.",
-                    "Полный разбор своего последнего боя — через Battle Analyzer.",
+                    "Оценка — по эталонной колоде архетипа из базы Ghosteek.",
+                    "Свой последний бой с таким соперником разберём отдельно.",
                 ],
             },
             actions=[{"type": "navigate", "path": "/decks/compare"}],
@@ -349,8 +371,10 @@ async def _route_game_coach(
     return _payload(
         INTENT_GAME_COACH,
         ok=False,
-        error=(
-            "Уточните совет: «как апнуть кубки?» или «как играть против Lavaloon?»."
+        error=coach_reply(
+            "Уточни совет.",
+            action="«Как апнуть кубки?» или «как играть против Lavaloon?»",
+            tip="Чем конкретнее вопрос — тем точнее план.",
         ),
     )
 
@@ -361,7 +385,12 @@ async def _route_last_battle(user: User, ctx: dict[str, Any]) -> dict[str, Any]:
         return _payload(
             INTENT_LAST_BATTLE,
             ok=False,
-            error="Нет истории боёв. Синхронизируйте бои или сыграйте ladder/PvP.",
+            error=coach_reply(
+                "Истории боёв пока нет.",
+                why="Без боя разбирать нечего.",
+                action="Синхронизируй бои или сыграй ladder/PvP.",
+                tip="После этого разберём последний матч по шагам.",
+            ),
             actions=[{"type": "navigate", "path": "/battles"}],
         )
 
@@ -434,7 +463,12 @@ async def _route_matchup(
         return _payload(
             INTENT_MATCHUP,
             ok=False,
-            error="Для матчапа нужны две колоды по 8 карт или хотя бы один бой в истории.",
+            error=coach_reply(
+                "Для матчапа мало данных.",
+                why="Нужны две колоды по 8 карт или хотя бы один бой в истории.",
+                action="Пришли обе колоды или сыграй бой и синхронизируй историю.",
+                tip="Тогда скажу, где давить и где лучше подождать.",
+            ),
             actions=[{"type": "navigate", "path": "/battles"}],
         )
 

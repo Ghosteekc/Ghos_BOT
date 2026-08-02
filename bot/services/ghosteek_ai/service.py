@@ -57,6 +57,7 @@ async def ask_ghosteek_ai(
         "service": payload.get("service") or detected.service,
         "ok": payload.get("ok"),
         "data": payload.get("data") or {},
+        "persona": "coach",
     }
     return GhosteekAiResponse(
         intent=str(payload.get("intent") or detected.intent),
