@@ -1,4 +1,8 @@
-"""Ограничения Ghosteek AI — только факты из разрешённых источников."""
+"""Ограничения Ghosteek AI — только факты из разрешённых источников.
+
+Важно: в текстах для игрока не используем слова API, Analyzer, Builder
+и прочие внутрипроектовые ярлыки.
+"""
 
 from __future__ import annotations
 
@@ -6,18 +10,19 @@ import re
 
 from bot.services.ghosteek_ai.voice import coach_reply
 
-# Разрешённые основания для ответа
+# Разрешённые основания (внутренние коды, не для UI)
 ALLOWED_SOURCES = (
-    "supercell_api",       # Clash Royale / Supercell API
-    "project_analysis",    # Analyzer, Matchup, Battle report, Recommendation…
-    "card_database",       # card profile / names / roles
-    "meta",                # meta decks / templates
-    "user_data",           # профиль, история боёв, сессия
+    "supercell_api",
+    "project_analysis",
+    "card_database",
+    "meta",
+    "user_data",
 )
 
+# Коротко и по-человечески — без «API» и названий модулей
 CONSTRAINTS_SUMMARY = (
-    "Отвечаю только по данным Supercell API, анализу Ghosteek, карточной базе, "
-    "мете и твоим данным. Не выдумываю статистику, урон и то, чего нет в API."
+    "Опираюсь только на доступные данные боя, разбор колоды и твои сохранённые результаты. "
+    "Не выдумываю урон, статистику и то, чего в данных нет."
 )
 
 # Запросы, на которые нельзя честно ответить без выдумки
@@ -77,25 +82,44 @@ _FORBIDDEN_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Внутрипроектовый жаргон — вычищаем из ответов игроку
+_INTERNAL_JARGON_RE = re.compile(
+    r"("
+    r"\bAPI\b|"
+    r"Supercell\s+API|"
+    r"Clash\s+Royale\s+API|"
+    r"CR\s+API|"
+    r"RecommendationEngine|"
+    r"Matchup\s*Analyzer|"
+    r"Battle\s*Analyzer|"
+    r"Knowledge\s*Base|"
+    r"Card\s*Database|"
+    r"Game\s*Coach|"
+    r"Session\s*Context|"
+    r"\bBuilder\b|"
+    r"\bAnalyzer\b|"
+    r"HonestFallback|"
+    r"intent\s*:"
+    r")",
+    re.IGNORECASE,
+)
+
 
 def is_unsupported_request(message: str) -> bool:
-    """True, если запрос требует данных, которых нет у CR API / наших сервисов."""
+    """True, если запрос требует данных, которых у нас нет."""
     return bool(_UNSUPPORTED_REQUEST_RE.search(message or ""))
 
 
 def refuse_unsupported(*, detail: str | None = None) -> str:
-    """Честный отказ без выдуманных цифр."""
+    """Честный отказ без выдуманных цифр и без внутренних терминов."""
     why = detail or (
-        "Supercell API не отдаёт точный урон карт в бою, эликсир в руке, "
-        "кадры реплея и счётчики «сколько раз сыграли карту» в матче."
+        "В доступных данных боя нет точного урона карт, эликсира в руке, "
+        "кадров реплея и счётчика «сколько раз сыграли карту»."
     )
     return coach_reply(
         "Этих данных нет — не буду выдумывать.",
         why=why,
-        action=(
-            "Могу опереться на API, разбор колоды/боя/матчапа Ghosteek, "
-            "карточную базу, мету и твои сохранённые данные."
-        ),
+        action="Могу разобрать колоду, матчап, бой или объяснить термин по делу.",
         tip=CONSTRAINTS_SUMMARY,
     )
 
@@ -104,23 +128,54 @@ def contains_forbidden_claim(text: str) -> bool:
     return bool(_FORBIDDEN_CLAIM_RE.search(text or ""))
 
 
+def strip_internal_jargon(text: str) -> str:
+    """Убрать/смягчить внутрипроектовые ярлыки в тексте для игрока."""
+    if not text:
+        return text
+
+    replacements = (
+        (r"Clash\s+Royale\s+API", "доступные данные"),
+        (r"Supercell\s+API", "доступные данные"),
+        (r"CR\s+API", "доступные данные"),
+        (r"\bAPI\b", "данные"),
+        (r"RecommendationEngine", "разбор"),
+        (r"Matchup\s*Analyzer", "разбор матчапа"),
+        (r"Battle\s*Analyzer", "разбор боя"),
+        (r"Knowledge\s*Base", "словарь терминов"),
+        (r"Card\s*Database", "картотека"),
+        (r"Game\s*Coach", "совет"),
+        (r"Session\s*Context", "этот диалог"),
+        (r"\bBuilder\b", "сборка колоды"),
+        (r"\bAnalyzer\b", "разбор"),
+        (r"из базы Ghosteek", "из наших шаблонов"),
+        (r"базы Ghosteek", "готовых шаблонов"),
+        (r"конструктором Ghosteek", "сборкой"),
+        (r"конструктором", "сборкой"),
+    )
+    out = text
+    for pattern, repl in replacements:
+        out = re.sub(pattern, repl, out, flags=re.IGNORECASE)
+    # подчистить двойные пробелы после замен
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return out.strip()
+
+
 def sanitize_answer(text: str) -> str:
-    """Убрать/заменить запрещённые утверждения, если они вдруг попали в ответ."""
+    """Убрать запрещённые утверждения и внутренний жаргон."""
     raw = (text or "").strip()
     if not raw:
         return raw
-    if not contains_forbidden_claim(raw):
-        return raw
-    # Не пытаемся «починить» галлюцинацию — честно режем
-    return coach_reply(
-        "Тут я чуть не сказал лишнего.",
-        why="Точных кадров боя, урона карт и счётчиков розыгрышей в API нет.",
-        action="Опирайся на разбор колоды, матчап и сохранённую историю боёв.",
-        tip=CONSTRAINTS_SUMMARY,
-    )
+    if contains_forbidden_claim(raw):
+        return coach_reply(
+            "Тут я чуть не сказал лишнего.",
+            why="Точных кадров боя, урона карт и счётчиков розыгрышей в данных нет.",
+            action="Опирайся на разбор колоды, матчап и сохранённую историю боёв.",
+            tip=CONSTRAINTS_SUMMARY,
+        )
+    return strip_internal_jargon(raw)
 
 
 def enforce_answer(text: str, *, intent: str | None = None) -> str:
     """Финальный фильтр исходящего ответа."""
-    del intent  # reserved for intent-specific rules
+    del intent
     return sanitize_answer(text)

@@ -74,8 +74,7 @@ def _compose_card(data: dict[str, Any]) -> str:
         f"{name} — {elixir} эликсира, {card_type}.",
         why=f"В колоде она обычно работает как: {roles}.",
         action="Смотри, с чем она синергирует в твоей колоде, а не только «сильная ли карта сама по себе».",
-# Точный урон API не отдаёт — формулировка уже честная
-        tip="Точный урон и HP в бою Clash Royale API не отдаёт — опирайся на роль и матчапы.",
+        tip="Точный урон и HP в бою в данных нет — опирайся на роль и матчапы.",
     )
 
 
@@ -117,7 +116,7 @@ def _compose_coach(data: dict[str, Any]) -> str:
     return coach_reply(
         f"Против «{arch}» матчап {rating}"
         + (f" ({score}/100)." if score is not None else "."),
-        why=reason or f"Ориентир — эталонная колода «{arch}» из базы Ghosteek.",
+        why=reason or f"Ориентир — эталонная колода «{arch}».",
         action=action or "Держи ответы на win condition и не отдавай бесплатный эликсир у моста.",
         tip="Если хочешь точный план под свой последний бой с этим архетипом — разберём его отдельно.",
     )
@@ -207,7 +206,7 @@ def _compose_build(data: dict[str, Any]) -> str:
 
     return coach_reply(
         f"Собрал вариант: {_ru_list(names)}.",
-        why=f"Ядро {core_txt} закрыто конструктором." if core_txt else "Сборка вокруг твоего ядра.",
+        why=f"Ядро {core_txt} закрыто сборкой." if core_txt else "Сборка вокруг твоего ядра.",
         action="Протестируй 10–15 боёв, потом точечно улучшим.",
         tip=more or "Не меняй половину карт после двух поражений.",
     )

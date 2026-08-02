@@ -107,7 +107,8 @@ async def test_unsupported_answer_mentions_cr_api():
     result = await ask_ghosteek_ai("сколько эликсира в руке было", _user())
     assert result.intent == INTENT_UNSUPPORTED
     low = result.answer.lower()
-    assert "нет" in low or "api" in low or "выдум" in low
+    assert "нет" in low or "выдум" in low or "данных" in low
+    assert "api" not in low
     assert "как ии" not in low
     assert "3." not in result.answer
     assert result.sources.get("constraints")
@@ -135,6 +136,17 @@ def test_sanitize_blocks_forbidden_replay_claims():
     cleaned = sanitize_answer(bad)
     assert "видел реплей" not in cleaned.lower()
     assert "выдум" in cleaned.lower() or "нет" in cleaned.lower()
+    assert "api" not in cleaned.lower()
+
+
+def test_strip_internal_jargon_from_answers():
+    from bot.services.ghosteek_ai.constraints import strip_internal_jargon
+
+    raw = "Clash Royale API не отдаёт урон. Смотри Matchup Analyzer."
+    cleaned = strip_internal_jargon(raw).lower()
+    assert "api" not in cleaned
+    assert "matchup analyzer" not in cleaned
+    assert "данн" in cleaned or "разбор" in cleaned
 
 
 @pytest.mark.asyncio

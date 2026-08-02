@@ -277,7 +277,7 @@ def _route_build(core: list[str], user: User) -> dict[str, Any]:
             ok=False,
             error=coach_reply(
                 f"Готовых шаблонов вокруг «{card_name_ru(core[0])}» нет.",
-                why="В базе нет подходящей колоды под эту опору.",
+                why="Нет готовой колоды под эту опору.",
                 action="Дай ядро из 4 карт — соберём точнее.",
                 tip="Пример: «собери колоду вокруг Хог Терпила Мушкетёр Пушка».",
             ),
@@ -363,7 +363,7 @@ async def _route_game_coach(
                 "advantages": evaluation.advantages,
                 "disadvantages": evaluation.disadvantages,
                 "tips": [
-                    "Оценка — по эталонной колоде архетипа из базы Ghosteek.",
+                    "Оценка — по эталонной колоде этого архетипа.",
                     "Свой последний бой с таким соперником разберём отдельно.",
                 ],
             },

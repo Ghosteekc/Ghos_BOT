@@ -7,7 +7,7 @@ from typing import Any
 
 from bot.models.database import User
 from bot.services.ghosteek_ai.composer import compose_answer
-from bot.services.ghosteek_ai.constraints import CONSTRAINTS_SUMMARY, enforce_answer
+from bot.services.ghosteek_ai.constraints import enforce_answer
 from bot.services.ghosteek_ai.intents import detect_intent
 from bot.services.ghosteek_ai.router import route_intent
 from bot.services.ghosteek_ai.session_context import (
@@ -85,13 +85,14 @@ async def ask_ghosteek_ai(
         for a in (payload.get("actions") or [])
         if isinstance(a, dict) and a.get("path")
     ]
+    # Не отдаём игроку сырой constraints-текст с жаргоном — только флаг
     sources = {
         "intent": intent,
         "service": service,
         "ok": payload.get("ok"),
         "data": payload.get("data") or {},
         "persona": "coach",
-        "constraints": CONSTRAINTS_SUMMARY,
+        "constraints": True,
         "session": session.to_public(),
     }
     return GhosteekAiResponse(
