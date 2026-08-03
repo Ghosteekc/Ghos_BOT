@@ -11,8 +11,17 @@ logger = logging.getLogger(__name__)
 _cards_by_name: dict[str, dict] | None = None
 
 # CDN URLs from /cards API can 404 until Supercell publishes the asset.
-_CARD_ICON_FALLBACKS: dict[str, str] = {
-    "ronin": "/cards/ronin.png",
+_CARD_ICON_FALLBACKS: dict[str, str] = {}
+
+# Evo / hero arts: official iconUrls often lag behind season drops.
+# Paths are served from the webapp /public/cards.
+_CARD_EVOLUTION_ICON_FALLBACKS: dict[str, str] = {
+    "elite barbarians": "/cards/elite-barbarians-ev1.png",
+}
+
+_CARD_HERO_ICON_FALLBACKS: dict[str, str] = {
+    "valkyrie": "/cards/valkyrie-hero.png",
+    "berserker": "/cards/berserker-hero.png",
 }
 
 
@@ -20,10 +29,35 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower()
 
 
+def _webapp_asset(path: str) -> str:
+    return f"{settings.webapp_url.rstrip('/')}{path}"
+
+
 def _resolve_card_icon(name: str, api_icon: str) -> str:
     fallback_path = _CARD_ICON_FALLBACKS.get(_normalize_name(name))
     if fallback_path:
-        return f"{settings.webapp_url.rstrip('/')}{fallback_path}"
+        return _webapp_asset(fallback_path)
+    return api_icon
+
+
+def _resolve_evolution_icon(name: str, api_icon: str) -> str:
+    key = _normalize_name(name)
+    fallback_path = _CARD_EVOLUTION_ICON_FALLBACKS.get(key)
+    if fallback_path and not api_icon:
+        return _webapp_asset(fallback_path)
+    # Prefer local season art when API URL is present but often 404s on day-1.
+    if fallback_path and key in _CARD_EVOLUTION_ICON_FALLBACKS:
+        return _webapp_asset(fallback_path)
+    return api_icon
+
+
+def _resolve_hero_icon(name: str, api_icon: str) -> str:
+    key = _normalize_name(name)
+    fallback_path = _CARD_HERO_ICON_FALLBACKS.get(key)
+    if fallback_path and not api_icon:
+        return _webapp_asset(fallback_path)
+    if fallback_path and key in _CARD_HERO_ICON_FALLBACKS:
+        return _webapp_asset(fallback_path)
     return api_icon
 
 
@@ -54,13 +88,19 @@ async def ensure_cards_loaded() -> dict[str, dict]:
             continue
         icons = item.get("iconUrls") or {}
         api_icon = icons.get("medium") or icons.get("small") or ""
+        evo_icon = _resolve_evolution_icon(name, icons.get("evolutionMedium") or "")
+        hero_icon = _resolve_hero_icon(name, icons.get("heroMedium") or "")
+        max_evo = int(item.get("maxEvolutionLevel") or 0)
+        # Season overrides: local evo art implies evolvable card.
+        if evo_icon and _normalize_name(name) in _CARD_EVOLUTION_ICON_FALLBACKS:
+            max_evo = max(max_evo, 1)
         result[_normalize_name(name)] = {
             "name": name,
             "id": item.get("id"),
             "icon": _resolve_card_icon(name, api_icon),
-            "evolution_icon": icons.get("evolutionMedium") or "",
-            "hero_icon": icons.get("heroMedium") or "",
-            "max_evolution_level": int(item.get("maxEvolutionLevel") or 0),
+            "evolution_icon": evo_icon,
+            "hero_icon": hero_icon,
+            "max_evolution_level": max_evo,
             "elixir": item.get("elixirCost"),
             "rarity": item.get("rarity") or "",
             "max_level": int(item.get("maxLevel") or 0) or None,
