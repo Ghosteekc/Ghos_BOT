@@ -41,6 +41,24 @@ class Settings(BaseSettings):
     meta_top_players_scan: int = 20
     meta_seed_tags: str = ""
 
+    # Ghosteek AI response backend: qwen | ollama | template
+    # LLM errors fall back to TemplateGenerator automatically.
+    ghosteek_ai_backend: str = "qwen"
+    # auto = agent if provider.supports_tools() else planner
+    # agent = LLM Tool Calling (Planner = recommendation only)
+    # planner = legacy INTENT_TOOL_MAP → ToolCaller → LLM/template text
+    ghosteek_ai_mode: str = "auto"
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "llama3.2"
+    ollama_timeout: float = 60.0
+    ollama_enable_tools: bool = True
+
+    # OpenAI-compatible LLM (Qwen / DashScope compatible-mode, etc.)
+    llm_api_key: str = ""
+    llm_base_url: str = ""
+    llm_model: str = "qwen3-235b-a22b-thinking-2507"
+    llm_timeout: float = 90.0
+
 
 settings = Settings()
 

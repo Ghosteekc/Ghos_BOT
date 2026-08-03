@@ -1,4 +1,8 @@
-"""Planner — выбирает Tool по каталогу, не зная реализации."""
+"""Planner — выбирает Tool по каталогу; исполняется только как LLM fallback.
+
+Agent Mode: LLM выбирает tools сама (Planner.plan не исполняется).
+Planner Mode / fallback: INTENT_TOOL_MAP → ToolCaller.execute_plan.
+"""
 
 from __future__ import annotations
 
@@ -39,16 +43,11 @@ INTENT_TOOL_MAP: dict[str, list[str]] = {
 
 
 class Planner:
-    """Выбор tools по имени из Registry. Без текста и без импорта сервисов.
+    """Выбор tools по имени из Registry.
 
-    Использование:
-      Planner.plan(detected)           # совместимый static API
-      Planner(registry).build(detected)  # instance API
-
-    TODO(Qwen): заменить select_tool_names на tool_calls из модели,
-    оставив validate + ToolCaller.execute_qwen_tool_calls.
-    HOOK: bot.services.ghosteek_ai.planner.planner.Planner.build
-    Модель пока не подключена.
+    Исполняется только когда LLM недоступен или упал с ошибкой.
+    В штатном Agent Mode plan строится для seed args / метаданных, но
+    ToolCaller.execute_plan(plan) не вызывается — tools выбирает модель.
     """
 
     def __init__(self, registry: ToolRegistry | None = None) -> None:

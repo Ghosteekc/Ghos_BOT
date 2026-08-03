@@ -137,11 +137,13 @@ def _build_deck_entry(
 
     stats = analyze_deck(deck_names)
     category = _category_from_archetype(archetype)
-    # Единый total из EvaluationReport; legacy score_breakdown — fallback.
+    # Единый total из EvaluationReport; score_breakdown — только API-compat.
     if evaluation_report and "total_score" in evaluation_report:
         total = float(evaluation_report["total_score"])
+    elif score_breakdown:
+        total = float(score_breakdown.get("total", 0) or 0)
     else:
-        total = score_breakdown.get("total", 0) if score_breakdown else 0
+        total = 0.0
     desc = f"Синергия {round(synergy_score, 0):.0f}% · баланс {round(total, 0):.0f} · эликсир {stats.avg_elixir}"
     if is_alternative:
         desc = "Альтернатива (ядро без конфликтующей карты) · " + desc
@@ -151,9 +153,7 @@ def _build_deck_entry(
         "name": name,
         "cards": [deck_card_info_from_parsed(c, slot=i) for i, c in enumerate(out_parsed)],
         "synergy_score": round(synergy_score, 1),
-        "total_score": round(total, 1) if evaluation_report else round(
-            total * 0.5 + synergy_score * 0.3 + confidence * 0.2, 1
-        ),
+        "total_score": round(total, 1),
         "synergy_notes": synergy_notes[:4],
         "avg_elixir": stats.avg_elixir,
         "deck_link": build_deck_share_link(deck_names),
@@ -163,7 +163,7 @@ def _build_deck_entry(
         "archetype": archetype,
         "confidence": round(confidence, 1),
         "balanced": balanced,
-        "score_breakdown": score_breakdown,  # Deprecated — см. evaluation_report
+        "score_breakdown": score_breakdown,  # Deprecated — заполняется из evaluation_report
         "evaluation_report": evaluation_report,
         "is_alternative": is_alternative,
     }

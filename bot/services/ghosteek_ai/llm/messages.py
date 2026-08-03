@@ -1,4 +1,4 @@
-"""LLM message types for Ghosteek AI (no model calls)."""
+"""LLM message types for Ghosteek AI."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ class ChatMessage:
     content: str
     name: str | None = None
     tool_call_id: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         role = self.role.value if isinstance(self.role, MessageRole) else str(self.role)
@@ -30,6 +31,8 @@ class ChatMessage:
             out["name"] = self.name
         if self.tool_call_id:
             out["tool_call_id"] = self.tool_call_id
+        if self.tool_calls:
+            out["tool_calls"] = list(self.tool_calls)
         return out
 
     @classmethod
@@ -39,11 +42,15 @@ class ChatMessage:
             role: MessageRole | str = MessageRole(role_raw)
         except ValueError:
             role = role_raw
+        tool_calls = raw.get("tool_calls")
         return cls(
             role=role,
             content=str(raw.get("content") or ""),
             name=raw.get("name"),
             tool_call_id=raw.get("tool_call_id"),
+            tool_calls=[dict(t) for t in tool_calls if isinstance(t, dict)]
+            if isinstance(tool_calls, list)
+            else None,
         )
 
 
@@ -56,14 +63,21 @@ class LLMToolCall:
     arguments: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        import json
+
         return {
             "id": self.id,
             "type": "function",
             "function": {
                 "name": self.name,
-                "arguments": self.arguments,
+                "arguments": json.dumps(self.arguments, ensure_ascii=False)
+                if isinstance(self.arguments, dict)
+                else self.arguments,
             },
         }
+
+    def to_openai_dict(self) -> dict[str, Any]:
+        return self.to_dict()
 
 
 @dataclass
@@ -110,6 +124,33 @@ class LLMGenerateResult:
     @property
     def has_tool_calls(self) -> bool:
         return bool(self.tool_calls)
+
+
+@dataclass
+class ToolCallResult:
+    """Модель запросила tools — не финальный текст пользователю.
+
+    Возвращается из QwenResponseGenerator вместо ответа игроку.
+    Исполнение — через существующий ToolCaller / execute_llm_round.
+    """
+
+    tool_calls: list[LLMToolCall] = field(default_factory=list)
+    messages: list[ChatMessage] = field(default_factory=list)
+    raw: LLMGenerateResult | None = None
+
+    @property
+    def has_tool_calls(self) -> bool:
+        return bool(self.tool_calls)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tool_calls": [t.to_dict() for t in self.tool_calls],
+            "messages": [m.to_dict() for m in self.messages],
+            "raw": self.raw.to_dict() if self.raw is not None else None,
+        }
+
+    def to_openai_tool_calls(self) -> list[dict[str, Any]]:
+        return [t.to_dict() for t in self.tool_calls]
 
 
 def messages_to_openai(messages: list[ChatMessage]) -> list[dict[str, Any]]:

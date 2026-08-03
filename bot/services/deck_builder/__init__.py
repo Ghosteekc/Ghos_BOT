@@ -2,6 +2,9 @@
 
 Импорты balance/builder — ленивые: иначе package init тянет card_matchups
 во время загрузки loader → отравление CardProfile (см. card_profile.py).
+
+ScoreBreakdown / compute_score_breakdown экспортируются для совместимости;
+ранжирование и валидация Builder идут через EvaluationReport.
 """
 
 from __future__ import annotations

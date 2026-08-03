@@ -1,4 +1,4 @@
-"""Safety Layer — проверки исходящего ответа."""
+"""Safety Layer — post-validation ответа против AIContext."""
 
 from __future__ import annotations
 
@@ -8,22 +8,45 @@ from bot.services.ghosteek_ai.constraints import (
     sanitize_answer,
 )
 from bot.services.ghosteek_ai.models import AIContext
+from bot.services.ghosteek_ai.safety.facts import extract_allowed_facts
+from bot.services.ghosteek_ai.safety.validators import (
+    validate_battle_claims,
+    validate_language,
+    validate_numbers,
+    validate_statistics,
+)
 from bot.services.ghosteek_ai.voice import PERSONA, SYSTEM_PROMPT, assert_coach_voice, ensure_coach_ending
 
 
 class SafetyLayer:
     """Факты / запреты / стиль / длина / терминология.
 
-    TODO(Qwen): усилить hallucination check против AIContext (сверка чисел
-    score/synergy только если они есть в ctx.data). Использовать SYSTEM_PROMPT.
+    Pipeline:
+      validate_language
+      → validate_battle_claims
+      → validate_statistics
+      → validate_numbers
+      → enforce_answer (jargon + остаточные forbidden)
+      → coach voice + ending + length
     """
 
     MAX_CHARS = 3500
 
+    # Порядок расширяемый: новые validators добавлять сюда.
+    VALIDATORS = (
+        validate_language,
+        validate_battle_claims,
+        validate_statistics,
+        validate_numbers,
+    )
+
     @classmethod
     def apply(cls, text: str, ctx: AIContext | None = None) -> str:
-        del ctx  # reserved for fact-check against AIContext
-        out = enforce_answer(text)
+        out = (text or "").strip()
+        facts = extract_allowed_facts(ctx)
+        for validator in cls.VALIDATORS:
+            out = validator(out, ctx, facts=facts)
+        out = enforce_answer(out)
         out = ensure_coach_ending(assert_coach_voice(out))
         if len(out) > cls.MAX_CHARS:
             out = out[: cls.MAX_CHARS - 1].rstrip() + "…"

@@ -1,8 +1,9 @@
 """DeckEvaluator — единый слой оценки готовой колоды из 8 карт.
 
 Только читает состав. Не меняет карты, не предлагает свапы.
-Внутри переиспользует существующие хелперы (balance, synergy, win_plan, elixir…).
-Публичный контракт для потребителей — EvaluationReport.
+Внутри переиспользует хелперы осей (balance, synergy, win_plan, elixir…).
+Публичный контракт и единственный итоговый score — EvaluationReport.
+ScoreBreakdown.total не влияет на total_score / ранжирование Builder.
 """
 
 from __future__ import annotations
@@ -237,15 +238,15 @@ def _win_plan_axis(win_plan, game_plan) -> AxisScore:
     )
 
 
-def _synergy_axis(deck: list[str], breakdown_synergy: float) -> AxisScore:
+def _synergy_axis(deck: list[str], axis_synergy: float) -> AxisScore:
+    """Синергия EvaluationReport: deck_synergy + ось ролей/ядра (axis helper)."""
     evaluation = evaluate_deck_synergy(deck)
-    # Blend: многоуровневая синергия + ось ScoreBreakdown.
-    score = evaluation.score * 0.65 + float(breakdown_synergy) * 0.35
+    score = evaluation.score * 0.65 + float(axis_synergy) * 0.35
     return AxisScore(
         score=_clamp(score),
         details={
             "deck_synergy": evaluation.score,
-            "axis_synergy": round(breakdown_synergy, 1),
+            "axis_synergy": round(axis_synergy, 1),
             "breakdown": {
                 "core": evaluation.breakdown.core,
                 "role": evaluation.breakdown.role,
@@ -258,8 +259,11 @@ def _synergy_axis(deck: list[str], breakdown_synergy: float) -> AxisScore:
 
 
 def _matchup_coverage_axis(
-    breakdown,
     *,
+    anti_air: float,
+    anti_swarm: float,
+    defense: float,
+    offense: float,
     opponent: list[str] | None,
     user_deck: list[str],
 ) -> AxisScore:
@@ -269,16 +273,16 @@ def _matchup_coverage_axis(
     Coverage = 100 − difficulty.
     """
     defensive = (
-        float(breakdown.anti_air) * 0.34
-        + float(breakdown.anti_swarm) * 0.33
-        + float(breakdown.defense) * 0.33
+        float(anti_air) * 0.34
+        + float(anti_swarm) * 0.33
+        + float(defense) * 0.33
     )
     notes: list[str] = []
     details: dict = {
-        "anti_air": round(breakdown.anti_air, 1),
-        "anti_swarm": round(breakdown.anti_swarm, 1),
-        "defense": round(breakdown.defense, 1),
-        "offense": round(breakdown.offense, 1),
+        "anti_air": round(anti_air, 1),
+        "anti_swarm": round(anti_swarm, 1),
+        "defense": round(defense, 1),
+        "offense": round(offense, 1),
     }
     score = defensive
     if opponent and len(opponent) == 8:
@@ -291,17 +295,17 @@ def _matchup_coverage_axis(
         details["matchup_rating"] = matchup.rating
         notes = list(matchup.reasons[:3]) + list(matchup.advantages[:2])
     else:
-        if breakdown.anti_air < 50:
+        if anti_air < 50:
             notes.append("Слабое покрытие воздуха")
-        if breakdown.anti_swarm < 55:
+        if anti_swarm < 55:
             notes.append("Слабое покрытие спама")
-        if breakdown.defense < 50:
+        if defense < 50:
             notes.append("Слабая общая защита")
     return AxisScore(score=_clamp(score), details=details, notes=tuple(notes[:5]))
 
 
-def _elixir_axis(elixir_report, breakdown_elixir: float) -> AxisScore:
-    # Профиль эликсира: баланс средней стоимости и осей эффективности.
+def _elixir_axis(elixir_report, axis_elixir: float) -> AxisScore:
+    """Профиль эликсира: efficiency-отчёт + ось archetype elixir range."""
     profile_pts = (
         int(elixir_report.cheap_rotation)
         + int(elixir_report.punish_speed)
@@ -309,7 +313,7 @@ def _elixir_axis(elixir_report, breakdown_elixir: float) -> AxisScore:
         + int(elixir_report.double_elixir_power)
         + int(elixir_report.overtime_strength)
     ) / 5.0
-    score = float(breakdown_elixir) * 0.45 + profile_pts * 0.55
+    score = float(axis_elixir) * 0.45 + profile_pts * 0.55
     return AxisScore(
         score=_clamp(score),
         details={
@@ -321,7 +325,7 @@ def _elixir_axis(elixir_report, breakdown_elixir: float) -> AxisScore:
             "recovery_speed": elixir_report.recovery_speed,
             "double_elixir_power": elixir_report.double_elixir_power,
             "overtime_strength": elixir_report.overtime_strength,
-            "axis_elixir": round(breakdown_elixir, 1),
+            "axis_elixir": round(axis_elixir, 1),
         },
         notes=tuple(elixir_report.explanations[:4]),
     )
@@ -339,8 +343,8 @@ def _compose_total(
     matchup_coverage: AxisScore,
     archetype_fit: AxisScore,
     elixir_profile: AxisScore,
-    legacy_total: float,
 ) -> float:
+    """Итог только из осей EvaluationReport — без якоря к ScoreBreakdown.total."""
     parts = {
         "synergy": synergy.score,
         "win_plan": win_plan.score,
@@ -352,9 +356,7 @@ def _compose_total(
         "elixir_profile": elixir_profile.score,
         "soft_constraints": soft.score,
     }
-    composite = sum(parts[k] * _TOTAL_WEIGHTS[k] for k in _TOTAL_WEIGHTS)
-    # Якорим к legacy ScoreBreakdown.total, чтобы ранжирование Builder не прыгало.
-    total = composite * 0.55 + float(legacy_total) * 0.45
+    total = sum(parts[k] * _TOTAL_WEIGHTS[k] for k in _TOTAL_WEIGHTS)
     if not hard.passed:
         total = min(total, 42.0)
         total -= 8.0 * len(hard.issues)
@@ -423,16 +425,18 @@ class DeckEvaluator:
         core_cards = list(core) if core else []
 
         intent = DeckIntentEngine.infer(cards, archetype=arch)
-        breakdown = compute_score_breakdown(cards, database, core_cards, arch)
+        # Axis helpers из balance — входные оси EvaluationReport.
+        # axes.total не используется (ранжирование только по EvaluationReport).
+        axes = compute_score_breakdown(cards, database, core_cards, arch)
         win_plan = evaluate_win_plan(cards, database, arch, intent=intent)
         game_plan = build_game_plan(cards, archetype=arch, intent=intent)
         elixir_report = analyze_elixir_efficiency(cards)
 
-        hard = _constraint_score(list(breakdown.hard_issues), hard=True)
-        soft = _constraint_score(list(breakdown.soft_issues), hard=False)
+        hard = _constraint_score(list(axes.hard_issues), hard=True)
+        soft = _constraint_score(list(axes.soft_issues), hard=False)
         role_coverage = _role_coverage_axis(cards, database, intent.required_role_ids)
         spell_balance = AxisScore(
-            score=_clamp(breakdown.spell_balance),
+            score=_clamp(axes.spell_balance),
             details={
                 "has_big": has_role(cards, database, ROLE_BIG_SPELL),
                 "has_small": has_role(cards, database, ROLE_SMALL_SPELL),
@@ -453,18 +457,21 @@ class DeckEvaluator:
             win_plan=win_plan,
         )
         win_plan_axis = _win_plan_axis(win_plan, game_plan)
-        synergy = _synergy_axis(cards, breakdown.synergy)
+        synergy = _synergy_axis(cards, axes.synergy)
         matchup_coverage = _matchup_coverage_axis(
-            breakdown,
+            anti_air=axes.anti_air,
+            anti_swarm=axes.anti_swarm,
+            defense=axes.defense,
+            offense=axes.offense,
             opponent=opponent,
             user_deck=cards,
         )
         archetype_fit = AxisScore(
-            score=_clamp(breakdown.archetype_fit),
+            score=_clamp(axes.archetype_fit),
             details={"archetype": arch, "play_style": intent.play_style},
             notes=(f"Архетип: {arch}",),
         )
-        elixir_profile = _elixir_axis(elixir_report, breakdown.elixir)
+        elixir_profile = _elixir_axis(elixir_report, axes.elixir)
 
         coaching_strengths: list[str] = []
         try:
@@ -501,7 +508,6 @@ class DeckEvaluator:
             matchup_coverage=matchup_coverage,
             archetype_fit=archetype_fit,
             elixir_profile=elixir_profile,
-            legacy_total=breakdown.total,
         )
 
         return EvaluationReport(

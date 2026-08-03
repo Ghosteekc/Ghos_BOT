@@ -55,8 +55,7 @@ class ResponseParser:
         if not isinstance(choice, dict):
             return LLMGenerateResult(raw=dict(raw))
         message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
-        content = message.get("content")
-        text = content.strip() if isinstance(content, str) else ""
+        text = self._coerce_content(message.get("content"))
         tool_calls = self._parse_tool_calls(message.get("tool_calls"))
         return LLMGenerateResult(
             text=text,
@@ -68,8 +67,7 @@ class ResponseParser:
 
     def _parse_ollama_message(self, raw: dict[str, Any]) -> LLMGenerateResult:
         message = raw.get("message") if isinstance(raw.get("message"), dict) else {}
-        content = message.get("content")
-        text = content.strip() if isinstance(content, str) else ""
+        text = self._coerce_content(message.get("content"))
         tool_calls = self._parse_tool_calls(message.get("tool_calls"))
         return LLMGenerateResult(
             text=text,
@@ -78,6 +76,23 @@ class ResponseParser:
             finish_reason=raw.get("done_reason") or ("stop" if raw.get("done") else None),
             model=raw.get("model"),
         )
+
+    @staticmethod
+    def _coerce_content(content: Any) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    if item.get("type") == "text":
+                        parts.append(str(item.get("text") or ""))
+                    elif "text" in item:
+                        parts.append(str(item.get("text") or ""))
+            return "".join(parts).strip()
+        return ""
 
     def _parse_tool_calls(self, raw_calls: Any) -> list[LLMToolCall]:
         if not isinstance(raw_calls, list):

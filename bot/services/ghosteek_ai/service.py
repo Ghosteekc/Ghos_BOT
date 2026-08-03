@@ -1,24 +1,196 @@
-"""Публичный API Ghosteek AI — AI Orchestrator pipeline."""
+"""Публичный API Ghosteek AI — LLM Tool Calling + Planner fallback."""
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
+from bot.config import settings
 from bot.models.database import User
+from bot.services.ghosteek_ai.agent.runner import run_llm_agent
 from bot.services.ghosteek_ai.context.builder import ContextBuilder
 from bot.services.ghosteek_ai.conversation.manager import ConversationManager
-from bot.services.ghosteek_ai.generator.factory import get_response_generator
+from bot.services.ghosteek_ai.generator.factory import (
+    get_response_generator,
+    get_template_generator,
+)
 from bot.services.ghosteek_ai.intents import detect_intent
-from bot.services.ghosteek_ai.models import GhosteekAiAction, GhosteekAiResponse
+from bot.services.ghosteek_ai.llm.provider import LLMProvider, get_llm_provider
+from bot.services.ghosteek_ai.models import GhosteekAiAction, GhosteekAiResponse, Plan
 from bot.services.ghosteek_ai.planner.planner import Planner
 from bot.services.ghosteek_ai.safety.layer import SafetyLayer
 from bot.services.ghosteek_ai.tools.base import ToolCaller, get_default_registry
 
+logger = logging.getLogger(__name__)
+
 _REGISTRY = get_default_registry()
 _CALLER = ToolCaller(_REGISTRY)
-# Default generator — template. Qwen не подключен.
-# HOOK: get_response_generator("qwen") после подключения модели.
-_GENERATOR = get_response_generator("template")
+_TEMPLATE = get_template_generator()
+
+MODE_AUTO = "auto"
+MODE_AGENT = "agent"
+MODE_PLANNER = "planner"
+
+
+def _configured_backend() -> str:
+    return (settings.ghosteek_ai_backend or "qwen").strip().lower()
+
+
+def _configured_mode() -> str:
+    return (settings.ghosteek_ai_mode or MODE_AUTO).strip().lower()
+
+
+def _resolve_provider(backend: str) -> LLMProvider | None:
+    if backend in {"template", "default", ""}:
+        return None
+    if backend in {"qwen", "dashscope", "openai", "openai_compatible"}:
+        return get_llm_provider("qwen")
+    if backend in {"ollama", "local"}:
+        return get_llm_provider("ollama")
+    return get_llm_provider(backend)
+
+
+def _resolve_runtime_mode(provider: LLMProvider | None) -> str:
+    """agent если LLM умеет tools; planner — только fallback / явный force."""
+    configured = _configured_mode()
+    # Явный planner — для отладки / когда LLM отключён оператором.
+    if configured == MODE_PLANNER:
+        return MODE_PLANNER
+    if provider is not None and provider.supports_tools():
+        return MODE_AGENT
+    return MODE_PLANNER
+
+
+async def _run_planner_fallback(
+    ai_context: Any,
+    plan: Plan,
+    *,
+    backend: str,
+    provider: LLMProvider | None,
+    reason: str,
+) -> tuple[str, list[str], dict[str, Any]]:
+    """Planner определяет tools только когда LLM недоступен или упал."""
+    meta: dict[str, Any] = {
+        "mode": MODE_PLANNER,
+        "llm_backend": backend,
+        "used_backend": backend,
+        "response_time_ms": None,
+        "fallback_reason": reason,
+    }
+    t0 = time.perf_counter()
+    tool_results = await _CALLER.execute_plan(plan, ai_context)
+    tool_names = [tr.tool for tr in tool_results]
+
+    if backend in {"template", "default", ""} or provider is None:
+        text = _TEMPLATE.generate(ai_context)
+        meta["used_backend"] = "template"
+        meta["llm_backend"] = "template" if backend in {"template", "default", ""} else backend
+        meta["response_time_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        logger.info(
+            "ghosteek_ai mode=%s used_backend=template response_time_ms=%s fallback_reason=%s",
+            MODE_PLANNER,
+            meta["response_time_ms"],
+            reason,
+        )
+        return text, tool_names, meta
+
+    try:
+        generator = get_response_generator(
+            "ollama" if backend in {"ollama", "local"} else backend
+        )
+        agenerate = getattr(generator, "agenerate", None)
+        if agenerate is None:
+            raise RuntimeError("generator has no agenerate()")
+        text = await agenerate(ai_context)
+        if not isinstance(text, str):
+            # ToolCallResult в fallback-path не ожидаем — на template
+            raise RuntimeError("fallback generator returned non-text result")
+        meta["response_time_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        meta["used_backend"] = "ollama" if backend in {"ollama", "local"} else backend
+        logger.info(
+            "ghosteek_ai mode=%s llm_backend=%s used_backend=%s response_time_ms=%s fallback_reason=%s",
+            MODE_PLANNER,
+            meta["llm_backend"],
+            meta["used_backend"],
+            meta["response_time_ms"],
+            reason,
+        )
+        return text, tool_names, meta
+    except Exception as exc:
+        meta["fallback_reason"] = f"{reason}; template: {type(exc).__name__}: {exc}"
+        meta["used_backend"] = "template"
+        meta["response_time_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        logger.warning(
+            "ghosteek_ai mode=%s used_backend=template response_time_ms=%s fallback_reason=%s",
+            MODE_PLANNER,
+            meta["response_time_ms"],
+            meta["fallback_reason"],
+        )
+        text = _TEMPLATE.generate(ai_context)
+        return text, tool_names, meta
+
+
+async def _run_agent_mode(
+    ai_context: Any,
+    plan: Plan,
+    *,
+    backend: str,
+    provider: LLMProvider,
+) -> tuple[str, list[str], dict[str, Any]]:
+    """LLM Tool Calling loop. При ошибке → Planner fallback."""
+    meta: dict[str, Any] = {
+        "mode": MODE_AGENT,
+        "llm_backend": backend,
+        "used_backend": backend,
+        "response_time_ms": None,
+        "fallback_reason": None,
+        "agent_rounds": None,
+        "used_tool_calling": False,
+    }
+    t0 = time.perf_counter()
+    try:
+        result = await run_llm_agent(
+            ai_context,
+            provider=provider,
+            caller=_CALLER,
+            registry=_REGISTRY,
+            planner_plan=None,
+        )
+        meta["response_time_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        meta["used_backend"] = provider.name
+        meta["agent_rounds"] = result.rounds
+        meta["used_tool_calling"] = result.used_tool_calling
+        logger.info(
+            "ghosteek_ai mode=%s llm_backend=%s used_backend=%s response_time_ms=%s "
+            "agent_rounds=%s used_tool_calling=%s tools=%s",
+            MODE_AGENT,
+            meta["llm_backend"],
+            meta["used_backend"],
+            meta["response_time_ms"],
+            result.rounds,
+            result.used_tool_calling,
+            result.tool_names,
+        )
+        return result.text, result.tool_names, meta
+    except Exception as exc:
+        reason = f"agent_failed: {type(exc).__name__}: {exc}"
+        logger.warning(
+            "ghosteek_ai mode=%s llm_backend=%s fallback_reason=%s — Planner fallback",
+            MODE_AGENT,
+            backend,
+            reason,
+        )
+        text, tool_names, fb_meta = await _run_planner_fallback(
+            ai_context,
+            plan,
+            backend=backend,
+            provider=provider,
+            reason=reason,
+        )
+        fb_meta["agent_rounds"] = meta.get("agent_rounds")
+        fb_meta["used_tool_calling"] = False
+        return text, tool_names, fb_meta
 
 
 async def ask_ghosteek_ai(
@@ -28,16 +200,15 @@ async def ask_ghosteek_ai(
     context: dict[str, Any] | None = None,
 ) -> GhosteekAiResponse:
     """
-    Orchestrator pipeline:
+    Orchestrator:
 
-    Conversation Manager
-      → Intent Detection
-      → Planner
-      → bootstrap AIContext
-      → ToolCaller (tools ↔ AIContext)
-      → Response Generator
-      → Safety Layer
-      → Response
+    Conversation → Intent
+      → LLM available: PromptBuilder → Qwen → tool_calls → ToolCaller
+           → role=tool → Qwen → … ≤5 → Safety → Response
+      → LLM unavailable / error: Planner → ToolCaller(plan) → Template/LLM text
+           → Safety → Response
+
+    Planner не выбирает tools, пока LLM работает.
     """
     session = ConversationManager.get_or_create(user.telegram_id)
     ConversationManager.add_user_message(session, message)
@@ -53,6 +224,8 @@ async def ask_ghosteek_ai(
         session, detected, message, req_ctx
     )
 
+    # Plan строится заранее: seed args для AIContext + fallback, если LLM упадёт.
+    # В Agent Mode plan НЕ исполняется и НЕ диктует tools.
     plan = Planner.plan(detected)
     tool_args = dict(plan.tools[0].args) if plan.tools else {}
 
@@ -65,11 +238,32 @@ async def ask_ghosteek_ai(
         tool_args=tool_args,
     )
 
-    tool_results = await _CALLER.execute_plan(plan, ai_context)
-    tool_names = [tr.tool for tr in tool_results]
+    backend = _configured_backend()
+    provider = _resolve_provider(backend)
+    runtime_mode = _resolve_runtime_mode(provider)
 
-    # HOOK_RESPONSE_GENERATOR: заменить на get_response_generator("qwen") при подключении LLM
-    raw_answer = _GENERATOR.generate(ai_context)
+    if runtime_mode == MODE_AGENT and provider is not None:
+        raw_answer, tool_names, gen_meta = await _run_agent_mode(
+            ai_context, plan, backend=backend, provider=provider
+        )
+    else:
+        reason = (
+            "llm_unavailable"
+            if provider is None
+            else (
+                "mode_planner"
+                if runtime_mode == MODE_PLANNER
+                else "tools_unsupported"
+            )
+        )
+        raw_answer, tool_names, gen_meta = await _run_planner_fallback(
+            ai_context,
+            plan,
+            backend=backend,
+            provider=provider,
+            reason=reason,
+        )
+
     answer = SafetyLayer.apply(raw_answer, ai_context)
 
     intent_name = ai_context.intent.request
@@ -101,6 +295,16 @@ async def ask_ghosteek_ai(
         "session": session.to_public(),
         "tools": tool_names,
         "error_code": ai_context.error_code,
+        "llm": {
+            "mode": gen_meta.get("mode"),
+            "backend": gen_meta.get("llm_backend"),
+            "used_backend": gen_meta.get("used_backend"),
+            "response_time_ms": gen_meta.get("response_time_ms"),
+            "fallback_reason": gen_meta.get("fallback_reason"),
+            "agent_rounds": gen_meta.get("agent_rounds"),
+            "used_tool_calling": gen_meta.get("used_tool_calling"),
+            "planner_suggestion": [t.name for t in plan.tools],
+        },
         "memory": {
             "has_summary": bool(session.summary),
             "summary_preview": session.to_public().get("summary_preview", ""),
@@ -111,7 +315,9 @@ async def ask_ghosteek_ai(
             "player": ai_context.player.to_dict(),
             "arena": ai_context.arena.to_dict(),
             "has_deck": len(ai_context.deck.cards) >= 8,
-            "has_battle": bool(ai_context.battle.raw or ai_context.battle.battle_index is not None),
+            "has_battle": bool(
+                ai_context.battle.raw or ai_context.battle.battle_index is not None
+            ),
             "has_summary": bool(ai_context.conversation.summary),
         },
     }

@@ -1,6 +1,7 @@
 """ResponseGenerator — интерфейс для Template / Ollama / Qwen.
 
-Модель не подключена. По умолчанию используется TemplateResponseGenerator.
+Factory выбирает backend по конфигу (GHOSTEEK_AI_BACKEND).
+TemplateGenerator остаётся fallback при ошибках LLM.
 """
 
 from __future__ import annotations

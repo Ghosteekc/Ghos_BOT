@@ -17,10 +17,11 @@ class PromptBuilder:
 
     Порядок сообщений:
       1. System
-      2. Conversation history
-      3. AIContext
-      4. Tool Results
-      5. User Message
+      2. Planner recommendation (optional)
+      3. Conversation history
+      4. AIContext
+      5. Tool Results (optional)
+      6. User Message
     """
 
     def __init__(
@@ -34,15 +35,46 @@ class PromptBuilder:
             constraints if constraints is not None else CONSTRAINTS_SUMMARY
         )
 
-    def build(self, ctx: AIContext) -> list[ChatMessage]:
-        """Полный список messages для LLMProvider."""
+    def build(
+        self,
+        ctx: AIContext,
+        *,
+        include_tool_results: bool = True,
+        planner_recommendation: Any | None = None,
+    ) -> list[ChatMessage]:
+        """Полный список messages для LLMProvider.
+
+        planner_recommendation — Plan (или объект с .intent/.tools): подсказка, не приказ.
+        """
         messages: list[ChatMessage] = []
         messages.extend(self.build_system())
+        messages.extend(self.build_planner_recommendation(planner_recommendation))
         messages.extend(self.build_conversation_history(ctx))
         messages.extend(self.build_ai_context(ctx))
-        messages.extend(self.build_tool_results(ctx))
+        if include_tool_results:
+            messages.extend(self.build_tool_results(ctx))
         messages.extend(self.build_user_message(ctx))
         return messages
+
+    def build_planner_recommendation(self, plan: Any | None) -> list[ChatMessage]:
+        if plan is None:
+            return []
+        intent = getattr(plan, "intent", None) or ""
+        tools = getattr(plan, "tools", None) or []
+        names: list[str] = []
+        for t in tools:
+            name = getattr(t, "name", None) or (t.get("name") if isinstance(t, dict) else None)
+            if name:
+                names.append(str(name))
+        if not intent and not names:
+            return []
+        content = (
+            "Рекомендация Planner (необязательная подсказка, не приказ). "
+            "В Agent Mode решение о tools принимает модель.\n"
+            f"intent={intent or '—'}\n"
+            f"suggested_tools={', '.join(names) if names else '—'}"
+        )
+        return [ChatMessage(role=MessageRole.SYSTEM, content=content)]
 
     def build_system(self) -> list[ChatMessage]:
         parts = [self.system_prompt.strip()]
@@ -141,6 +173,19 @@ class PromptBuilder:
             text = "(пустое сообщение пользователя)"
         return [ChatMessage(role=MessageRole.USER, content=text)]
 
-    def build_openai_dicts(self, ctx: AIContext) -> list[dict[str, Any]]:
+    def build_openai_dicts(
+        self,
+        ctx: AIContext,
+        *,
+        include_tool_results: bool = True,
+        planner_recommendation: Any | None = None,
+    ) -> list[dict[str, Any]]:
         """Тот же prompt в виде list[dict] для HTTP-клиентов."""
-        return [m.to_dict() for m in self.build(ctx)]
+        return [
+            m.to_dict()
+            for m in self.build(
+                ctx,
+                include_tool_results=include_tool_results,
+                planner_recommendation=planner_recommendation,
+            )
+        ]

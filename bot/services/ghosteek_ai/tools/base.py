@@ -175,6 +175,33 @@ class ToolCaller:
         calls = [ToolCall.from_qwen_tool_call(raw) for raw in raw_tool_calls]
         return await self.execute_calls(calls, ctx)
 
+    async def execute_llm_round(
+        self,
+        messages: list,
+        ctx: AIContext,
+        *,
+        provider,
+        tools: list[dict[str, Any]] | None = None,
+        max_iterations: int = 5,
+    ):
+        """Инфраструктура multi-step LLM↔tools. Нигде не вызывается автоматически.
+
+        См. ``bot.services.ghosteek_ai.tools.llm_round.execute_llm_round``.
+        """
+        from bot.services.ghosteek_ai.tools.llm_round import (
+            MAX_LLM_ROUND_ITERATIONS,
+            execute_llm_round as _execute_llm_round,
+        )
+
+        return await _execute_llm_round(
+            messages,
+            ctx,
+            provider=provider,
+            caller=self,
+            tools=tools,
+            max_iterations=min(int(max_iterations), MAX_LLM_ROUND_ITERATIONS),
+        )
+
 
 async def execute_plan(
     plan: Plan,

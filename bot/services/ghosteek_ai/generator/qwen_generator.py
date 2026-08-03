@@ -1,7 +1,6 @@
-"""QwenResponseGenerator — stub через LLM-слой (модель не подключена).
+"""QwenResponseGenerator — LLM через OpenAI-compatible Chat Completions.
 
-Реэкспорт из generator.llm_generator для обратной совместимости.
-Прод-пайплайн использует TemplateResponseGenerator.
+Реэкспорт из generator.llm_generator.
 """
 
 from __future__ import annotations

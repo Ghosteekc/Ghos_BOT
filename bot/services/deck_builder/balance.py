@@ -1,10 +1,10 @@
-"""Жёсткие и мягкие ограничения баланса колод + score breakdown.
+"""Жёсткие и мягкие ограничения баланса колод + внутренние оси.
 
-.. deprecated::
-    ``ScoreBreakdown`` / ``compute_score_breakdown`` — внутренний legacy-скорер.
-    Для оценки готовой колоды используйте
-    ``bot.services.deck_evaluator.DeckEvaluator.evaluate`` → ``EvaluationReport``.
-    Этот модуль сохраняется для валидации Builder и как источник осей внутри DeckEvaluator.
+``ScoreBreakdown`` / ``compute_score_breakdown`` — калькулятор осей для
+``DeckEvaluator`` (синергия, offense/defense, anti-air, elixir range…).
+Итоговый score и ранжирование Builder — только ``EvaluationReport``.
+Поле ``ScoreBreakdown.total`` не используется потребителями Builder/API;
+публичный ``score_breakdown`` в JSON собирается адаптером из EvaluationReport.
 """
 
 from __future__ import annotations
@@ -74,11 +74,10 @@ SCORE_WEIGHTS: dict[str, float] = {
 
 @dataclass
 class ScoreBreakdown:
-    """Legacy оси качества колоды.
+    """Внутренние оси качества (вход для DeckEvaluator).
 
-    .. deprecated::
-        Используйте ``EvaluationReport`` из ``bot.services.deck_evaluator``.
-        Поле сохраняется для параллельной миграции и валидации Builder.
+    Не источник ранжирования Builder. Публичная оценка — EvaluationReport.
+    ``total`` оставлен для обратной совместимости импортов / is_playable_balanced.
     """
 
     synergy: float = 0.0
@@ -357,11 +356,10 @@ def compute_score_breakdown(
     *,
     pair_synergy: PairSynergyFn | None = None,
 ) -> ScoreBreakdown:
-    """Собрать legacy ScoreBreakdown.
+    """Собрать оси для DeckEvaluator (не публичный итоговый score).
 
-    .. deprecated::
-        Внешний код должен вызывать ``DeckEvaluator.evaluate``.
-        Функция остаётся для Builder validation и как внутренний источник осей.
+    Внешний код должен вызывать ``DeckEvaluator.evaluate`` → EvaluationReport.
+    ``ScoreBreakdown.total`` не участвует в ранжировании Builder.
     """
     ps = pair_synergy or (lambda a, b: default_pair_synergy(db, a, b))
     hard = hard_constraint_issues(deck, db, core)
@@ -401,7 +399,7 @@ def is_playable_balanced(
     min_core_synergy: float = 62.0,
     min_total: float = 58.0,
 ) -> bool:
-    """Играбельность: hard OK, ядро не разрушено, общий score приемлем."""
+    """Legacy helper. Builder использует EvaluationReport через validation.py."""
     if breakdown.hard_issues:
         return False
     if core_synergy_avg < min_core_synergy:
