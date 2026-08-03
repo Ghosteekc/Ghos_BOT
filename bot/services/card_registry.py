@@ -24,6 +24,15 @@ _CARD_HERO_ICON_FALLBACKS: dict[str, str] = {
     "berserker": "/cards/berserker-hero.png",
 }
 
+# Cards that have both Evolution and Hero in-game (dual-path).
+# Season APIs sometimes lag on maxEvolutionLevel / heroMedium.
+_DUAL_PATH_CARDS: frozenset[str] = frozenset({
+    "valkyrie",
+    "wizard",
+    "knight",
+    "musketeer",
+})
+
 
 def _normalize_name(name: str) -> str:
     return name.strip().lower()
@@ -91,10 +100,14 @@ async def ensure_cards_loaded() -> dict[str, dict]:
         evo_icon = _resolve_evolution_icon(name, icons.get("evolutionMedium") or "")
         hero_icon = _resolve_hero_icon(name, icons.get("heroMedium") or "")
         max_evo = int(item.get("maxEvolutionLevel") or 0)
+        key = _normalize_name(name)
         # Season overrides: local evo art implies evolvable card.
-        if evo_icon and _normalize_name(name) in _CARD_EVOLUTION_ICON_FALLBACKS:
+        if evo_icon and key in _CARD_EVOLUTION_ICON_FALLBACKS:
             max_evo = max(max_evo, 1)
-        result[_normalize_name(name)] = {
+        # Dual-path (evo + hero): collection uses 1/2/3 evolutionLevel tiers.
+        if key in _DUAL_PATH_CARDS and (evo_icon or max_evo >= 1) and hero_icon:
+            max_evo = max(max_evo, 3)
+        result[key] = {
             "name": name,
             "id": item.get("id"),
             "icon": _resolve_card_icon(name, api_icon),

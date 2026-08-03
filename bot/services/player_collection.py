@@ -25,17 +25,25 @@ def _mastery_card_name(badge_name: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"(?<!^)(?=[A-Z])", " ", raw)).strip()
 
 
-def _parse_card_upgrades(owned_raw: dict) -> dict:
+def _parse_card_upgrades(owned_raw: dict, info: dict | None = None) -> dict:
     """Derive evolution/hero unlock flags from Clash Royale player card payload.
 
     evolutionLevel semantics (player profile):
       1 — only evolution unlocked
       2 — hero unlocked (hero-only cards, or hero selected on dual-path card)
-      3+ — both evolution and hero unlocked (Wizard, Musketeer+Knight when fully upgraded)
-    iconUrls.evolutionMedium is present for all evolvable cards in catalog, not only unlocked.
+      3+ — both evolution and hero unlocked (Wizard, Valkyrie when fully upgraded)
+    Catalog iconUrls may omit season-new heroMedium on player payload —
+    use registry ``hero_icon`` / ``evolution_icon`` for capability detection.
     """
     icons = owned_raw.get("iconUrls") or {}
-    has_hero_icon = bool(icons.get("heroMedium"))
+    meta = info or {}
+    has_hero_cap = bool(icons.get("heroMedium") or meta.get("hero_icon"))
+    has_evo_cap = bool(
+        icons.get("evolutionMedium")
+        or meta.get("evolution_icon")
+        or int(owned_raw.get("maxEvolutionLevel") or 0) >= 1
+        or int(meta.get("max_evolution_level") or 0) >= 1
+    )
     evo_raw = owned_raw.get("evolutionLevel")
 
     if evo_raw is None:
@@ -53,8 +61,20 @@ def _parse_card_upgrades(owned_raw: dict) -> dict:
             "evolution_stat": False,
         }
 
-    hero_unlocked = has_hero_icon and evo >= 2
-    evolution_unlocked = evo == 1 or evo >= 3
+    if has_hero_cap and has_evo_cap:
+        # Dual-path: 1=evo, 2=hero, 3+=both
+        evolution_unlocked = evo == 1 or evo >= 3
+        hero_unlocked = evo >= 2
+    elif has_hero_cap:
+        evolution_unlocked = False
+        hero_unlocked = evo >= 2
+    elif has_evo_cap:
+        evolution_unlocked = evo >= 1
+        hero_unlocked = False
+    else:
+        # Fallback without icon hints (legacy payloads)
+        evolution_unlocked = evo == 1 or evo >= 3
+        hero_unlocked = evo >= 2
 
     return {
         "evolution_unlocked": evolution_unlocked,
@@ -104,8 +124,25 @@ def _resolve_icons(owned_raw: dict | None, info: dict) -> tuple[str, str, str]:
     icons = (owned_raw or {}).get("iconUrls") or {}
     api_base = icons.get("medium") or icons.get("small") or info.get("icon") or ""
     base = resolve_card_icon(name, api_base) if name else api_base
-    evo = icons.get("evolutionMedium") or info.get("evolution_icon") or base
-    hero = icons.get("heroMedium") or info.get("hero_icon") or base
+    evo = (
+        icons.get("evolutionMedium")
+        or info.get("evolution_icon")
+        or ""
+    )
+    hero = (
+        icons.get("heroMedium")
+        or info.get("hero_icon")
+        or ""
+    )
+    # Keep evo/hero distinct for split art — never collapse both to the same fallback.
+    if not evo:
+        evo = base
+    if not hero:
+        hero = base
+    if evo == hero and info.get("evolution_icon") and info.get("evolution_icon") != hero:
+        evo = str(info.get("evolution_icon"))
+    if evo == hero and info.get("hero_icon") and info.get("hero_icon") != evo:
+        hero = str(info.get("hero_icon"))
     return base, evo, hero
 
 
@@ -207,7 +244,9 @@ def build_collection_stats_from_player(player: dict) -> dict:
         display = to_display_level(int(api_level) if api_level is not None else None, rarity)
         star_raw = raw.get("starLevel")
         star_level = int(star_raw) if star_raw is not None else None
-        upgrades = _parse_card_upgrades(raw)
+        name = raw.get("name") or ""
+        info = get_card_info(name) if name else None
+        upgrades = _parse_card_upgrades(raw, info)
         rows.append({
             "owned": True,
             "level": display,
@@ -252,7 +291,7 @@ async def build_player_collection(player: dict) -> dict:
         max_evo_catalog = int(info.get("max_evolution_level") or 0)
 
         if owned_raw:
-            upgrades = _parse_card_upgrades(owned_raw)
+            upgrades = _parse_card_upgrades(owned_raw, info)
             evo = int(owned_raw.get("evolutionLevel") or 0)
             max_evo = int(owned_raw.get("maxEvolutionLevel") or max_evo_catalog)
             base, icon_evo, icon_hero = _resolve_icons(owned_raw, info)
@@ -323,7 +362,7 @@ async def build_player_collection(player: dict) -> dict:
         info = get_card_info(card_en) or {}
         owned_raw = player_cards.get(_normalize_name(card_en))
         base, icon_evo, icon_hero = _resolve_icons(owned_raw, info or {})
-        upgrades = _parse_card_upgrades(owned_raw) if owned_raw else {
+        upgrades = _parse_card_upgrades(owned_raw, info) if owned_raw else {
             "evolution_unlocked": False,
             "hero_unlocked": False,
             "evolution_stat": False,

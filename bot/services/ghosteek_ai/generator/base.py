@@ -1,4 +1,4 @@
-"""ResponseGenerator — интерфейс для Template / Qwen генераторов.
+"""ResponseGenerator — интерфейс для Template / Ollama / Qwen.
 
 Модель не подключена. По умолчанию используется TemplateResponseGenerator.
 """
@@ -21,5 +21,6 @@ class ResponseGenerator(Protocol):
 
 # Имена бэкендов для factory (без подключения модели)
 GENERATOR_TEMPLATE = "template"
+GENERATOR_OLLAMA = "ollama"
 GENERATOR_QWEN = "qwen"
 DEFAULT_GENERATOR = GENERATOR_TEMPLATE
