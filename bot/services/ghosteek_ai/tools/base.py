@@ -14,6 +14,7 @@ from bot.services.ghosteek_ai.tools.schema import (
     STANDARD_OUTPUT_SCHEMA,
     ToolCall,
     ToolDefinition,
+    is_valid_json_schema_object,
 )
 
 
@@ -81,6 +82,28 @@ class ToolRegistry:
     def has(self, name: str) -> bool:
         return name in self._tools
 
+    def validate_schemas(self) -> list[str]:
+        """Вернуть список ошибок схем. Пустой список = все tools готовы к LLM."""
+        errors: list[str] = []
+        for name, tool in self._tools.items():
+            if not tool.name:
+                errors.append(f"{name}: empty tool.name")
+            if not is_valid_json_schema_object(tool.input_schema):
+                errors.append(f"{name}: invalid input_schema (need type=object + properties)")
+            if not is_valid_json_schema_object(tool.output_schema):
+                errors.append(f"{name}: invalid output_schema (need type=object + properties)")
+            # output должен быть STANDARD envelope (или совместимый)
+            out_props = (tool.output_schema or {}).get("properties") or {}
+            for key in ("ok", "data", "error_code"):
+                if key not in out_props:
+                    errors.append(f"{name}: output_schema missing property '{key}'")
+        return errors
+
+    def assert_llm_ready(self) -> None:
+        errors = self.validate_schemas()
+        if errors:
+            raise ValueError("Tools not LLM-ready:\n- " + "\n- ".join(errors))
+
 
 class ToolCaller:
     """Исполняет ToolCall / Plan, обновляя единый AIContext."""
@@ -96,7 +119,7 @@ class ToolCaller:
                 ok=False,
                 error_code="UNKNOWN_TOOL",
                 error_params={"name": call.name},
-            )
+            ).normalized(call_id=call.id)
             ContextBuilder.apply_tool_result(ctx, result)
             return result
 
@@ -119,6 +142,7 @@ class ToolCaller:
         result = await tool.execute(ctx)
         if not result.tool:
             result.tool = tool.name
+        result = result.normalized(call_id=call.id or result.call_id)
         ContextBuilder.apply_tool_result(ctx, result)
         return result
 

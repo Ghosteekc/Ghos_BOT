@@ -383,6 +383,11 @@ def calculate_deck_synergy(cards: list[str]) -> tuple[float, list[str]]:
     """Оценка внутренней синергии колоды 0–100 и короткие строки на русском.
 
     Адаптер к DeckSynergyEvaluation: core + roles + gameplan − conflicts.
+
+    .. deprecated::
+        Для полной оценки колоды используйте
+        ``DeckEvaluator.evaluate(...).synergy`` / ``EvaluationReport``.
+        Функция сохранена для совместимости и внутренних осей.
     """
     from bot.services.deck_synergy import evaluate_deck_synergy
 

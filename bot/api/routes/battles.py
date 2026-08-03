@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from bot.api.deps import require_linked_player, require_subscription
 from bot.services.battle_opponent import resolve_opponent_fields
 from bot.api.schemas import (
+    BattleCoachResponse,
     BattleDetailResponse,
     TacticalDangerCard,
     TacticalMatchupResponse,
@@ -17,6 +18,7 @@ from bot.api.schemas import (
     BattleHistoryClearResponse,
     BattleListResponse,
     BattleSummary,
+    CoachInsightResponse,
     DeckCardInfo,
     DeckStatsResponse,
     KeyCardEntry,
@@ -206,6 +208,38 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
             explanations=rep.explanations,
         )
 
+    def _coach_insight(item) -> CoachInsightResponse | None:
+        if item is None:
+            return None
+        return CoachInsightResponse(
+            title=item.title,
+            text=item.text,
+            evidence=list(item.evidence),
+            confidence=item.confidence,
+        )
+
+    battle_coach = None
+    if analysis.battle_coach is not None:
+        bc = analysis.battle_coach
+        battle_coach = BattleCoachResponse(
+            main_mistakes=[
+                CoachInsightResponse(
+                    title=m.title,
+                    text=m.text,
+                    evidence=list(m.evidence),
+                    confidence=m.confidence,
+                )
+                for m in bc.main_mistakes
+            ],
+            best_moment=_coach_insight(bc.best_moment),
+            turning_point=_coach_insight(bc.turning_point),
+            outcome_decider=_coach_insight(bc.outcome_decider),
+            danger_moment=_coach_insight(bc.danger_moment),
+            counterfactual=_coach_insight(bc.counterfactual),
+            data_notes=list(bc.data_notes),
+            sufficient=bc.sufficient,
+        )
+
     return BattleDetailResponse(
         index=index,
         won=analysis.won,
@@ -260,6 +294,7 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
             if analysis.match_plan is not None
             else None
         ),
+        battle_coach=battle_coach,
     )
 
 

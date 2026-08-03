@@ -12,6 +12,7 @@ from bot.api.schemas import (
 )
 from bot.models.database import User
 from bot.services.ghosteek_ai import ask_ghosteek_ai
+from bot.services.ghosteek_ai.conversation.manager import ConversationManager
 from bot.services.ghosteek_ai.session_context import clear_session
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -42,8 +43,22 @@ async def ask_ai(
     )
 
 
+@router.get("/session")
+async def get_ai_session(user: User = Depends(require_subscription)) -> dict:
+    """Read-only: история ConversationManager для UI-чата (без изменения состояния)."""
+    session = ConversationManager.get(user.telegram_id)
+    if session is None:
+        return {"ok": True, "exists": False, "messages": [], "session": None}
+    return {
+        "ok": True,
+        "exists": True,
+        "messages": session.recent_messages_public(limit=40),
+        "session": session.to_public(),
+    }
+
+
 @router.delete("/session")
 async def clear_ai_session(user: User = Depends(require_subscription)) -> dict:
-    """Очистить Session Context текущего пользователя (конец сессии на /ai)."""
+    """Очистить Session Context текущего пользователя (кнопка «Начать новый разговор»)."""
     clear_session(user.telegram_id)
     return {"ok": True, "cleared": True}

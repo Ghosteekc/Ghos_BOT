@@ -7,7 +7,7 @@ from typing import Any
 from bot.models.database import User
 from bot.services.ghosteek_ai.context.builder import ContextBuilder
 from bot.services.ghosteek_ai.conversation.manager import ConversationManager
-from bot.services.ghosteek_ai.generator.response import generate_response
+from bot.services.ghosteek_ai.generator.factory import get_response_generator
 from bot.services.ghosteek_ai.intents import detect_intent
 from bot.services.ghosteek_ai.models import GhosteekAiAction, GhosteekAiResponse
 from bot.services.ghosteek_ai.planner.planner import Planner
@@ -16,6 +16,9 @@ from bot.services.ghosteek_ai.tools.base import ToolCaller, get_default_registry
 
 _REGISTRY = get_default_registry()
 _CALLER = ToolCaller(_REGISTRY)
+# Default generator — template. Qwen не подключен.
+# HOOK: get_response_generator("qwen") после подключения модели.
+_GENERATOR = get_response_generator("template")
 
 
 async def ask_ghosteek_ai(
@@ -65,7 +68,8 @@ async def ask_ghosteek_ai(
     tool_results = await _CALLER.execute_plan(plan, ai_context)
     tool_names = [tr.tool for tr in tool_results]
 
-    raw_answer = generate_response(ai_context)
+    # HOOK_RESPONSE_GENERATOR: заменить на get_response_generator("qwen") при подключении LLM
+    raw_answer = _GENERATOR.generate(ai_context)
     answer = SafetyLayer.apply(raw_answer, ai_context)
 
     intent_name = ai_context.intent.request

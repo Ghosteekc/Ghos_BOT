@@ -195,6 +195,24 @@ class MatchPlanResponse(BaseModel):
     win_condition_window: str = ""
 
 
+class CoachInsightResponse(BaseModel):
+    title: str
+    text: str
+    evidence: list[str] = []
+    confidence: str = "medium"  # high | medium | low | insufficient
+
+
+class BattleCoachResponse(BaseModel):
+    main_mistakes: list[CoachInsightResponse] = []
+    best_moment: CoachInsightResponse | None = None
+    turning_point: CoachInsightResponse | None = None
+    outcome_decider: CoachInsightResponse | None = None
+    danger_moment: CoachInsightResponse | None = None
+    counterfactual: CoachInsightResponse | None = None
+    data_notes: list[str] = []
+    sufficient: bool = False
+
+
 class BattleDetailResponse(BaseModel):
     index: int
     won: bool
@@ -222,6 +240,7 @@ class BattleDetailResponse(BaseModel):
     opponent_elixir: ElixirEfficiencyResponse | None = None
     match_difficulty: MatchDifficultyResponse | None = None
     match_plan: MatchPlanResponse | None = None
+    battle_coach: BattleCoachResponse | None = None
 
 
 class OpponentEntry(BaseModel):

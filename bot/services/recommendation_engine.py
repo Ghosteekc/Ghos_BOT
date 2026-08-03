@@ -204,6 +204,7 @@ class RecommendationResult:
     risk_assessment: RiskAssessment
     origin: str = DeckOrigin.PLAYER.value
     coaching: DeckCoaching | None = None
+    evaluation_report: object | None = None  # EvaluationReport — единый слой оценки
 
     def to_dict(self) -> dict:
         """Полный внутренний снимок (логирование / режим разработчика)."""
@@ -212,6 +213,7 @@ class RecommendationResult:
                 return None
             return asdict(r)
 
+        report = self.evaluation_report
         return {
             "intent": {
                 "archetype": self.intent.archetype,
@@ -225,6 +227,7 @@ class RecommendationResult:
                 "attack_bias": self.intent.attack_bias,
             },
             "game_plan": self.game_plan.to_dict(),
+            "evaluation_report": report.to_dict() if report is not None else None,
             "balance_issues": {
                 "hard": list(self.balance_issues.hard),
                 "soft": list(self.balance_issues.soft),
@@ -318,6 +321,9 @@ class RecommendationResult:
                 "attack_bias": self.intent.attack_bias,
             },
             "game_plan": self.game_plan.to_dict(),
+            "evaluation_report": (
+                self.evaluation_report.to_dict() if self.evaluation_report is not None else None
+            ),
             "balance_issues": {
                 "hard": [],
                 "soft": [],
@@ -1292,6 +1298,7 @@ class RecommendationEngine:
                 ),
                 origin=origin_val,
                 coaching=None,
+                evaluation_report=None,
             )
             if use_cache:
                 recommendation_cache.put(cache_key, result)
@@ -1387,6 +1394,14 @@ class RecommendationEngine:
         )
         risk = _risk_assessment(start_balance, game_plan, open_cats)
 
+        from bot.services.deck_evaluator import DeckEvaluator
+
+        evaluation = DeckEvaluator.evaluate(
+            original,
+            archetype=intent.archetype,
+            db=db,
+        )
+
         result = RecommendationResult(
             intent=intent,
             game_plan=game_plan,
@@ -1397,6 +1412,7 @@ class RecommendationEngine:
             risk_assessment=risk,
             origin=origin_val,
             coaching=coaching,
+            evaluation_report=evaluation,
         )
         if use_cache:
             recommendation_cache.put(cache_key, result)

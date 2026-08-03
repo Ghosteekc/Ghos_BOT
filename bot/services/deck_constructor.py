@@ -7,7 +7,6 @@ Stage 2 (fallback): Core Conflict Analysis — только если нет ка
 from __future__ import annotations
 
 from bot.services.card_icons import deck_card_info_from_parsed, normalize_deck_upgrades
-from bot.services.card_matchups import calculate_deck_synergy
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_registry import build_deck_share_link, get_card_info
 from bot.services.counter_engine import _get_arena_pool
@@ -108,6 +107,7 @@ def _build_deck_entry(
     synergy_notes: list[str],
     balanced: bool = True,
     score_breakdown: dict | None = None,
+    evaluation_report: dict | None = None,
     is_alternative: bool = False,
 ) -> dict | None:
     core_names = [c["name"] for c in core_parsed]
@@ -137,7 +137,11 @@ def _build_deck_entry(
 
     stats = analyze_deck(deck_names)
     category = _category_from_archetype(archetype)
-    total = score_breakdown.get("total", 0) if score_breakdown else 0
+    # Единый total из EvaluationReport; legacy score_breakdown — fallback.
+    if evaluation_report and "total_score" in evaluation_report:
+        total = float(evaluation_report["total_score"])
+    else:
+        total = score_breakdown.get("total", 0) if score_breakdown else 0
     desc = f"Синергия {round(synergy_score, 0):.0f}% · баланс {round(total, 0):.0f} · эликсир {stats.avg_elixir}"
     if is_alternative:
         desc = "Альтернатива (ядро без конфликтующей карты) · " + desc
@@ -147,7 +151,9 @@ def _build_deck_entry(
         "name": name,
         "cards": [deck_card_info_from_parsed(c, slot=i) for i, c in enumerate(out_parsed)],
         "synergy_score": round(synergy_score, 1),
-        "total_score": round(total * 0.5 + synergy_score * 0.3 + confidence * 0.2, 1),
+        "total_score": round(total, 1) if evaluation_report else round(
+            total * 0.5 + synergy_score * 0.3 + confidence * 0.2, 1
+        ),
         "synergy_notes": synergy_notes[:4],
         "avg_elixir": stats.avg_elixir,
         "deck_link": build_deck_share_link(deck_names),
@@ -157,7 +163,8 @@ def _build_deck_entry(
         "archetype": archetype,
         "confidence": round(confidence, 1),
         "balanced": balanced,
-        "score_breakdown": score_breakdown,
+        "score_breakdown": score_breakdown,  # Deprecated — см. evaluation_report
+        "evaluation_report": evaluation_report,
         "is_alternative": is_alternative,
     }
 
@@ -185,7 +192,31 @@ def _enrich_with_recommendation(
     entry["improvements"] = []
     entry["game_plan"] = rec.game_plan.to_dict()
     entry["recommendation"] = rec.to_public_dict()
+    if entry.get("evaluation_report") is None and rec.evaluation_report is not None:
+        entry["evaluation_report"] = rec.evaluation_report.to_dict()
     return entry
+
+
+def _score_breakdown_from_evaluation(report) -> dict:
+    """Адаптер EvaluationReport → legacy score_breakdown для неизменного API."""
+    details = report.matchup_coverage.details
+    elixir_axis = report.elixir_profile.details.get(
+        "axis_elixir",
+        report.elixir_profile.score,
+    )
+    return {
+        "synergy": round(report.synergy.score, 1),
+        "offense": round(float(details.get("offense", 0.0)), 1),
+        "defense": round(float(details.get("defense", 0.0)), 1),
+        "anti_air": round(float(details.get("anti_air", 0.0)), 1),
+        "anti_swarm": round(float(details.get("anti_swarm", 0.0)), 1),
+        "spell_balance": round(report.spell_balance.score, 1),
+        "elixir": round(float(elixir_axis), 1),
+        "archetype_fit": round(report.archetype_fit.score, 1),
+        "total": round(report.total_score, 1),
+        "hard_issues": list(report.hard_constraints.issues),
+        "soft_issues": list(report.soft_constraints.issues),
+    }
 
 
 def _entries_from_results(
@@ -202,10 +233,14 @@ def _entries_from_results(
     for result in built:
         if not any(is_attack_win(c) for c in result.deck):
             continue
-        synergy_score, synergy_notes = calculate_deck_synergy(result.deck)
-        builder_score = (
-            result.score_breakdown.total if result.score_breakdown else None
-        )
+        report = result.evaluation
+        if report is None:
+            continue
+        # API-поля synergy_score / score_breakdown без изменений контракта —
+        # заполняются из EvaluationReport (Builder больше их не отдаёт).
+        synergy_score = float(report.synergy.score)
+        synergy_notes = list(report.synergy.notes)
+        builder_score = float(report.total_score)
         entry = _build_deck_entry(
             core_parsed,
             result.deck,
@@ -213,10 +248,11 @@ def _entries_from_results(
             name="",
             archetype=result.archetype,
             confidence=result.confidence,
-            synergy_score=synergy_score or result.synergy_score,
+            synergy_score=synergy_score,
             synergy_notes=synergy_notes,
             balanced=result.balanced,
-            score_breakdown=result.score_breakdown.as_dict() if result.score_breakdown else None,
+            score_breakdown=_score_breakdown_from_evaluation(report),
+            evaluation_report=report.to_dict(),
             is_alternative=is_alternative,
         )
         if entry:

@@ -7,13 +7,10 @@ import os
 from dataclasses import dataclass
 
 from bot.services.card_data import WIN_CONDITIONS, card_has_role, get_card_elixir
-from bot.services.card_matchups import calculate_deck_synergy, synergy_between
+from bot.services.card_matchups import synergy_between
 from bot.services.deck_builder.balance import (
-    ScoreBreakdown,
-    compute_score_breakdown,
     finalize_deck as balance_finalize_deck,
     is_attack_win,
-    is_playable_balanced,
     is_spell,
 )
 from bot.services.deck_builder.constants import (
@@ -33,6 +30,7 @@ from bot.services.deck_builder.constants import (
     WEIGHT_SYNERGY,
 )
 from bot.services.deck_builder.loader import DeckDatabase, DeckRecord, get_database
+from bot.services.deck_evaluator import EvaluationReport
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +67,11 @@ class BuildResult:
     deck: list[str]
     archetype: str
     average_elixir: float
-    synergy_score: float
     confidence: float
     source_deck_id: str | None = None
     balanced: bool = True
-    score_breakdown: ScoreBreakdown | None = None
     validation: object | None = None
-
+    evaluation: EvaluationReport | None = None
 
 @dataclass
 class ScoredDeck:
@@ -234,28 +230,25 @@ def _rank_similar_decks(
     return scored[:limit]
 
 
-def _build_score_breakdown(
-    deck: list[str],
-    core: list[str],
-    db: DeckDatabase,
-    archetype: str,
-) -> ScoreBreakdown:
-    return compute_score_breakdown(deck, db, core, archetype, pair_synergy=lambda a, b: _pair_synergy(db, a, b))
-
-
 def _result_balanced(deck: list[str], core: list[str], db: DeckDatabase, archetype: str) -> bool:
+    """Проверка играбельности через EvaluationReport (единый источник)."""
     from bot.services.deck_builder.win_plan_check import evaluate_win_plan
+    from bot.services.deck_evaluator import DeckEvaluator
 
     if not evaluate_win_plan(deck, db, archetype).complete:
         return False
-    breakdown = _build_score_breakdown(deck, core, db, archetype)
+    report = DeckEvaluator.evaluate(deck, core=core, archetype=archetype, db=db)
+    if not report.hard_constraints.passed:
+        return False
     core_avg = sum(
         _pair_synergy(db, c, d)
         for c in core
         for d in deck
         if c != d
     ) / max(len(core) * max(len(deck) - 1, 1), 1)
-    return is_playable_balanced(breakdown, core_synergy_avg=core_avg)
+    if core_avg < 62.0:
+        return False
+    return report.total_score >= 58.0
 
 
 def _validate_variant(
@@ -552,16 +545,15 @@ def _candidate_pool(
 
 
 def _result_rank(result: BuildResult, decision) -> float:
-    """Одна формула выбора победителя после полной проверки кандидата."""
+    """Одна формула выбора победителя: только EvaluationReport.total_score."""
     from bot.services.deck_builder.constructor_decision import result_decision_bonus
 
-    total = result.score_breakdown.total if result.score_breakdown else 0.0
+    total = float(result.evaluation.total_score) if result.evaluation else 0.0
     plan = result.validation.win_plan if result.validation else None
     plan_bonus = 12.0 if plan and plan.complete else 0.0
     pressure_bonus = 5.0 if plan and plan.constant_pressure and plan.counterattack else 0.0
     return (
-        total * 0.45
-        + result.synergy_score * 0.25
+        total * 0.75
         + result.confidence * 0.15
         + result_decision_bonus(result.deck, decision) * 0.10
         + plan_bonus
@@ -661,18 +653,16 @@ def build_deck_from_core(
         if not validation.stable:
             rejected.append((reason, validation.issues))
             continue
-        synergy_score, _ = calculate_deck_synergy(trial)
         confidence = source.confidence if source else 35.0
         accepted.append(BuildResult(
             deck=trial,
             archetype=final_archetype,
             average_elixir=_avg_elixir(trial, db),
-            synergy_score=round(synergy_score, 1),
             confidence=round(confidence, 1),
             source_deck_id=source.record.id if source else None,
             balanced=True,
-            score_breakdown=validation.score_breakdown,
             validation=validation,
+            evaluation=validation.evaluation,
         ))
 
     accepted.sort(key=lambda result: -_result_rank(result, decision))
@@ -725,17 +715,15 @@ def build_multiple_decks(
         if not validation.stable:
             rejected.append((reason, validation.issues))
             continue
-        synergy_score, _ = calculate_deck_synergy(deck)
         results.append(BuildResult(
             deck=deck,
             archetype=final_archetype,
             average_elixir=_avg_elixir(deck, db),
-            synergy_score=round(synergy_score, 1),
             confidence=round(source.confidence if source else 35.0, 1),
             source_deck_id=source.record.id if source else None,
             balanced=True,
-            score_breakdown=validation.score_breakdown,
             validation=validation,
+            evaluation=validation.evaluation,
         ))
 
     results = _dedupe_build_results(results)

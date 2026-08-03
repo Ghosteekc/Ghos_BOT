@@ -24,6 +24,7 @@ from bot.services.deck_analyzer import (
     extract_deck,
     find_opponent_threats,
 )
+from bot.services.battle_coach import BattleCoachReport, build_battle_coach
 from bot.services.elixir_efficiency import ElixirEfficiencyAnalyzer, ElixirEfficiencyReport
 from bot.services.match_difficulty import MatchDifficultyReport
 from bot.services.match_plan import MatchPlanBuilder, MatchPlanReport
@@ -93,7 +94,8 @@ class EnhancedBattleAnalysis(BattleAnalysis):
     opponent_elixir: ElixirEfficiencyReport | None = None
     match_difficulty: MatchDifficultyReport | None = None
     match_plan: MatchPlanReport | None = None
-
+    battle_coach: BattleCoachReport | None = None
+    evaluation_report: object | None = None  # EvaluationReport — оценка колоды игрока
 
 def _generic_counters(threat: str) -> list[str]:
     if threat in AIR_CARDS or card_has_role(threat, "air"):
@@ -506,6 +508,49 @@ def analyze_battle_enhanced(
         )
         match_plan = MatchPlanBuilder.build(user_deck, opp_deck, tactical=tactical)
 
+    evaluation_report = None
+    if len(user_deck) == 8:
+        from bot.services.deck_evaluator import DeckEvaluator
+
+        evaluation_report = DeckEvaluator.evaluate(
+            user_deck,
+            opponent=opp_deck if len(opp_deck) == 8 else None,
+        )
+
+    tactical_out = tactical if tactical is not None and tactical.has_content() else None
+    user_elixir_out = user_elixir if user_elixir is not None and len(user_deck) >= 8 else None
+    opponent_elixir_out = (
+        opponent_elixir if opponent_elixir is not None and len(opp_deck) >= 8 else None
+    )
+    match_difficulty_out = (
+        match_difficulty
+        if match_difficulty is not None and len(user_deck) >= 8 and len(opp_deck) >= 8
+        else None
+    )
+    match_plan_out = match_plan if match_plan is not None and match_plan.has_content() else None
+
+    battle_coach = build_battle_coach(
+        won=base.won,
+        user_deck=user_deck,
+        opponent_deck=opp_deck,
+        threats=list(base.opponent_threats),
+        missing_counters=list(base.counter_cards_missing),
+        outcome_summary=outcome_summary,
+        matchup_score=base.matchup_score,
+        duration=duration,
+        crowns_user=crowns_user,
+        crowns_opp=crowns_opp,
+        crown_score=crown_score,
+        tactical=tactical_out,
+        match_plan=match_plan_out,
+        match_difficulty=match_difficulty_out,
+        user_elixir=user_elixir_out,
+        opponent_elixir=opponent_elixir_out,
+        user_key_cards=user_key_cards,
+        opponent_key_cards=opponent_key_cards,
+        low_impact_cards=low_impact,
+    )
+
     return EnhancedBattleAnalysis(
         won=base.won,
         user_deck=base.user_deck,
@@ -522,15 +567,11 @@ def analyze_battle_enhanced(
         opponent_key_cards=opponent_key_cards,
         low_impact_cards=low_impact,
         crown_score=crown_score,
-        tactical_matchup=tactical if tactical is not None and tactical.has_content() else None,
-        user_elixir=user_elixir if user_elixir is not None and len(user_deck) >= 8 else None,
-        opponent_elixir=(
-            opponent_elixir if opponent_elixir is not None and len(opp_deck) >= 8 else None
-        ),
-        match_difficulty=(
-            match_difficulty
-            if match_difficulty is not None and len(user_deck) >= 8 and len(opp_deck) >= 8
-            else None
-        ),
-        match_plan=match_plan if match_plan is not None and match_plan.has_content() else None,
+        tactical_matchup=tactical_out,
+        user_elixir=user_elixir_out,
+        opponent_elixir=opponent_elixir_out,
+        match_difficulty=match_difficulty_out,
+        match_plan=match_plan_out,
+        battle_coach=battle_coach if battle_coach.has_content() else None,
+        evaluation_report=evaluation_report,
     )

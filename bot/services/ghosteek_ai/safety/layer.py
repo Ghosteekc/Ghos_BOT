@@ -8,14 +8,14 @@ from bot.services.ghosteek_ai.constraints import (
     sanitize_answer,
 )
 from bot.services.ghosteek_ai.models import AIContext
-from bot.services.ghosteek_ai.voice import PERSONA, assert_coach_voice
+from bot.services.ghosteek_ai.voice import PERSONA, SYSTEM_PROMPT, assert_coach_voice, ensure_coach_ending
 
 
 class SafetyLayer:
     """Факты / запреты / стиль / длина / терминология.
 
     TODO(Qwen): усилить hallucination check против AIContext (сверка чисел
-    score/synergy только если они есть в ctx.data).
+    score/synergy только если они есть в ctx.data). Использовать SYSTEM_PROMPT.
     """
 
     MAX_CHARS = 3500
@@ -24,7 +24,7 @@ class SafetyLayer:
     def apply(cls, text: str, ctx: AIContext | None = None) -> str:
         del ctx  # reserved for fact-check against AIContext
         out = enforce_answer(text)
-        out = assert_coach_voice(out)
+        out = ensure_coach_ending(assert_coach_voice(out))
         if len(out) > cls.MAX_CHARS:
             out = out[: cls.MAX_CHARS - 1].rstrip() + "…"
         return out
@@ -34,5 +34,6 @@ __all__ = [
     "SafetyLayer",
     "CONSTRAINTS_SUMMARY",
     "PERSONA",
+    "SYSTEM_PROMPT",
     "sanitize_answer",
 ]

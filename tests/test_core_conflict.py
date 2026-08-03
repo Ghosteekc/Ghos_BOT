@@ -8,7 +8,31 @@ from bot.services.deck_builder.core_conflict import (
     is_quality_result,
 )
 from bot.services.deck_builder.builder import BuildResult
-from bot.services.deck_builder.balance import ScoreBreakdown
+from bot.services.deck_evaluator.models import (
+    AxisScore,
+    ConstraintScore,
+    EvaluationReport,
+)
+
+
+def _fake_evaluation(total: float) -> EvaluationReport:
+    zero = AxisScore(score=0.0)
+    ok = ConstraintScore(passed=True, score=100.0)
+    return EvaluationReport(
+        deck=("Hog Rider", "Ice Golem", "Musketeer", "Cannon", "Ice Spirit", "Skeletons", "The Log", "Fireball"),
+        archetype="Cycle",
+        hard_constraints=ok,
+        soft_constraints=ok,
+        role_coverage=zero,
+        spell_balance=zero,
+        cycle_quality=zero,
+        win_plan=zero,
+        synergy=AxisScore(score=70.0),
+        matchup_coverage=zero,
+        archetype_fit=zero,
+        elixir_profile=zero,
+        total_score=total,
+    )
 
 
 def _fake_result(total: float) -> BuildResult:
@@ -16,9 +40,8 @@ def _fake_result(total: float) -> BuildResult:
         deck=["Hog Rider", "Ice Golem", "Musketeer", "Cannon", "Ice Spirit", "Skeletons", "The Log", "Fireball"],
         archetype="Cycle",
         average_elixir=2.9,
-        synergy_score=70.0,
         confidence=50.0,
-        score_breakdown=ScoreBreakdown(total=total),
+        evaluation=_fake_evaluation(total),
     )
 
 
@@ -48,9 +71,8 @@ def test_conflict_picks_max_gain_card(monkeypatch):
             deck=list(core) + ["Ice Spirit", "Skeletons", "The Log", "Cannon", "Fireball"][: 8 - len(core)],
             archetype="Cycle",
             average_elixir=3.0,
-            synergy_score=60.0,
             confidence=40.0,
-            score_breakdown=ScoreBreakdown(total=total),
+            evaluation=_fake_evaluation(total),
         )
 
     monkeypatch.setattr(

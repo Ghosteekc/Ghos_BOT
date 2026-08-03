@@ -53,9 +53,14 @@ def _first(*candidates: Any) -> str:
 class TemplateResponseGenerator:
     """Генерация ответа из AIContext через coach-шаблоны.
 
-    TODO(Qwen): заменить generate() на вызов LLM с system prompt + AIContext JSON,
-    сохранив тот же вход/выход. Safety Layer остаётся снаружи.
+    Реализует ResponseGenerator Protocol.
+    Alias: TemplateGenerator.
+
+    TODO(Qwen): рядом QwenResponseGenerator; factory переключает backend.
+    Модель не подключать в этом классе.
     """
+
+    backend = "template"
 
     def generate(self, ctx: AIContext) -> str:
         if not ctx.ok:
@@ -182,12 +187,12 @@ class TemplateResponseGenerator:
                 hint_parts.append("У меня есть краткое резюме нашего разговора.")
             tip = " ".join(hint_parts) if hint_parts else ""
             return coach_reply(
-                "Давай уточним — так совет будет точнее.",
-                why=tip or "Нужен конкретный запрос.",
-                action="Могу: собрать колоду, разобрать колоду, улучшить состав, "
+                "Давай сузим задачу.",
+                why=tip or "Без конкретики получится общий совет — он почти не помогает в бою.",
+                action="Могу: собрать колоду, разобрать состав, улучшить карты, "
                 "разобрать матчап или бой, объяснить карту/механику, "
-                "подсказать по кубкам или против архетипа.",
-                tip="Напиши, что именно нужно — не буду угадывать.",
+                "дать план по кубкам или против архетипа.",
+                tip="Напиши одну цель: что улучшить прямо сейчас.",
             )
         return CLARIFY_PROMPT
 
@@ -212,7 +217,10 @@ class TemplateResponseGenerator:
             eval_data = ctx.evaluation.to_dict()
             merged = {**eval_data, **data} if eval_data.get("rating") or eval_data.get("score") is not None else data
             return self._compose_matchup(merged)
-        return coach_reply("Готово.", tip="Если нужно что-то ещё — скажи конкретнее.")
+        return coach_reply(
+            "Нужна чуть более конкретная задача.",
+            tip="Напиши колоду, матчап, бой или термин — разберём по механике.",
+        )
 
     def _compose_card(self, data: dict[str, Any]) -> str:
         name = data.get("name_ru") or data.get("name") or "Карта"
@@ -221,9 +229,9 @@ class TemplateResponseGenerator:
         card_type = data.get("card_type") or "карта"
         return coach_reply(
             f"{name} — {elixir} эликсира, {card_type}.",
-            why=f"В колоде она обычно работает как: {roles}.",
-            action="Смотри, с чем она синергирует в твоей колоде, а не только «сильная ли карта сама по себе».",
-            tip="Точный урон и HP в бою в данных нет — опирайся на роль и матчапы.",
+            why=f"Её работа в колоде: {roles}. Смотри не «сила сама по себе», а какой трейд и роль она закрывает.",
+            action="Проверь, есть ли у тебя ответ на то, что она бьёт, и синергия с win condition.",
+            tip=f"В бою ставь {name} под задачу роли — не кидай «просто чтобы что-то сделать».",
         )
 
     def _compose_mechanic(self, data: dict[str, Any]) -> str:
@@ -234,22 +242,21 @@ class TemplateResponseGenerator:
         summary = str(data.get("summary") or "")
         example = str(data.get("example") or "")
         tip = str(data.get("tip") or "")
-        lines = [f"{title} — {summary}"]
-        if example:
-            lines.append(f"Пример: {example}")
-        if tip:
-            lines.append(tip)
-        return assert_coach_voice("\n\n".join(lines))
+        return coach_reply(
+            f"{title}: {summary}",
+            why=f"Пример: {example}" if example else "",
+            tip=tip or "В следующем бою назови момент, где это сработало или сломалось — так термин закрепится.",
+        )
 
     def _compose_coach(self, data: dict[str, Any]) -> str:
         topic = data.get("topic")
         if topic == "climb":
             tips = [str(t) for t in (data.get("tips") or []) if t][:3]
-            why = tips[0] if tips else "Стабильность важнее постоянной смены колод."
-            action = tips[1] if len(tips) > 1 else "Закрепи одну колоду и разбери слабые бои."
-            tip = tips[2] if len(tips) > 2 else "После серии поражений сначала разбор боя, потом замены."
+            why = tips[0] if tips else "Стабильный цикл решений важнее постоянной смены колод."
+            action = tips[1] if len(tips) > 1 else "Закрепи одну колоду и разбирай слабые матчапы точечно."
+            tip = tips[2] if len(tips) > 2 else "После 3 поражений подряд — сначала разбор боя, потом замены."
             return coach_reply(
-                "Кубки растут от стабильной колоды и спокойных решений, не от паники.",
+                "Кубки растут от стабильных решений, не от паники после двух лоссов.",
                 why=why,
                 action=action,
                 tip=tip,
@@ -263,9 +270,9 @@ class TemplateResponseGenerator:
         return coach_reply(
             f"Против «{arch}» матчап {rating}"
             + (f" ({score}/100)." if score is not None else "."),
-            why=reason or f"Ориентир — эталонная колода «{arch}».",
-            action=action or "Держи ответы на win condition и не отдавай бесплатный эликсир у моста.",
-            tip="Если хочешь точный план под свой последний бой с этим архетипом — разберём его отдельно.",
+            why=reason or f"Ключ — ответы на win condition «{arch}» и контроль эликсира у моста.",
+            action=action or "Не отдавай бесплатный эликсир у моста и не пускай их win condition без ответа.",
+            tip="В следующем таком матче заранее реши, чем гасишь win condition — и не трать этот ответ раньше времени.",
         )
 
     def _compose_recommendation(self, intent: str, data: dict[str, Any]) -> str:
@@ -287,22 +294,22 @@ class TemplateResponseGenerator:
             if plan.get("needed"):
                 step = _first(plan.get("steps"))
                 return coach_reply(
-                    "Колоду можно усилить точечной заменой.",
-                    why=step or weakness or "Есть слабое место в балансе или синергии.",
-                    action=step or "Сначала закрой самую большую дыру, не меняй всё сразу.",
-                    tip=tip or "После замены сыграй пачку боёв и снова разберём.",
+                    "Усиление — точечная замена, не пересборка с нуля.",
+                    why=step or weakness or "Есть дыра в балансе ролей или синергии.",
+                    action=step or "Закрой самую большую дыру одной картой, остальное не трогай.",
+                    tip=tip or "Сыграй 10–15 боёв на новой карте, потом снова разберём трейды.",
                 )
             return coach_reply(
-                "Критичных замен сейчас не нужно.",
+                "Критических замен сейчас нет.",
                 why=strength
-                or (f"Синергия около {synergy}%." if synergy is not None else "Состав выглядит цельным."),
-                action=how or "Играй чище по плану колоды — это даст больше, чем лишние свапы.",
-                tip=tip or "Если матчап бесит — разберём конкретный бой, а не всю колоду заново.",
+                or (f"Синергия около {synergy}% — состав цельный." if synergy is not None else "Состав уже держится."),
+                action=how or "Выигрыш здесь в чистой игре по плану колоды, а не в свапах.",
+                tip=tip or "Если бесит конкретный матчап — разберём бой, а не всю колоду.",
             )
 
-        verdict = "Колода читается."
+        verdict = "Состав читается по ролям."
         if style:
-            verdict = f"Играй это как {style}."
+            verdict = f"Играй это как {style}: свой темп, свой win condition."
         elif synergy is not None:
             verdict = f"Колода собрана — синергия около {synergy}%."
 
@@ -310,12 +317,12 @@ class TemplateResponseGenerator:
             verdict,
             why=strength
             or (
-                f"Синергия {synergy}%."
+                f"Синергия {synergy}% — связки есть."
                 if synergy is not None
                 else "Состав держится на своих сильных связках."
             ),
-            action=how or weakness or "Дави своим win condition, не разменивайся в минус без причины.",
-            tip=tip or "В следующем бою следи за одним навыком — цикл или трейды.",
+            action=how or weakness or "Дави win condition после плюса по эликсиру, не лезь в минус без причины.",
+            tip=tip or "В следующем бою следи за одним навыком: цикл или трейды.",
         )
 
     def _compose_build(self, data: dict[str, Any]) -> str:
@@ -325,7 +332,7 @@ class TemplateResponseGenerator:
         if not decks:
             return coach_reply(
                 "Пока не собрал вариантов.",
-                why="Мало данных по ядру.",
+                why="Мало данных по ядру — без win condition сборка будет гаданием.",
                 action="Дай win condition или 4 карты ядра.",
                 tip="Пример: «хочу играть через Хога» или 4 карты подряд.",
             )
@@ -354,17 +361,17 @@ class TemplateResponseGenerator:
         if mode == "meta_templates":
             return coach_reply(
                 f"Бери за основу «{label}».",
-                why=f"Это готовый шаблон под {core_txt or 'твой win condition'}."
+                why=f"Шаблон закрывает {core_txt or 'твой win condition'} готовыми ролями."
                 if core_txt
                 else "Это проверенный шаблон под твой win condition.",
                 action=f"Состав: {_ru_list(names)}.",
-                tip=more or "Если хочешь точную сборку под арену — пришли 4 карты ядра.",
+                tip=more or "Сыграй пачку, потом точечно подкрутим ответы на твои проигрышные матчапы.",
             )
 
         return coach_reply(
             f"Собрал вариант: {_ru_list(names)}.",
-            why=f"Ядро {core_txt} закрыто сборкой." if core_txt else "Сборка вокруг твоего ядра.",
-            action="Протестируй 10–15 боёв, потом точечно улучшим.",
+            why=f"Ядро {core_txt} закрыто ролями." if core_txt else "Сборка вокруг твоего ядра.",
+            action="Протестируй 10–15 боёв — смотри трейды, не только винрейт за вечер.",
             tip=more or "Не меняй половину карт после двух поражений.",
         )
 
@@ -378,19 +385,19 @@ class TemplateResponseGenerator:
             ((data.get("match_difficulty") or {}).get("reasons")),
         )
         if not why and data.get("matchup_score") is not None:
-            why = f"Матчап был около {data.get('matchup_score')}/100."
+            why = f"Матчап был около {data.get('matchup_score')}/100 — это про давление составов, не про «рандом»."
         mp = data.get("match_plan") or {}
         action = mp.get("win_condition_window") or _first(data.get("reasons"))
         avoid = mp.get("avoid") or []
         tip = (
-            f"Не делай так: {avoid[0]}."
+            f"В похожем матчапе не делай так: {avoid[0]}"
             if avoid
-            else "Открой полный разбор в истории и повтори один ключевой момент."
+            else "Открой полный разбор и повтори один ключевой момент — цикл или ответ на WC."
         )
         return coach_reply(
             verdict,
-            why=why or "Ключевой момент боя уже в разборе.",
-            action=action or "В следующем таком матчапе держи план из разбора.",
+            why=why or "Ключевой фактор уже в разборе по составу и счёту.",
+            action=action or "В следующем таком матчапе заранее реши, чем гасишь их win condition.",
             tip=tip,
         )
 
@@ -407,18 +414,24 @@ class TemplateResponseGenerator:
         )
         return coach_reply(
             f"Матчап {rating}" + (f" ({score}/100)." if score is not None else "."),
-            why=reason or "Смотри на win condition соперника и твои ответы.",
-            action=action or "Не лезь в лобовую, если у врага готовый ответ.",
-            tip=tip or "Подожди розыгрыша ключевой защиты — потом дави win condition.",
+            why=reason or "Смотри на их win condition и твои ответы — это ось матчапа.",
+            action=action or "Не лезь в лобовую, если у врага готовый ответ и плюс по эликсиру.",
+            tip=tip or "Дождись розыгрыша их ключевой защиты — потом дави win condition.",
         )
 
 
-# Singleton для оркестратора
+# Singleton для оркестратора / тестов
 _default_generator = TemplateResponseGenerator()
+
+# Alias по ТЗ
+TemplateGenerator = TemplateResponseGenerator
 
 
 def generate_response(ctx: AIContext) -> str:
-    return _default_generator.generate(ctx)
+    """Совместимый entrypoint: всегда Template (поведение не меняется)."""
+    from bot.services.ghosteek_ai.generator.factory import get_response_generator
+
+    return get_response_generator("template").generate(ctx)
 
 
 def compose_answer_from_payload(payload: dict[str, Any]) -> str:

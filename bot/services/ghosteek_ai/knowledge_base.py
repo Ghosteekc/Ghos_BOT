@@ -272,11 +272,12 @@ def list_mechanic_titles(*, limit: int = 12) -> list[str]:
 
 
 def format_mechanic_answer(entry: MechanicEntry) -> str:
-    """Короткий ответ тренера: до нескольких предложений, с примером."""
-    parts = [
-        f"{entry.title} — {entry.summary}",
-        f"Пример: {entry.example}",
-    ]
-    if entry.tip:
-        parts.append(entry.tip)
-    return "\n\n".join(parts)
+    """Короткий ответ тренера: суть → пример → практический совет."""
+    from bot.services.ghosteek_ai.voice import coach_reply
+
+    return coach_reply(
+        f"{entry.title}: {entry.summary}",
+        why=f"Пример: {entry.example}",
+        tip=entry.tip
+        or "В следующем бою поймай момент, где это сработало или сломалось — так термин закрепится.",
+    )

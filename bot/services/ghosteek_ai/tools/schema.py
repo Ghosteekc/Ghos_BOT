@@ -47,12 +47,21 @@ COMMON_INPUT_PROPERTIES: dict[str, Any] = {
     },
 }
 
+# Единый envelope ToolResult (все tools обязаны соответствовать)
 STANDARD_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "required": ["ok"],
+    "required": ["tool", "ok", "data", "schema_version"],
+    "additionalProperties": False,
     "properties": {
+        "tool": {
+            "type": "string",
+            "description": "Registered tool name",
+        },
         "ok": {"type": "boolean"},
-        "data": {"type": "object", "description": "Structured tool payload (no player-facing prose)"},
+        "data": {
+            "type": "object",
+            "description": "Structured tool payload (no player-facing prose required)",
+        },
         "error_code": {
             "type": ["string", "null"],
             "description": "Machine error code for Response Generator",
@@ -62,14 +71,26 @@ STANDARD_OUTPUT_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {
                 "type": "object",
+                "required": ["type", "path"],
                 "properties": {
                     "type": {"type": "string"},
                     "path": {"type": "string"},
                 },
+                "additionalProperties": False,
             },
+        },
+        "call_id": {
+            "type": "string",
+            "description": "tool_call_id from Planner / Qwen tool_calls[]",
+        },
+        "schema_version": {
+            "type": "string",
+            "description": "ToolResult schema version",
         },
     },
 }
+
+TOOL_RESULT_SCHEMA_VERSION = "1"  # keep in sync with models.TOOL_RESULT_SCHEMA_VERSION
 
 
 def object_schema(
@@ -88,6 +109,16 @@ def object_schema(
     if description:
         schema["description"] = description
     return schema
+
+
+def is_valid_json_schema_object(schema: dict[str, Any] | None) -> bool:
+    """Минимальная проверка, что у tool есть JSON Schema object."""
+    if not isinstance(schema, dict):
+        return False
+    if schema.get("type") != "object":
+        return False
+    props = schema.get("properties")
+    return isinstance(props, dict)
 
 
 @dataclass(frozen=True)
@@ -119,12 +150,13 @@ class ToolDefinition:
         return self.to_openai_tool()
 
     def to_catalog_entry(self) -> dict[str, Any]:
-        """Внутренний каталог: name + schemas (Planner / docs)."""
+        """Внутренний каталог: name + schemas (Planner / docs / LLM)."""
         return {
             "name": self.name,
             "description": self.description,
             "input_schema": self.input_schema,
             "output_schema": self.output_schema,
+            "parameters": self.input_schema,  # alias for LLM SDKs
         }
 
 
@@ -158,3 +190,20 @@ class ToolCall:
 
     def to_spec_args(self) -> dict[str, Any]:
         return dict(self.arguments)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "arguments": dict(self.arguments),
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "ToolCall":
+        return cls(
+            name=str(raw.get("name") or ""),
+            arguments=dict(raw.get("arguments") or {})
+            if isinstance(raw.get("arguments"), dict)
+            else {},
+            id=str(raw.get("id") or ""),
+        )

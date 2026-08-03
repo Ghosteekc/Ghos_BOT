@@ -1,12 +1,29 @@
 """Единый AIContext — все данные оркестратора в одном объекте.
 
 Tools, Context Builder и Response Generator работают только с AIContext.
+Полная сериализация: to_dict / from_dict (без _user).
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _as_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [c for c in value if isinstance(c, str)]
+
+
+def _as_dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(x) for x in value if isinstance(x, dict)]
 
 
 @dataclass
@@ -18,6 +35,15 @@ class PlayerContext:
     def to_dict(self) -> dict[str, Any]:
         return {"telegram_id": self.telegram_id, "tag": self.tag, "name": self.name}
 
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "PlayerContext":
+        data = _as_dict(raw)
+        return cls(
+            telegram_id=int(data.get("telegram_id") or 0),
+            tag=data.get("tag"),
+            name=data.get("name"),
+        )
+
 
 @dataclass
 class ArenaContext:
@@ -26,6 +52,11 @@ class ArenaContext:
 
     def to_dict(self) -> dict[str, Any]:
         return {"arena_id": self.arena_id, "trophies": self.trophies}
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "ArenaContext":
+        data = _as_dict(raw)
+        return cls(arena_id=data.get("arena_id"), trophies=data.get("trophies"))
 
 
 @dataclass
@@ -45,6 +76,17 @@ class DeckContext:
             "build_mode": self.build_mode,
         }
 
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "DeckContext":
+        data = _as_dict(raw)
+        return cls(
+            cards=_as_str_list(data.get("cards")),
+            opponent_cards=_as_str_list(data.get("opponent_cards")),
+            core=_as_str_list(data.get("core")),
+            built_decks=_as_dict_list(data.get("built_decks")),
+            build_mode=data.get("build_mode"),
+        )
+
 
 @dataclass
 class BattleContext:
@@ -59,6 +101,7 @@ class BattleContext:
     raw: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """Плоский вид для Generator (совместимость: при raw — payload боя)."""
         if self.raw:
             return dict(self.raw)
         return {
@@ -70,6 +113,24 @@ class BattleContext:
             "reasons": list(self.reasons),
             "match_difficulty": self.match_difficulty,
             "match_plan": self.match_plan,
+        }
+
+    def to_state_dict(self) -> dict[str, Any]:
+        """Полное состояние для AIContext.to_dict (round-trip)."""
+        return {
+            "battle_index": self.battle_index,
+            "won": self.won,
+            "opponent_name": self.opponent_name,
+            "matchup_score": self.matchup_score,
+            "outcome_summary": self.outcome_summary,
+            "reasons": list(self.reasons),
+            "match_difficulty": dict(self.match_difficulty)
+            if isinstance(self.match_difficulty, dict)
+            else self.match_difficulty,
+            "match_plan": dict(self.match_plan)
+            if isinstance(self.match_plan, dict)
+            else self.match_plan,
+            "raw": dict(self.raw),
         }
 
     @classmethod
@@ -90,6 +151,33 @@ class BattleContext:
             raw=dict(data),
         )
 
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "BattleContext":
+        data = _as_dict(raw)
+        if not data:
+            return cls()
+        nested_raw = data.get("raw") if isinstance(data.get("raw"), dict) else None
+        # state_dict from to_state_dict / structured payload
+        if nested_raw is not None or any(
+            k in data for k in ("won", "opponent_name", "outcome_summary", "matchup_score")
+        ):
+            return cls(
+                battle_index=data.get("battle_index"),
+                won=data.get("won"),
+                opponent_name=data.get("opponent_name"),
+                matchup_score=data.get("matchup_score"),
+                outcome_summary=data.get("outcome_summary"),
+                reasons=list(data.get("reasons") or []),
+                match_difficulty=data.get("match_difficulty")
+                if isinstance(data.get("match_difficulty"), dict)
+                else None,
+                match_plan=data.get("match_plan")
+                if isinstance(data.get("match_plan"), dict)
+                else None,
+                raw=dict(nested_raw) if nested_raw is not None else {},
+            )
+        return cls.from_data(data)
+
 
 @dataclass
 class RecommendationContext:
@@ -105,6 +193,19 @@ class RecommendationContext:
             "synergy_notes": list(self.synergy_notes),
             "improvement_needed": self.improvement_needed,
         }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "RecommendationContext":
+        data = _as_dict(raw)
+        payload = data.get("recommendation")
+        if not isinstance(payload, dict):
+            payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+        return cls(
+            payload=dict(payload),
+            synergy_score=data.get("synergy_score"),
+            synergy_notes=list(data.get("synergy_notes") or []),
+            improvement_needed=data.get("improvement_needed"),
+        )
 
 
 @dataclass
@@ -134,6 +235,10 @@ class EvaluationContext:
             disadvantages=list(data.get("disadvantages") or []),
         )
 
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "EvaluationContext":
+        return cls.from_data(_as_dict(raw))
+
 
 @dataclass
 class IntentContext:
@@ -156,6 +261,18 @@ class IntentContext:
             "coach_topic": self.coach_topic,
         }
 
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "IntentContext":
+        data = _as_dict(raw)
+        return cls(
+            request=str(data.get("request") or ""),
+            service=str(data.get("service") or ""),
+            deck_intent=_as_dict(data.get("deck_intent")),
+            card_query=data.get("card_query"),
+            mechanic_query=data.get("mechanic_query"),
+            coach_topic=data.get("coach_topic"),
+        )
+
 
 @dataclass
 class GamePlanContext:
@@ -163,6 +280,10 @@ class GamePlanContext:
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.payload)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "GamePlanContext":
+        return cls(payload=_as_dict(raw))
 
 
 @dataclass
@@ -188,6 +309,20 @@ class SessionContext:
             "last_intent": self.last_intent,
         }
 
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "SessionContext":
+        data = _as_dict(raw)
+        return cls(
+            public=_as_dict(data.get("public")),
+            last_deck=_as_str_list(data.get("last_deck")),
+            last_opponent_deck=_as_str_list(data.get("last_opponent_deck")),
+            last_battle_index=data.get("last_battle_index"),
+            last_battle=_as_dict(data.get("last_battle")),
+            last_recommendation=_as_dict(data.get("last_recommendation")),
+            active_topic=data.get("active_topic"),
+            last_intent=data.get("last_intent"),
+        )
+
 
 @dataclass
 class ConversationContext:
@@ -208,6 +343,18 @@ class ConversationContext:
             "active_topic": self.active_topic,
         }
 
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "ConversationContext":
+        data = _as_dict(raw)
+        return cls(
+            summary=str(data.get("summary") or ""),
+            recent_messages=_as_dict_list(data.get("recent_messages")),
+            last_questions=_as_str_list(data.get("last_questions")),
+            last_tools=_as_str_list(data.get("last_tools")),
+            followups=_as_dict_list(data.get("followups")),
+            active_topic=data.get("active_topic"),
+        )
+
 
 @dataclass
 class KnowledgeContext:
@@ -222,6 +369,15 @@ class KnowledgeContext:
             "coach": dict(self.coach),
         }
 
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "KnowledgeContext":
+        data = _as_dict(raw)
+        return cls(
+            mechanic=_as_dict(data.get("mechanic")),
+            card=_as_dict(data.get("card")),
+            coach=_as_dict(data.get("coach")),
+        )
+
 
 @dataclass
 class MetaContext:
@@ -235,6 +391,15 @@ class MetaContext:
             "data": dict(self.data),
             "error_code": self.error_code,
         }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "MetaContext":
+        data = _as_dict(raw)
+        return cls(
+            ready=bool(data.get("ready")),
+            data=_as_dict(data.get("data")),
+            error_code=data.get("error_code"),
+        )
 
 
 @dataclass
@@ -251,6 +416,15 @@ class HistoryContext:
             "turns": list(self.turns),
             "last_analysis": dict(self.last_analysis),
         }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "HistoryContext":
+        data = _as_dict(raw)
+        return cls(
+            summary=str(data.get("summary") or ""),
+            turns=_as_dict_list(data.get("turns")),
+            last_analysis=_as_dict(data.get("last_analysis")),
+        )
 
 
 @dataclass
@@ -290,7 +464,7 @@ class AIContext:
     tool_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     data: dict[str, Any] = field(default_factory=dict)
 
-    # Внутренняя ссылка на User для вызовов доменных сервисов (не для Generator)
+    # Внутренняя ссылка на User для вызовов доменных сервисов (не для Generator / LLM)
     _user: Any = field(default=None, repr=False, compare=False)
 
     # --- Совместимость с Generator / старым плоским API ---
@@ -430,7 +604,7 @@ class AIContext:
         return list(self.session.last_opponent_deck)
 
     def to_public_dict(self) -> dict[str, Any]:
-        """Сериализация для Qwen / отладки."""
+        """Компактная сериализация (совместимость / отладка)."""
         return {
             "player": self.player.to_dict(),
             "arena": self.arena.to_dict(),
@@ -450,9 +624,84 @@ class AIContext:
             "actions": list(self.actions),
         }
 
+    def to_dict(self) -> dict[str, Any]:
+        """Полная сериализация AIContext (без _user) — round-trip через from_dict."""
+        return {
+            "player": self.player.to_dict(),
+            "arena": self.arena.to_dict(),
+            "deck": self.deck.to_dict(),
+            "battle": self.battle.to_state_dict(),
+            "recommendation": self.recommendation.to_dict(),
+            "evaluation": self.evaluation.to_dict(),
+            "intent": self.intent.to_dict(),
+            "game_plan": self.game_plan.to_dict(),
+            "session": self.session.to_dict(),
+            "conversation": self.conversation.to_dict(),
+            "knowledge": self.knowledge.to_dict(),
+            "meta": self.meta.to_dict(),
+            "history": self.history.to_dict(),
+            "raw_message": self.raw_message,
+            "tool_args": dict(self.tool_args),
+            "request_context": dict(self.request_context),
+            "ok": self.ok,
+            "error_code": self.error_code,
+            "error_params": dict(self.error_params),
+            "actions": list(self.actions),
+            "tool_outputs": {k: dict(v) for k, v in self.tool_outputs.items()},
+            "data": dict(self.data),
+        }
 
-# Alias: Generator и тесты ожидают ctx.intent как строку интента запроса.
-# IntentContext лежит в поле intent — для строкового доступа используем helper.
+    def to_llm_dict(self) -> dict[str, Any]:
+        """Контекст для prompt LLM (= полный to_dict, без секретов/_user)."""
+        return self.to_dict()
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "AIContext":
+        data = _as_dict(raw)
+        tool_outputs_raw = data.get("tool_outputs")
+        tool_outputs: dict[str, dict[str, Any]] = {}
+        if isinstance(tool_outputs_raw, dict):
+            for key, val in tool_outputs_raw.items():
+                if isinstance(val, dict):
+                    tool_outputs[str(key)] = dict(val)
+
+        actions_raw = data.get("actions")
+        actions: list[dict[str, str]] = []
+        if isinstance(actions_raw, list):
+            for item in actions_raw:
+                if isinstance(item, dict):
+                    actions.append(
+                        {
+                            "type": str(item.get("type") or "navigate"),
+                            "path": str(item.get("path") or "/"),
+                        }
+                    )
+
+        return cls(
+            player=PlayerContext.from_dict(data.get("player")),
+            arena=ArenaContext.from_dict(data.get("arena")),
+            deck=DeckContext.from_dict(data.get("deck")),
+            battle=BattleContext.from_dict(data.get("battle")),
+            recommendation=RecommendationContext.from_dict(data.get("recommendation")),
+            evaluation=EvaluationContext.from_dict(data.get("evaluation")),
+            intent=IntentContext.from_dict(data.get("intent")),
+            game_plan=GamePlanContext.from_dict(data.get("game_plan")),
+            session=SessionContext.from_dict(data.get("session")),
+            conversation=ConversationContext.from_dict(data.get("conversation")),
+            knowledge=KnowledgeContext.from_dict(data.get("knowledge")),
+            meta=MetaContext.from_dict(data.get("meta")),
+            history=HistoryContext.from_dict(data.get("history")),
+            raw_message=str(data.get("raw_message") or ""),
+            tool_args=_as_dict(data.get("tool_args")),
+            request_context=_as_dict(data.get("request_context")),
+            ok=bool(data.get("ok")),
+            error_code=data.get("error_code"),
+            error_params=_as_dict(data.get("error_params")),
+            actions=actions,
+            tool_outputs=tool_outputs,
+            data=_as_dict(data.get("data")),
+            _user=None,
+        )
 
 
 def get_request_intent(ctx: AIContext) -> str:

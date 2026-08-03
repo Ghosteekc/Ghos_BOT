@@ -1,4 +1,11 @@
-"""Жёсткие и мягкие ограничения баланса колод + score breakdown."""
+"""Жёсткие и мягкие ограничения баланса колод + score breakdown.
+
+.. deprecated::
+    ``ScoreBreakdown`` / ``compute_score_breakdown`` — внутренний legacy-скорер.
+    Для оценки готовой колоды используйте
+    ``bot.services.deck_evaluator.DeckEvaluator.evaluate`` → ``EvaluationReport``.
+    Этот модуль сохраняется для валидации Builder и как источник осей внутри DeckEvaluator.
+"""
 
 from __future__ import annotations
 
@@ -67,6 +74,13 @@ SCORE_WEIGHTS: dict[str, float] = {
 
 @dataclass
 class ScoreBreakdown:
+    """Legacy оси качества колоды.
+
+    .. deprecated::
+        Используйте ``EvaluationReport`` из ``bot.services.deck_evaluator``.
+        Поле сохраняется для параллельной миграции и валидации Builder.
+    """
+
     synergy: float = 0.0
     offense: float = 0.0
     defense: float = 0.0
@@ -343,6 +357,12 @@ def compute_score_breakdown(
     *,
     pair_synergy: PairSynergyFn | None = None,
 ) -> ScoreBreakdown:
+    """Собрать legacy ScoreBreakdown.
+
+    .. deprecated::
+        Внешний код должен вызывать ``DeckEvaluator.evaluate``.
+        Функция остаётся для Builder validation и как внутренний источник осей.
+    """
     ps = pair_synergy or (lambda a, b: default_pair_synergy(db, a, b))
     hard = hard_constraint_issues(deck, db, core)
     soft = soft_balance_issues(deck, db, archetype)

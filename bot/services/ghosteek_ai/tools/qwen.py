@@ -1,7 +1,11 @@
-"""Qwen Tool Calling bridge — tools работают через AIContext."""
+"""Qwen Tool Calling bridge — tools работают через AIContext.
+
+Модель не вызывается. Экспорт schemas + исполнение tool_calls + format для LLM.
+"""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from bot.services.ghosteek_ai.context.ai_context import AIContext
@@ -10,6 +14,7 @@ from bot.services.ghosteek_ai.tools.base import ToolCaller, ToolRegistry, get_de
 
 
 def export_qwen_tools(registry: ToolRegistry | None = None) -> list[dict[str, Any]]:
+    """tools[] для Qwen / OpenAI function calling (JSON Schema parameters)."""
     reg = registry or get_default_registry()
     return reg.qwen_tools()
 
@@ -30,15 +35,40 @@ async def run_qwen_tool_calls(
     return await caller.execute_qwen_tool_calls(raw_tool_calls, ctx)
 
 
-def format_tool_results_for_llm(results: list[ToolResult]) -> list[dict[str, Any]]:
+def format_tool_results_for_llm(
+    results: list[ToolResult],
+    *,
+    call_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Сообщения role=tool для Chat Completions / Qwen.
+
+    content — JSON-строка стандартизированного ToolResult.to_dict().
+    """
     out: list[dict[str, Any]] = []
     for i, r in enumerate(results):
+        normalized = r.normalized()
+        call_id = ""
+        if call_ids and i < len(call_ids) and call_ids[i]:
+            call_id = call_ids[i]
+        elif normalized.call_id:
+            call_id = normalized.call_id
+        else:
+            call_id = f"call_{i}"
+        payload = normalized.normalized(call_id=call_id)
         out.append(
             {
                 "role": "tool",
-                "name": r.tool,
-                "tool_call_id": f"call_{i}",
-                "content": r.to_dict(),
+                "name": payload.tool,
+                "tool_call_id": call_id,
+                "content": payload.to_llm_content(),
             }
         )
     return out
+
+
+def tool_results_to_jsonable(results: list[ToolResult]) -> list[dict[str, Any]]:
+    return [r.normalized().to_dict() for r in results]
+
+
+def dumps_tool_results(results: list[ToolResult]) -> str:
+    return json.dumps(tool_results_to_jsonable(results), ensure_ascii=False)

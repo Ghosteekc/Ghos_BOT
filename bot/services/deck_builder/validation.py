@@ -3,13 +3,14 @@
 Этот модуль не выбирает и не меняет карты. Он отвечает на один вопрос:
 достаточно ли стабилен уже собранный вариант, чтобы Builder мог вернуть его
 пользователю. Если нет, Builder обязан отбросить вариант и построить другой.
+
+Единственный источник числовой оценки — EvaluationReport (DeckEvaluator).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from bot.services.deck_builder.balance import ScoreBreakdown, compute_score_breakdown
 from bot.services.deck_builder.constants import (
     ROLE_ANTI_TANK,
     ROLE_COUNTERPUSH,
@@ -21,6 +22,8 @@ from bot.services.deck_builder.constants import (
 )
 from bot.services.deck_builder.loader import DeckDatabase
 from bot.services.deck_builder.win_plan_check import WinPlanCheck, evaluate_win_plan
+from bot.services.deck_evaluator import EvaluationReport
+from bot.services.deck_evaluator.evaluator import DeckEvaluator
 from bot.services.deck_game_plan import build_game_plan
 from bot.services.deck_intent import DeckIntent
 
@@ -48,7 +51,7 @@ class BuilderValidation:
     archetype_identity: bool
     deck_identity: bool
     win_plan: WinPlanCheck
-    score_breakdown: ScoreBreakdown
+    evaluation: EvaluationReport
     issues: list[str]
 
     @property
@@ -71,16 +74,18 @@ def validate_builder_variant(
     """Проверить готовую колоду по обязательному checklist Builder.
 
     Роли не изобретаются: используются только существующие roles[] и
-    ScoreBreakdown. ``counter_coverage`` — агрегат защиты от воздуха, роя и
-    тяжёлых целей, а не отдельный второй рекомендатель.
+    EvaluationReport. ``counter_coverage`` — агрегат защиты от воздуха, роя и
+    тяжёлых целей из evaluation.matchup_coverage.
     """
-    breakdown = compute_score_breakdown(
+    del required_roles  # сигнал Intent; покрытие ролей уже в EvaluationReport
+
+    evaluation = DeckEvaluator.evaluate(
         deck,
-        db,
-        core,
-        archetype,
-        pair_synergy=pair_synergy,
+        core=core,
+        archetype=archetype,
+        db=db,
     )
+
     # Если пользователь положил win condition в core, это не просто одна из
     # карт: принудительно проверяем план именно вокруг неё.
     plan_intent = replace(intent, archetype=archetype, primary_win=primary_anchor) if primary_anchor else None
@@ -131,9 +136,17 @@ def validate_builder_variant(
     }
     allows_combo_wins = any(pair <= wins for pair in _COMBO_WIN_PAIRS)
     selected_core_wins = wins <= set(core)
-    hard_issues = set(breakdown.hard_issues)
+
+    hard_issues = set(evaluation.hard_constraints.issues)
     if allows_combo_wins or selected_core_wins:
         hard_issues.discard("too_many_wins")
+    soft_issues = set(evaluation.soft_constraints.issues)
+
+    details = evaluation.matchup_coverage.details
+    anti_air = float(details.get("anti_air", evaluation.matchup_coverage.score))
+    anti_swarm = float(details.get("anti_swarm", evaluation.matchup_coverage.score))
+    defense = float(details.get("defense", evaluation.matchup_coverage.score))
+
     anchor_present = not primary_anchor or primary_anchor in deck
     anchor_is_primary = not primary_anchor or win_plan.primary_card == primary_anchor
     anchor_plan_matches = (
@@ -156,32 +169,32 @@ def validate_builder_variant(
     checks = {
         "balance": (
             not hard_issues
-            and breakdown.total >= 52.0
-            and not {"elixir", "big_spell", "small_spell"} & set(breakdown.soft_issues)
+            and evaluation.total_score >= 52.0
+            and not {"elixir", "big_spell", "small_spell"} & soft_issues
         ),
-        "synergy": breakdown.synergy >= 30.0,
+        "synergy": evaluation.synergy.score >= 30.0,
         "counter_coverage": (
-            breakdown.anti_air >= 50.0
-            and breakdown.anti_swarm >= 55.0
-            and breakdown.defense >= 30.0
+            anti_air >= 50.0
+            and anti_swarm >= 55.0
+            and defense >= 30.0
         ),
         "win_condition": win_plan.primary_win,
         "primary_anchor": anchor_present and anchor_is_primary,
         "anchor_pressure": anchor_pressure,
         "anchor_game_plan": anchor_plan_matches,
         "win_support": has_win_support,
-        "air_defense": breakdown.anti_air >= 50.0,
+        "air_defense": anti_air >= 50.0,
         "ground_defense": has_ground_defense,
         "anti_tank": has_anti_tank,
         # Не навязываем искусственно два cycle-слота, но у готовой колоды
         # всегда должен быть хотя бы один способ вернуть давление в руку.
         "cycle": cycle_n >= 1,
         "spell_balance": (
-            breakdown.spell_balance >= 55.0
-            and not {"big_spell", "small_spell"} & set(breakdown.soft_issues)
+            evaluation.spell_balance.score >= 55.0
+            and not {"big_spell", "small_spell"} & soft_issues
         ),
         "building": (
-            not intent.require_building or "building" not in breakdown.soft_issues
+            not intent.require_building or "building" not in soft_issues
         ),
         # Архетип — ранжирующий сигнал, не причина отклонить завершённую
         # стратегию с тем же core.
@@ -205,6 +218,6 @@ def validate_builder_variant(
         archetype_identity=checks["archetype_identity"],
         deck_identity=checks["deck_identity"],
         win_plan=win_plan,
-        score_breakdown=breakdown,
+        evaluation=evaluation,
         issues=issues,
     )

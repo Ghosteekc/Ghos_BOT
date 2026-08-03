@@ -55,6 +55,11 @@ class BattleAnalysisTool(BaseTool):
             "matchup_score": analysis.matchup_score,
             "outcome_summary": analysis.outcome_summary,
             "reasons": analysis.reasons[:6],
+            "evaluation_report": (
+                analysis.evaluation_report.to_dict()
+                if getattr(analysis, "evaluation_report", None) is not None
+                else None
+            ),
             "match_difficulty": (
                 {
                     "difficulty": analysis.match_difficulty.difficulty,

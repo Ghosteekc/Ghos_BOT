@@ -149,4 +149,8 @@ def build_mine_deck_stats(battles: list[dict], player_tag: str, cards: list[str]
         "sample_note": sample_note,
         "game_plan": rec.game_plan.to_dict(),
         "recommendation": rec.to_public_dict(),
+        # Passport отображает только EvaluationReport (единый слой оценки).
+        "evaluation_report": (
+            rec.evaluation_report.to_dict() if rec.evaluation_report is not None else None
+        ),
     }

@@ -1,6 +1,11 @@
 """Многоуровневая оценка внутренней синергии колоды.
 
 Не среднее по всем парам: топ core-связок + роли + gameplan − конфликты.
+
+.. deprecated::
+    Отдельный score синергии как «оценка колоды» устарел.
+    Используйте ``bot.services.deck_evaluator.DeckEvaluator`` →
+    ``EvaluationReport.synergy``. Модуль остаётся источником оси synergy.
 """
 
 from __future__ import annotations

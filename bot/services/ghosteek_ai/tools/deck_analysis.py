@@ -33,12 +33,15 @@ class DeckAnalysisTool(BaseTool):
             )
         rec = call_recommendation_analyze(deck, apply_swaps=False)
         synergy_score, synergy_notes = call_calculate_deck_synergy(deck)
+        evaluation = getattr(rec, "evaluation_report", None)
         return ToolResult(
             tool=self.name,
             ok=True,
             data={
                 "deck": deck,
                 "recommendation": rec.to_public_dict(),
+                "evaluation_report": evaluation.to_dict() if evaluation is not None else None,
+                # Deprecated: отдельные synergy_* — используйте evaluation_report.synergy
                 "synergy_score": synergy_score,
                 "synergy_notes": synergy_notes,
             },

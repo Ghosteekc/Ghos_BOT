@@ -1,6 +1,6 @@
 """Core Conflict Analysis — fallback, когда полное ядро из 4 карт не даёт качественной колоды.
 
-Для каждой карты Core: убрать → собрать колоду → EvaluationReport (score_breakdown.total).
+Для каждой карты Core: убрать → собрать колоду → EvaluationReport.total_score.
 Конфликтующая = та, чьё удаление даёт максимальный прирост качества.
 Основной Core пользователем не меняется — только предлагается альтернатива.
 """
@@ -22,10 +22,10 @@ MIN_QUALITY_TOTAL = 62.0
 
 
 def evaluation_score(result: BuildResult | None) -> float:
-    """Итоговая оценка колоды (аналог EvaluationReport.finalScore)."""
-    if result is None or result.score_breakdown is None:
+    """Итоговая оценка колоды из EvaluationReport (единый DeckEvaluator)."""
+    if result is None or result.evaluation is None:
         return 0.0
-    return float(result.score_breakdown.total)
+    return float(result.evaluation.total_score)
 
 
 def is_quality_result(result: BuildResult | None) -> bool:

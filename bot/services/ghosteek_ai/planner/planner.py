@@ -46,7 +46,9 @@ class Planner:
       Planner(registry).build(detected)  # instance API
 
     TODO(Qwen): заменить select_tool_names на tool_calls из модели,
-    оставив validate + ToolCaller.execute_calls.
+    оставив validate + ToolCaller.execute_qwen_tool_calls.
+    HOOK: bot.services.ghosteek_ai.planner.planner.Planner.build
+    Модель пока не подключена.
     """
 
     def __init__(self, registry: ToolRegistry | None = None) -> None:
