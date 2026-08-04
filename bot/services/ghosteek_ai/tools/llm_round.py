@@ -12,6 +12,11 @@ from typing import Any
 from bot.services.ghosteek_ai.context.ai_context import AIContext
 from bot.services.ghosteek_ai.llm.messages import ChatMessage, MessageRole
 from bot.services.ghosteek_ai.llm.provider import LLMProvider
+from bot.services.ghosteek_ai.llm.reasoning_filter import (
+    FINAL_ANSWER_RETRY_PROMPT,
+    DEFAULT_REASONING_FILTER,
+    finalize_user_facing_text,
+)
 from bot.services.ghosteek_ai.models import ToolResult
 
 logger = logging.getLogger(__name__)
@@ -68,11 +73,13 @@ def _error_result(
 
 def _append_assistant_tool_calls(messages: list[ChatMessage], result) -> None:
     assistant_tool_calls = [tc.to_dict() for tc in result.tool_calls]
+    reasoning = getattr(result, "reasoning", None) or ""
     messages.append(
         ChatMessage(
             role=MessageRole.ASSISTANT,
             content=(result.text or "").strip(),
             tool_calls=assistant_tool_calls,
+            reasoning=reasoning.strip() or None,
         )
     )
 
@@ -159,14 +166,65 @@ async def execute_llm_round(
                 )
 
             if not llm_result.has_tool_calls:
-                return LLMRoundResult(
-                    ok=True,
-                    text=(llm_result.text or "").strip(),
-                    messages=working,
-                    tool_results=all_results,
-                    iterations=iterations,
-                    used_tools=used_tools,
+                final = finalize_user_facing_text(
+                    content=llm_result.text,
+                    reasoning=getattr(llm_result, "reasoning", None),
+                    filter=DEFAULT_REASONING_FILTER,
                 )
+                if final:
+                    return LLMRoundResult(
+                        ok=True,
+                        text=final,
+                        messages=working,
+                        tool_results=all_results,
+                        iterations=iterations,
+                        used_tools=used_tools,
+                    )
+
+                # Reasoning / CoT / пустой content — не отдаём пользователю.
+                # Просим финальный ответ и продолжаем цикл (если есть слоты).
+                logger.info(
+                    "execute_llm_round: blocked non-final LLM text iteration=%s "
+                    "has_reasoning=%s text_preview=%r",
+                    iterations,
+                    bool((getattr(llm_result, "reasoning", None) or "").strip()),
+                    ((llm_result.text or "")[:120]),
+                )
+                working.append(
+                    ChatMessage(
+                        role=MessageRole.ASSISTANT,
+                        content=(llm_result.text or "").strip(),
+                        reasoning=(getattr(llm_result, "reasoning", None) or "").strip()
+                        or None,
+                    )
+                )
+                working.append(
+                    ChatMessage(
+                        role=MessageRole.USER,
+                        content=FINAL_ANSWER_RETRY_PROMPT,
+                    )
+                )
+                if round_idx >= limit - 1:
+                    err = _error_result(
+                        "LLM_ROUND_REASONING_BLOCKED",
+                        params={
+                            "reason": "model returned internal reasoning instead of final answer",
+                        },
+                        data={
+                            "iterations": iterations,
+                            "used_tools": used_tools,
+                            "text_preview": (llm_result.text or "")[:200],
+                        },
+                    )
+                    return LLMRoundResult(
+                        ok=False,
+                        messages=working,
+                        tool_results=all_results,
+                        iterations=iterations,
+                        used_tools=used_tools,
+                        error=err,
+                    )
+                continue
 
             used_tools = True
             _append_assistant_tool_calls(working, llm_result)

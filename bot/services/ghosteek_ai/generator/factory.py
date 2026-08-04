@@ -1,4 +1,4 @@
-"""Factory ResponseGenerator — template / ollama / qwen по конфигу."""
+"""Factory ResponseGenerator — template / ollama / qwen / groq по конфигу."""
 
 from __future__ import annotations
 
@@ -20,6 +20,14 @@ TemplateGenerator = TemplateResponseGenerator
 
 _DEFAULT_TEMPLATE = TemplateResponseGenerator()
 
+_OPENAI_COMPAT = {
+    GENERATOR_QWEN,
+    "dashscope",
+    "openai",
+    "openai_compatible",
+    "groq",
+}
+
 
 def _backend_from_settings() -> str:
     try:
@@ -34,12 +42,12 @@ def get_response_generator(backend: str | None = None) -> ResponseGenerator:
     """Вернуть генератор по имени или из settings.ghosteek_ai_backend.
 
     backend:
-      - "template" → TemplateGenerator (fallback)
-      - "qwen" / "dashscope" / "openai" → QwenGenerator (OpenAI-compatible)
+      - "template" → TemplateGenerator (fallback, has agenerate)
+      - "qwen" / "groq" / "openai" → QwenResponseGenerator (OpenAI-compatible)
       - "ollama" / "local" → OllamaResponseGenerator
     """
     name = (backend if backend is not None else _backend_from_settings()).strip().lower()
-    if name in {GENERATOR_QWEN, "dashscope", "openai", "openai_compatible"}:
+    if name in _OPENAI_COMPAT:
         return QwenResponseGenerator()
     if name in {GENERATOR_OLLAMA, "local"}:
         return OllamaResponseGenerator()

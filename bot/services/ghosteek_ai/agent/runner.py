@@ -12,6 +12,10 @@ from dataclasses import dataclass, field
 from bot.services.ghosteek_ai.context.ai_context import AIContext
 from bot.services.ghosteek_ai.llm.prompt_builder import PromptBuilder
 from bot.services.ghosteek_ai.llm.provider import LLMProvider
+from bot.services.ghosteek_ai.llm.reasoning_filter import (
+    DEFAULT_REASONING_FILTER,
+    finalize_user_facing_text,
+)
 from bot.services.ghosteek_ai.models import Plan
 from bot.services.ghosteek_ai.tools.base import ToolCaller, ToolRegistry
 from bot.services.ghosteek_ai.tools.llm_round import (
@@ -87,9 +91,14 @@ async def run_llm_agent(
             msg = f"{msg}: {detail}"
         raise RuntimeError(msg)
 
-    text = (round_result.text or "").strip()
+    text = finalize_user_facing_text(
+        content=round_result.text,
+        filter=DEFAULT_REASONING_FILTER,
+    )
     if not text:
-        raise RuntimeError("Agent mode: LLM returned empty final response")
+        raise RuntimeError(
+            "Agent mode: LLM returned internal reasoning instead of a final answer"
+        )
 
     tool_names = [r.tool for r in round_result.tool_results]
     logger.info(

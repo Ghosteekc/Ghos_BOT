@@ -39,3 +39,24 @@ class LLMConfig:
             "extra": dict(self.extra),
             # api_key намеренно не сериализуем в логи
         }
+
+
+class ProviderError(Exception):
+    """Ошибка LLM-провайдера с кодом и деталями (не голый RuntimeError)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "PROVIDER_ERROR",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = str(code or "PROVIDER_ERROR")
+        self.details: dict[str, Any] = dict(details or {})
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        if self.code and self.code not in base:
+            return f"[{self.code}] {base}"
+        return base

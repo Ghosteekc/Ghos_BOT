@@ -10,7 +10,7 @@ from typing import Any
 
 import aiohttp
 
-from bot.services.ghosteek_ai.llm.base import LLMCapabilities, LLMConfig
+from bot.services.ghosteek_ai.llm.base import LLMCapabilities, LLMConfig, ProviderError
 from bot.services.ghosteek_ai.llm.messages import (
     ChatMessage,
     LLMGenerateRequest,
@@ -113,18 +113,28 @@ def ollama_config_from_settings() -> LLMConfig:
 
 
 def qwen_config_from_settings() -> LLMConfig:
-    """Конфиг OpenAI-compatible LLM из LLM_API_KEY / LLM_BASE_URL / LLM_MODEL."""
+    """Конфиг OpenAI-compatible LLM (Qwen / Groq / DashScope) из LLM_*."""
     from bot.config import settings
 
+    base_url = (settings.llm_base_url or "").strip().rstrip("/")
+    backend = (settings.ghosteek_ai_backend or "").strip().lower()
+    provider_name = "qwen"
+    if backend == "groq" or "groq.com" in base_url.lower():
+        provider_name = "groq"
+
     return LLMConfig(
-        provider="qwen",
+        provider=provider_name,
         model=(settings.llm_model or "qwen3-235b-a22b-thinking-2507").strip(),
-        base_url=(settings.llm_base_url or "").strip().rstrip("/"),
+        base_url=base_url,
         api_key=(settings.llm_api_key or "").strip(),
         temperature=0.3,
         max_tokens=1024,
         timeout_seconds=float(getattr(settings, "llm_timeout", 90.0) or 90.0),
-        extra={"enable_tools": True},
+        extra={
+            "enable_tools": True,
+            # Groq reasoning models: отдельное поле message.reasoning
+            "reasoning_format": "parsed" if provider_name == "groq" else None,
+        },
     )
 
 
@@ -133,7 +143,7 @@ def _role_value(role: MessageRole | str) -> str:
 
 
 def _messages_for_openai(messages: list[ChatMessage]) -> list[dict[str, Any]]:
-    """OpenAI Chat Completions messages: system / user / assistant / tool."""
+    """OpenAI / Groq Chat Completions messages: system / user / assistant / tool."""
     out: list[dict[str, Any]] = []
     for msg in messages:
         role = _role_value(msg.role).lower()
@@ -154,12 +164,15 @@ def _messages_for_openai(messages: list[ChatMessage]) -> list[dict[str, Any]]:
         if role not in {"system", "user", "assistant"}:
             role = "user"
 
-        entry = {"role": role, "content": content}
+        entry: dict[str, Any] = {"role": role, "content": content}
         if role == "assistant" and msg.tool_calls:
             entry["tool_calls"] = list(msg.tool_calls)
-            # OpenAI допускает content=null / "" вместе с tool_calls
+            # OpenAI/Groq: content может быть "" / null вместе с tool_calls
             if not (content or "").strip():
                 entry["content"] = content if content is not None else ""
+        # Groq multi-turn: reasoning нужно возвращать модели
+        if role == "assistant" and getattr(msg, "reasoning", None):
+            entry["reasoning"] = msg.reasoning
         out.append(entry)
     return out
 
@@ -205,14 +218,10 @@ class OllamaProvider(LLMProvider):
     def __init__(self, config: LLMConfig | None = None) -> None:
         cfg = config or ollama_config_from_settings()
         super().__init__(cfg)
-        self._session: aiohttp.ClientSession | None = None
         self._parser = ResponseParser()
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=float(self.config.timeout_seconds or 60.0))
-            self._session = aiohttp.ClientSession(timeout=timeout)
-        return self._session
+    def _client_timeout(self) -> aiohttp.ClientTimeout:
+        return aiohttp.ClientTimeout(total=float(self.config.timeout_seconds or 60.0))
 
     def _chat_url(self) -> str:
         base = (self.config.base_url or "http://127.0.0.1:11434").rstrip("/")
@@ -251,27 +260,43 @@ class OllamaProvider(LLMProvider):
         req = self._normalize_request(messages, tools=tools, **kwargs)
         url = self._chat_url()
         payload = self._payload(req, stream=False)
-        session = await self._get_session()
 
         try:
-            async with session.post(url, json=payload) as resp:
-                raw_text = await resp.text()
-                if resp.status >= 400:
-                    raise RuntimeError(
-                        f"Ollama HTTP {resp.status} at {url}: {raw_text[:300]}"
-                    )
-                try:
-                    data = json.loads(raw_text) if raw_text else {}
-                except json.JSONDecodeError as exc:
-                    raise RuntimeError(
-                        f"Ollama returned non-JSON response: {raw_text[:200]}"
-                    ) from exc
+            async with aiohttp.ClientSession(timeout=self._client_timeout()) as session:
+                async with session.post(url, json=payload) as resp:
+                    raw_text = await resp.text()
+                    if resp.status >= 400:
+                        raise ProviderError(
+                            f"Ollama HTTP {resp.status} at {url}: {raw_text[:300]}",
+                            code="OLLAMA_HTTP_ERROR",
+                            details={"status": resp.status, "body": raw_text[:2000]},
+                        )
+                    try:
+                        data = json.loads(raw_text) if raw_text else {}
+                    except json.JSONDecodeError as exc:
+                        raise ProviderError(
+                            f"Ollama returned non-JSON response: {raw_text[:200]}",
+                            code="OLLAMA_NON_JSON",
+                        ) from exc
+        except ProviderError:
+            raise
         except aiohttp.ClientError as exc:
-            raise RuntimeError(f"Ollama connection error: {exc}") from exc
+            raise ProviderError(
+                f"Ollama connection error: {exc}",
+                code="OLLAMA_CONNECTION_ERROR",
+            ) from exc
 
         parsed = self._parser.parse(data if isinstance(data, dict) else {})
-        if not (parsed.text or "").strip() and not parsed.has_tool_calls:
-            raise RuntimeError("Ollama returned empty message content")
+        # reasoning ≠ ответ игроку; usable = content | tools | reasoning (для retry)
+        if not (
+            parsed.has_tool_calls
+            or (parsed.text or "").strip()
+            or (parsed.reasoning or "").strip()
+        ):
+            raise ProviderError(
+                "Ollama returned empty message content",
+                code="OLLAMA_EMPTY_CONTENT",
+            )
         parsed.model = parsed.model or payload.get("model")
         return parsed
 
@@ -285,37 +310,42 @@ class OllamaProvider(LLMProvider):
         req = self._normalize_request(messages, tools=tools, **kwargs)
         url = self._chat_url()
         payload = self._payload(req, stream=True)
-        # streaming tool calls не используются в agent loop
         payload.pop("tools", None)
-        session = await self._get_session()
 
         try:
-            async with session.post(url, json=payload) as resp:
-                if resp.status >= 400:
-                    body = await resp.text()
-                    raise RuntimeError(
-                        f"Ollama HTTP {resp.status} at {url}: {body[:300]}"
-                    )
-                async for raw_line in resp.content:
-                    line = raw_line.decode("utf-8", errors="ignore").strip()
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if not isinstance(chunk, dict):
-                        continue
-                    message = chunk.get("message")
-                    if isinstance(message, dict):
-                        piece = message.get("content")
-                        if isinstance(piece, str) and piece:
-                            yield piece
-                    alt = chunk.get("response")
-                    if isinstance(alt, str) and alt and not isinstance(message, dict):
-                        yield alt
+            async with aiohttp.ClientSession(timeout=self._client_timeout()) as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status >= 400:
+                        body = await resp.text()
+                        raise ProviderError(
+                            f"Ollama HTTP {resp.status} at {url}: {body[:300]}",
+                            code="OLLAMA_HTTP_ERROR",
+                        )
+                    async for raw_line in resp.content:
+                        line = raw_line.decode("utf-8", errors="ignore").strip()
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(chunk, dict):
+                            continue
+                        message = chunk.get("message")
+                        if isinstance(message, dict):
+                            piece = message.get("content")
+                            if isinstance(piece, str) and piece:
+                                yield piece
+                        alt = chunk.get("response")
+                        if isinstance(alt, str) and alt and not isinstance(message, dict):
+                            yield alt
+        except ProviderError:
+            raise
         except aiohttp.ClientError as exc:
-            raise RuntimeError(f"Ollama stream connection error: {exc}") from exc
+            raise ProviderError(
+                f"Ollama stream connection error: {exc}",
+                code="OLLAMA_CONNECTION_ERROR",
+            ) from exc
 
     def supports_tools(self) -> bool:
         return bool(self.config.extra.get("enable_tools", True))
@@ -324,16 +354,14 @@ class OllamaProvider(LLMProvider):
         return True
 
     async def close(self) -> None:
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
-        self._session = None
+        return None
 
 
 class QwenLLMProvider(LLMProvider):
-    """OpenAI-compatible Chat Completions (Qwen / DashScope compatible-mode).
+    """OpenAI-compatible Chat Completions (Qwen / Groq / DashScope).
 
-    Обычный HTTP (aiohttp). Без DashScope SDK.
-    Streaming пока не реализован — только generate().
+    Endpoint: ``{LLM_BASE_URL}/chat/completions`` (не Responses API).
+    HTTP через aiohttp. Streaming пока не реализован.
     """
 
     name = "qwen"
@@ -341,32 +369,40 @@ class QwenLLMProvider(LLMProvider):
     def __init__(self, config: LLMConfig | None = None) -> None:
         cfg = config or qwen_config_from_settings()
         super().__init__(cfg)
-        self._session: aiohttp.ClientSession | None = None
+        # name отражает фактический бэкенд (qwen / groq)
+        self.name = (cfg.provider or "qwen").strip().lower() or "qwen"
         self._parser = ResponseParser()
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=float(self.config.timeout_seconds or 90.0))
-            self._session = aiohttp.ClientSession(timeout=timeout)
-        return self._session
+    def _is_groq(self) -> bool:
+        if self.name == "groq":
+            return True
+        base = (self.config.base_url or "").lower()
+        return "groq.com" in base
+
+    def _client_timeout(self) -> aiohttp.ClientTimeout:
+        return aiohttp.ClientTimeout(total=float(self.config.timeout_seconds or 90.0))
 
     def _chat_url(self) -> str:
         base = (self.config.base_url or "").strip().rstrip("/")
         if not base:
-            raise RuntimeError(
+            raise ProviderError(
                 "LLM_BASE_URL is not configured. "
-                "Set an OpenAI-compatible Chat Completions base URL."
+                "Set an OpenAI-compatible Chat Completions base URL "
+                "(e.g. https://api.groq.com/openai/v1).",
+                code="LLM_BASE_URL_MISSING",
             )
+        # Уже полный path
         if base.endswith("/chat/completions"):
             return base
+        # Groq / OpenAI-compatible: Chat Completions, не Responses API
         return f"{base}/chat/completions"
 
     def _headers(self) -> dict[str, str]:
         api_key = (self.config.api_key or "").strip()
         if not api_key:
-            raise RuntimeError(
-                "LLM_API_KEY is not configured. "
-                "Set an API key for the OpenAI-compatible endpoint."
+            raise ProviderError(
+                "LLM_API_KEY is not configured.",
+                code="LLM_API_KEY_MISSING",
             )
         return {
             "Authorization": f"Bearer {api_key}",
@@ -379,7 +415,12 @@ class QwenLLMProvider(LLMProvider):
         *,
         stream: bool = False,
     ) -> dict[str, Any]:
-        model = (req.model or self.config.model or "qwen3-235b-a22b-thinking-2507").strip()
+        default_model = (
+            "llama-3.3-70b-versatile"
+            if self._is_groq()
+            else "qwen3-235b-a22b-thinking-2507"
+        )
+        model = (req.model or self.config.model or default_model).strip()
         body: dict[str, Any] = {
             "model": model,
             "messages": _messages_for_openai(list(req.messages)),
@@ -393,13 +434,51 @@ class QwenLLMProvider(LLMProvider):
             body["max_tokens"] = int(max_tokens)
         if req.tools and self.supports_tools():
             body["tools"] = list(req.tools)
-        # response_format: из kwargs/extra или явного поля запроса
+
         response_format = None
+        reasoning_format = None
         if isinstance(req.extra, dict):
             response_format = req.extra.get("response_format")
+            reasoning_format = req.extra.get("reasoning_format")
         if response_format is not None:
             body["response_format"] = response_format
+        # Groq reasoning models: message.reasoning при reasoning_format=parsed
+        if reasoning_format is None and self._is_groq():
+            reasoning_format = self.config.extra.get("reasoning_format") or "parsed"
+        if reasoning_format:
+            body["reasoning_format"] = reasoning_format
         return body
+
+    def _log_raw_response(
+        self,
+        *,
+        url: str,
+        status: int,
+        headers: Any,
+        raw_text: str,
+        data: Any,
+    ) -> None:
+        """Полный debug dump ответа до интерпретации (без усечения JSON)."""
+        try:
+            header_map = {
+                k: v
+                for k, v in (headers.items() if headers is not None else [])
+                if str(k).lower() not in {"authorization", "cookie", "set-cookie"}
+            }
+        except Exception:
+            header_map = {}
+        if isinstance(data, (dict, list)):
+            body_dump = json.dumps(data, ensure_ascii=False, default=str)
+        else:
+            body_dump = raw_text if raw_text is not None else str(data)
+        logger.debug(
+            "llm_provider_raw_response provider=%s url=%s status=%s headers=%s body=%s",
+            self.name,
+            url,
+            status,
+            json.dumps(header_map, ensure_ascii=False, default=str),
+            body_dump,
+        )
 
     async def generate(
         self,
@@ -409,44 +488,114 @@ class QwenLLMProvider(LLMProvider):
         **kwargs: Any,
     ) -> LLMGenerateResult:
         req = self._normalize_request(messages, tools=tools, **kwargs)
-        # response_format может прийти kwargs'ом
         if "response_format" in kwargs and "response_format" not in req.extra:
             req.extra["response_format"] = kwargs["response_format"]
-
-        url = self._chat_url()
-        headers = self._headers()
-        payload = self._payload(req, stream=False)
-        session = await self._get_session()
+        if "reasoning_format" in kwargs and "reasoning_format" not in req.extra:
+            req.extra["reasoning_format"] = kwargs["reasoning_format"]
 
         try:
-            async with session.post(url, json=payload, headers=headers) as resp:
-                raw_text = await resp.text()
-                if resp.status >= 400:
-                    raise RuntimeError(
-                        f"Qwen/OpenAI HTTP {resp.status} at {url}: {raw_text[:400]}"
-                    )
-                try:
-                    data = json.loads(raw_text) if raw_text else {}
-                except json.JSONDecodeError as exc:
-                    raise RuntimeError(
-                        f"Qwen/OpenAI returned non-JSON response: {raw_text[:200]}"
-                    ) from exc
-        except aiohttp.ClientError as exc:
-            raise RuntimeError(f"Qwen/OpenAI connection error: {exc}") from exc
+            url = self._chat_url()
+            headers = self._headers()
+            payload = self._payload(req, stream=False)
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise ProviderError(
+                f"Failed to build LLM request: {exc}",
+                code="LLM_REQUEST_BUILD_ERROR",
+                details={"error": str(exc)[:400]},
+            ) from exc
 
+        raw_text = ""
+        status = 0
+        resp_headers: Any = None
+        data: Any = None
+
+        try:
+            # Per-request session: гарантированно закрывается (нет Unclosed client session)
+            async with aiohttp.ClientSession(timeout=self._client_timeout()) as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    status = int(resp.status)
+                    resp_headers = resp.headers
+                    raw_text = await resp.text()
+                    try:
+                        data = json.loads(raw_text) if raw_text else {}
+                    except json.JSONDecodeError:
+                        data = None
+
+                    self._log_raw_response(
+                        url=url,
+                        status=status,
+                        headers=resp_headers,
+                        raw_text=raw_text,
+                        data=data if data is not None else raw_text,
+                    )
+
+                    if status >= 400:
+                        raise ProviderError(
+                            f"LLM HTTP {status} at {url}: {(raw_text or '')[:500]}",
+                            code="LLM_HTTP_ERROR",
+                            details={"status": status, "url": url, "body": (raw_text or "")[:2000]},
+                        )
+        except ProviderError:
+            raise
+        except aiohttp.ClientError as exc:
+            raise ProviderError(
+                f"LLM connection error: {exc}",
+                code="LLM_CONNECTION_ERROR",
+                details={"url": url, "error": str(exc)[:400]},
+            ) from exc
+        except Exception as exc:
+            raise ProviderError(
+                f"LLM request failed: {exc}",
+                code="LLM_REQUEST_ERROR",
+                details={"url": url, "error": str(exc)[:400]},
+            ) from exc
+
+        if data is None:
+            raise ProviderError(
+                f"LLM returned non-JSON response: {(raw_text or '')[:300]}",
+                code="LLM_NON_JSON",
+                details={"status": status, "body": (raw_text or "")[:2000]},
+            )
         if not isinstance(data, dict):
-            raise RuntimeError("Qwen/OpenAI returned unexpected payload type")
+            raise ProviderError(
+                "LLM returned unexpected payload type",
+                code="LLM_BAD_PAYLOAD",
+                details={"type": type(data).__name__},
+            )
 
         if data.get("error"):
             err = data["error"]
             msg = err.get("message") if isinstance(err, dict) else str(err)
-            raise RuntimeError(f"Qwen/OpenAI API error: {msg}")
+            raise ProviderError(
+                f"LLM API error: {msg}",
+                code="LLM_API_ERROR",
+                details={"error": err},
+            )
 
         parsed = self._parser.parse(data)
-        if not (parsed.text or "").strip() and not parsed.has_tool_calls:
-            raise RuntimeError("Qwen/OpenAI returned empty message content")
-        parsed.model = parsed.model or payload.get("model")
-        return parsed
+        # content / tool_calls / reasoning разделены.
+        # reasoning НИКОГДА не копируется в text (не для пользователя).
+        if parsed.has_tool_calls:
+            parsed.model = parsed.model or payload.get("model")
+            return parsed
+
+        if (parsed.text or "").strip() or (parsed.reasoning or "").strip():
+            parsed.model = parsed.model or payload.get("model")
+            return parsed
+
+        raise ProviderError(
+            "LLM returned empty message content "
+            "(no content, no tool_calls, no reasoning)",
+            code="LLM_EMPTY_CONTENT",
+            details={
+                "finish_reason": parsed.finish_reason,
+                "model": parsed.model or payload.get("model"),
+                "has_choices": bool(isinstance(data.get("choices"), list) and data.get("choices")),
+                "usage": data.get("usage"),
+            },
+        )
 
     async def stream_generate(
         self,
@@ -457,8 +606,9 @@ class QwenLLMProvider(LLMProvider):
     ) -> AsyncIterator[str]:
         """Streaming пока не реализован — используйте generate()."""
         self._normalize_request(messages, tools=tools, **kwargs)
-        raise NotImplementedError(
-            "QwenLLMProvider.stream_generate is not implemented yet. Use generate()."
+        raise ProviderError(
+            "stream_generate is not implemented. Use generate().",
+            code="LLM_STREAM_NOT_IMPLEMENTED",
         )
         if False:  # pragma: no cover
             yield ""
@@ -470,13 +620,13 @@ class QwenLLMProvider(LLMProvider):
         return False
 
     async def close(self) -> None:
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
-        self._session = None
+        # Per-request sessions — нечего закрывать; метод для контракта LLMProvider.
+        return None
 
 
 # Alias по ТЗ
 QwenProvider = QwenLLMProvider
+GroqProvider = QwenLLMProvider
 
 
 def get_llm_provider(name: str | None = None, *, config: LLMConfig | None = None) -> LLMProvider:
@@ -485,12 +635,23 @@ def get_llm_provider(name: str | None = None, *, config: LLMConfig | None = None
         from bot.config import settings
 
         key = (settings.ghosteek_ai_backend or "qwen").strip().lower()
-    if key in {"qwen", "dashscope", "openai", "openai_compatible"}:
-        return QwenLLMProvider(config or qwen_config_from_settings())
+    if key in {"qwen", "dashscope", "openai", "openai_compatible", "groq"}:
+        cfg = config or qwen_config_from_settings()
+        if key == "groq" and cfg.provider != "groq":
+            cfg = LLMConfig(
+                provider="groq",
+                model=cfg.model,
+                base_url=cfg.base_url,
+                api_key=cfg.api_key,
+                temperature=cfg.temperature,
+                max_tokens=cfg.max_tokens,
+                timeout_seconds=cfg.timeout_seconds,
+                extra={**dict(cfg.extra), "reasoning_format": cfg.extra.get("reasoning_format") or "parsed"},
+            )
+        return QwenLLMProvider(cfg)
     if key in {"ollama", "local"}:
         return OllamaProvider(config or ollama_config_from_settings())
     if key in {"template", "default"}:
-        # Factory/service не должны сюда попадать; безопасный fallback — ollama local
         return OllamaProvider(config or ollama_config_from_settings())
     return QwenLLMProvider(config or qwen_config_from_settings())
 

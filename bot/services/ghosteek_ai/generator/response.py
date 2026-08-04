@@ -55,9 +55,6 @@ class TemplateResponseGenerator:
 
     Реализует ResponseGenerator Protocol.
     Alias: TemplateGenerator.
-
-    TODO(Qwen): рядом QwenResponseGenerator; factory переключает backend.
-    Модель не подключать в этом классе.
     """
 
     backend = "template"
@@ -67,6 +64,10 @@ class TemplateResponseGenerator:
             return assert_coach_voice(self._from_error(ctx))
         text = self._from_success(ctx)
         return assert_coach_voice(text)
+
+    async def agenerate(self, ctx: AIContext) -> str:
+        """Async-совместимость с LLM generators / orchestrator fallback."""
+        return self.generate(ctx)
 
     def _from_error(self, ctx: AIContext) -> str:
         code = ctx.error_code or "CLARIFY"

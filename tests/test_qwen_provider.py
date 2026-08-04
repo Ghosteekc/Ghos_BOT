@@ -152,26 +152,30 @@ def test_qwen_generate_builds_openai_payload():
 
 
 def test_qwen_missing_config_errors():
+    from bot.services.ghosteek_ai.llm.base import ProviderError
+
     provider = QwenLLMProvider(
         LLMConfig(provider="qwen", model="m", base_url="", api_key="x")
     )
     try:
         provider._chat_url()
-        assert False, "expected RuntimeError"
-    except RuntimeError as exc:
+        assert False, "expected ProviderError"
+    except ProviderError as exc:
         assert "LLM_BASE_URL" in str(exc)
+        assert exc.code == "LLM_BASE_URL_MISSING"
 
     provider2 = QwenLLMProvider(
         LLMConfig(provider="qwen", model="m", base_url="https://x/v1", api_key="")
     )
     try:
         provider2._headers()
-        assert False, "expected RuntimeError"
-    except RuntimeError as exc:
+        assert False, "expected ProviderError"
+    except ProviderError as exc:
         assert "LLM_API_KEY" in str(exc)
+        assert exc.code == "LLM_API_KEY_MISSING"
 
 
 def test_qwen_config_from_settings_defaults():
     cfg = qwen_config_from_settings()
-    assert cfg.provider == "qwen"
-    assert cfg.model  # default model set
+    assert cfg.provider in {"qwen", "groq"}
+    assert cfg.model  # default / env model set

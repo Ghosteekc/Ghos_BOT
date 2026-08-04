@@ -23,6 +23,8 @@ class ChatMessage:
     name: str | None = None
     tool_call_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
+    # Groq reasoning models: round-trip поля reasoning в multi-turn
+    reasoning: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         role = self.role.value if isinstance(self.role, MessageRole) else str(self.role)
@@ -33,6 +35,8 @@ class ChatMessage:
             out["tool_call_id"] = self.tool_call_id
         if self.tool_calls:
             out["tool_calls"] = list(self.tool_calls)
+        if self.reasoning:
+            out["reasoning"] = self.reasoning
         return out
 
     @classmethod
@@ -43,6 +47,7 @@ class ChatMessage:
         except ValueError:
             role = role_raw
         tool_calls = raw.get("tool_calls")
+        reasoning = raw.get("reasoning") or raw.get("reasoning_content")
         return cls(
             role=role,
             content=str(raw.get("content") or ""),
@@ -51,6 +56,7 @@ class ChatMessage:
             tool_calls=[dict(t) for t in tool_calls if isinstance(t, dict)]
             if isinstance(tool_calls, list)
             else None,
+            reasoning=str(reasoning) if reasoning else None,
         )
 
 
@@ -104,10 +110,11 @@ class LLMGenerateRequest:
 
 @dataclass
 class LLMGenerateResult:
-    """Нормализованный ответ провайдера (текст и/или tool_calls)."""
+    """Нормализованный ответ провайдера (текст и/или tool_calls / reasoning)."""
 
     text: str = ""
     tool_calls: list[LLMToolCall] = field(default_factory=list)
+    reasoning: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
     finish_reason: str | None = None
     model: str | None = None
@@ -116,6 +123,7 @@ class LLMGenerateResult:
         return {
             "text": self.text,
             "tool_calls": [t.to_dict() for t in self.tool_calls],
+            "reasoning": self.reasoning,
             "raw": dict(self.raw),
             "finish_reason": self.finish_reason,
             "model": self.model,
@@ -124,6 +132,10 @@ class LLMGenerateResult:
     @property
     def has_tool_calls(self) -> bool:
         return bool(self.tool_calls)
+
+    @property
+    def has_usable_output(self) -> bool:
+        return bool((self.text or "").strip() or self.has_tool_calls or (self.reasoning or "").strip())
 
 
 @dataclass

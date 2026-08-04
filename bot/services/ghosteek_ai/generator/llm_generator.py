@@ -1,9 +1,10 @@
-"""ResponseGenerator поверх LLMProvider (Ollama / Qwen)."""
+"""ResponseGenerator поверх LLMProvider (Ollama / Qwen / Groq)."""
 
 from __future__ import annotations
 
 from bot.services.ghosteek_ai.context.ai_context import AIContext
-from bot.services.ghosteek_ai.llm.messages import ChatMessage, ToolCallResult
+from bot.services.ghosteek_ai.llm.base import ProviderError
+from bot.services.ghosteek_ai.llm.messages import ChatMessage, MessageRole, ToolCallResult
 from bot.services.ghosteek_ai.llm.prompt_builder import PromptBuilder
 from bot.services.ghosteek_ai.llm.provider import (
     LLMProvider,
@@ -13,11 +14,16 @@ from bot.services.ghosteek_ai.llm.provider import (
     ollama_config_from_settings,
     qwen_config_from_settings,
 )
+from bot.services.ghosteek_ai.llm.reasoning_filter import (
+    FINAL_ANSWER_RETRY_PROMPT,
+    DEFAULT_REASONING_FILTER,
+    finalize_user_facing_text,
+)
 from bot.services.ghosteek_ai.llm.response_parser import ResponseParser
 
 
 class LLMResponseGenerator:
-    """PromptBuilder → LLMProvider → ResponseParser → text | ToolCallResult.
+    """PromptBuilder → LLMProvider → ResponseParser → ReasoningFilter → text.
 
     Sync generate() оставлен для Protocol; LLM backends используют agenerate().
     """
@@ -54,10 +60,10 @@ class LLMResponseGenerator:
         tools: list | None = None,
         **kwargs,
     ) -> str | ToolCallResult:
-        """Построить messages → model → parse.
+        """Построить messages → model → parse → ReasoningFilter.
 
-        Если модель вернула tool_calls — вернуть ToolCallResult (не текст игроку).
-        Иначе — финальный текст.
+        tool_calls → ToolCallResult (не текст игроку).
+        Reasoning / CoT → retry за финальным ответом, иначе ProviderError.
         """
         self.last_tool_call_result = None
         messages = self.build_messages(ctx)
@@ -73,10 +79,46 @@ class LLMResponseGenerator:
             self.last_tool_call_result = tool_result
             return tool_result
 
-        text = (parsed.text or "").strip()
-        if not text:
-            raise RuntimeError(f"{self.backend} returned empty text")
-        return text
+        final = finalize_user_facing_text(
+            content=parsed.text,
+            reasoning=parsed.reasoning,
+            filter=DEFAULT_REASONING_FILTER,
+        )
+        if final:
+            return final
+
+        # Один retry: явно просим финальный ответ без внутренних рассуждений.
+        retry_messages = list(messages) + [
+            ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=(parsed.text or "").strip(),
+                reasoning=(parsed.reasoning or "").strip() or None,
+            ),
+            ChatMessage(role=MessageRole.USER, content=FINAL_ANSWER_RETRY_PROMPT),
+        ]
+        retry = await self.provider.generate(retry_messages, tools=None)
+        retry_parsed = self.response_parser.parse(retry)
+        if retry_parsed.has_tool_calls:
+            raise ProviderError(
+                f"{self.backend} returned tool_calls on final-answer retry",
+                code="LLM_REASONING_BLOCKED",
+            )
+        final_retry = finalize_user_facing_text(
+            content=retry_parsed.text,
+            reasoning=retry_parsed.reasoning,
+            filter=DEFAULT_REASONING_FILTER,
+        )
+        if final_retry:
+            return final_retry
+
+        raise ProviderError(
+            f"{self.backend} returned internal reasoning instead of a final answer",
+            code="LLM_REASONING_BLOCKED",
+            details={
+                "text_preview": (parsed.text or "")[:200],
+                "has_reasoning": bool((parsed.reasoning or "").strip()),
+            },
+        )
 
 
 class OllamaResponseGenerator(LLMResponseGenerator):
@@ -92,11 +134,7 @@ class OllamaResponseGenerator(LLMResponseGenerator):
 
 
 class QwenResponseGenerator(LLMResponseGenerator):
-    """PromptBuilder → QwenLLMProvider (OpenAI-compatible) → ResponseParser.
-
-    tool_calls → ToolCallResult (без ответа пользователю).
-    Текст → str. Template остаётся fallback на уровне service.
-    """
+    """PromptBuilder → OpenAI-compatible LLM → ResponseParser → ReasoningFilter."""
 
     backend = "qwen"
 
@@ -114,7 +152,7 @@ QwenGenerator = QwenResponseGenerator
 
 def make_llm_response_generator(backend: str) -> LLMResponseGenerator:
     key = (backend or "").strip().lower()
-    if key in {"qwen", "dashscope", "openai", "openai_compatible"}:
+    if key in {"qwen", "dashscope", "openai", "openai_compatible", "groq"}:
         return QwenResponseGenerator()
     if key in {"ollama", "local"}:
         return OllamaResponseGenerator()

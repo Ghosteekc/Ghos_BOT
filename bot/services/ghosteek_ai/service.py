@@ -44,8 +44,8 @@ def _configured_mode() -> str:
 def _resolve_provider(backend: str) -> LLMProvider | None:
     if backend in {"template", "default", ""}:
         return None
-    if backend in {"qwen", "dashscope", "openai", "openai_compatible"}:
-        return get_llm_provider("qwen")
+    if backend in {"qwen", "dashscope", "openai", "openai_compatible", "groq"}:
+        return get_llm_provider(backend)
     if backend in {"ollama", "local"}:
         return get_llm_provider("ollama")
     return get_llm_provider(backend)
