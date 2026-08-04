@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_model: str = "qwen3-235b-a22b-thinking-2507"
     llm_timeout: float = 90.0
+    # Лимит completion tokens — компактные ответы тренера
+    llm_max_tokens: int = 512
 
 
 settings = Settings()

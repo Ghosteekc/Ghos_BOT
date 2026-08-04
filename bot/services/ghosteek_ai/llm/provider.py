@@ -128,7 +128,7 @@ def qwen_config_from_settings() -> LLMConfig:
         base_url=base_url,
         api_key=(settings.llm_api_key or "").strip(),
         temperature=0.3,
-        max_tokens=1024,
+        max_tokens=int(getattr(settings, "llm_max_tokens", 512) or 512),
         timeout_seconds=float(getattr(settings, "llm_timeout", 90.0) or 90.0),
         extra={
             "enable_tools": True,

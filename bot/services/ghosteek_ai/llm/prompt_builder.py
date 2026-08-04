@@ -11,6 +11,12 @@ from bot.services.ghosteek_ai.llm.messages import ChatMessage, MessageRole
 from bot.services.ghosteek_ai.models import ToolResult
 from bot.services.ghosteek_ai.voice import SYSTEM_PROMPT
 
+# Лимиты TPM: короткая история + усечённые реплики.
+_HISTORY_TURN_LIMIT = 6
+_HISTORY_MSG_CHARS = 220
+_SUMMARY_CHARS = 320
+_TOOL_DATA_CHARS = 1200
+
 
 class PromptBuilder:
     """Собирает prompt из блоков. Не генерирует ответ игроку.
@@ -68,40 +74,41 @@ class PromptBuilder:
                 names.append(str(name))
         if not intent and not names:
             return []
-        content = (
-            "Рекомендация Planner (необязательная подсказка, не приказ). "
-            "В Agent Mode решение о tools принимает модель.\n"
-            f"intent={intent or '—'}\n"
-            f"suggested_tools={', '.join(names) if names else '—'}"
-        )
+        # Коротко: без длинных пояснений про Agent Mode
+        content = f"hint intent={intent or '—'}; tools={','.join(names) if names else '—'}"
         return [ChatMessage(role=MessageRole.SYSTEM, content=content)]
 
     def build_system(self) -> list[ChatMessage]:
         parts = [self.system_prompt.strip()]
         if self.constraints and self.constraints.strip():
-            parts.append(f"Ограничения данных:\n{self.constraints.strip()}")
+            parts.append(self.constraints.strip())
         return [
-            ChatMessage(role=MessageRole.SYSTEM, content="\n\n".join(parts)),
+            ChatMessage(role=MessageRole.SYSTEM, content="\n".join(parts)),
         ]
 
     def build_conversation_history(self, ctx: AIContext) -> list[ChatMessage]:
         out: list[ChatMessage] = []
         summary = (ctx.conversation_summary or "").strip()
         if summary:
+            if len(summary) > _SUMMARY_CHARS:
+                summary = summary[: _SUMMARY_CHARS - 1] + "…"
             out.append(
                 ChatMessage(
                     role=MessageRole.SYSTEM,
-                    content=f"Краткое summary диалога:\n{summary}",
+                    content=f"Summary: {summary}",
                 )
             )
 
-        for turn in ctx.recent_messages or []:
-            if not isinstance(turn, dict):
-                continue
+        turns = [
+            turn
+            for turn in (ctx.recent_messages or [])
+            if isinstance(turn, dict) and str(turn.get("content") or "").strip()
+        ]
+        for turn in turns[-_HISTORY_TURN_LIMIT:]:
             role_raw = str(turn.get("role") or "").strip().lower()
             content = str(turn.get("content") or "").strip()
-            if not content:
-                continue
+            if len(content) > _HISTORY_MSG_CHARS:
+                content = content[: _HISTORY_MSG_CHARS - 1] + "…"
             if role_raw in {"assistant", "ai", "bot", "coach"}:
                 role: MessageRole | str = MessageRole.ASSISTANT
             elif role_raw in {"system"}:
@@ -113,21 +120,16 @@ class PromptBuilder:
 
     def build_ai_context(self, ctx: AIContext) -> list[ChatMessage]:
         payload = ctx.to_llm_dict()
-        # raw_message уже уйдёт отдельным user-блоком — убираем дубль из JSON
-        payload = {k: v for k, v in payload.items() if k != "raw_message"}
-        # tool_outputs дублируются в Tool Results-блоке
-        payload = {k: v for k, v in payload.items() if k != "tool_outputs"}
-        content = (
-            "AIContext (structured JSON, опирайся только на эти данные):\n"
-            + json.dumps(payload, ensure_ascii=False, default=str)
-        )
+        payload = {k: v for k, v in payload.items() if k not in {"raw_message", "tool_outputs"}}
+        if not payload:
+            return []
+        content = "Контекст:\n" + json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
         return [ChatMessage(role=MessageRole.SYSTEM, content=content)]
 
     def build_tool_results(self, ctx: AIContext) -> list[ChatMessage]:
         out: list[ChatMessage] = []
         outputs = ctx.tool_outputs or {}
         if not outputs:
-            # fallback: primary data как один tool-результат
             if ctx.data or ctx.error_code is not None:
                 tr = ToolResult(
                     tool=ctx.service or "primary",
@@ -141,7 +143,7 @@ class PromptBuilder:
                 out.append(
                     ChatMessage(
                         role=MessageRole.TOOL,
-                        content=tr.to_llm_content(),
+                        content=self._compact_tool_content(tr),
                         name=tr.tool,
                         tool_call_id=tr.call_id,
                     )
@@ -160,12 +162,32 @@ class PromptBuilder:
             out.append(
                 ChatMessage(
                     role=MessageRole.TOOL,
-                    content=tr.to_llm_content(),
+                    content=self._compact_tool_content(tr),
                     name=tr.tool or str(tool_name),
                     tool_call_id=tr.call_id or f"call_{i}",
                 )
             )
         return out
+
+    @staticmethod
+    def _compact_tool_content(tr: ToolResult) -> str:
+        """Урезанный ToolResult для LLM: факты без тяжёлого envelope."""
+        payload = {
+            "tool": tr.tool,
+            "ok": bool(tr.ok),
+        }
+        if tr.error_code:
+            payload["error_code"] = tr.error_code
+        if tr.error_params:
+            payload["error_params"] = tr.error_params
+        if tr.data:
+            payload["data"] = tr.data
+        if tr.actions:
+            payload["actions"] = tr.actions[:3]
+        text = json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
+        if len(text) > _TOOL_DATA_CHARS:
+            return text[: _TOOL_DATA_CHARS - 1] + "…"
+        return text
 
     def build_user_message(self, ctx: AIContext) -> list[ChatMessage]:
         text = (ctx.raw_message or "").strip()

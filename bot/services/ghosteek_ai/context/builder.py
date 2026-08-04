@@ -102,7 +102,7 @@ class ContextBuilder:
             ),
             conversation=ConversationContext(
                 summary=conversation.summary or "",
-                recent_messages=conversation.recent_messages_public(limit=20),
+                recent_messages=conversation.recent_messages_public(limit=6),
                 last_questions=list(conversation.last_questions[-10:]),
                 last_tools=list(conversation.last_tools[-10:]),
                 followups=followups,
@@ -112,7 +112,7 @@ class ContextBuilder:
             meta=MetaContext(),
             history=HistoryContext(
                 summary=conversation.summary or "",
-                turns=conversation.recent_messages_public(limit=20),
+                turns=conversation.recent_messages_public(limit=6),
                 last_analysis=dict(conversation.last_analysis),
             ),
             raw_message=raw_message,

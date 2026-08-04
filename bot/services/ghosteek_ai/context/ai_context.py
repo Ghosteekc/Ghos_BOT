@@ -652,8 +652,171 @@ class AIContext:
         }
 
     def to_llm_dict(self) -> dict[str, Any]:
-        """Контекст для prompt LLM (= полный to_dict, без секретов/_user)."""
-        return self.to_dict()
+        """Компактный контекст для LLM: факты без дублей и пустых блоков.
+
+        Не включает: полную историю сообщений (идёт отдельным блоком),
+        сырой battle.raw, пустые секции, request_context целиком.
+        """
+        out: dict[str, Any] = {}
+
+        player = {
+            k: v
+            for k, v in {
+                "tag": self.player.tag,
+                "name": self.player.name,
+            }.items()
+            if v
+        }
+        if player:
+            out["player"] = player
+
+        arena = {
+            k: v
+            for k, v in {
+                "arena_id": self.arena.arena_id,
+                "trophies": self.arena.trophies,
+            }.items()
+            if v is not None
+        }
+        if arena:
+            out["arena"] = arena
+
+        deck: dict[str, Any] = {}
+        if self.deck.cards:
+            deck["cards"] = list(self.deck.cards)[:8]
+        if self.deck.opponent_cards:
+            deck["opponent_cards"] = list(self.deck.opponent_cards)[:8]
+        if self.deck.core:
+            deck["core"] = list(self.deck.core)[:4]
+        if self.deck.build_mode:
+            deck["build_mode"] = self.deck.build_mode
+        # built_decks — только имена карт первых 2 вариантов
+        if self.deck.built_decks:
+            compact_builds: list[Any] = []
+            for item in self.deck.built_decks[:2]:
+                if isinstance(item, dict):
+                    cards = item.get("cards")
+                    if isinstance(cards, list):
+                        compact_builds.append([c for c in cards if isinstance(c, str)][:8])
+                    else:
+                        name = item.get("name") or item.get("archetype")
+                        if name:
+                            compact_builds.append(str(name))
+            if compact_builds:
+                deck["built_decks"] = compact_builds
+        if deck:
+            out["deck"] = deck
+
+        battle: dict[str, Any] = {}
+        for key in (
+            "battle_index",
+            "won",
+            "opponent_name",
+            "matchup_score",
+            "outcome_summary",
+        ):
+            val = getattr(self.battle, key, None)
+            if val is not None and val != "":
+                battle[key] = val
+        if self.battle.reasons:
+            battle["reasons"] = list(self.battle.reasons)[:4]
+        if isinstance(self.battle.match_difficulty, dict) and self.battle.match_difficulty:
+            # только ключевые поля, не весь объект
+            md = self.battle.match_difficulty
+            battle["match_difficulty"] = {
+                k: md[k]
+                for k in ("rating", "score", "label", "difficulty")
+                if k in md
+            } or {"keys": list(md.keys())[:5]}
+        if isinstance(self.battle.match_plan, dict) and self.battle.match_plan:
+            mp = self.battle.match_plan
+            battle["match_plan"] = {
+                k: mp[k]
+                for k in ("how_to_win", "primary_threat", "key_tips", "tips")
+                if k in mp
+            } or {"keys": list(mp.keys())[:5]}
+        # battle.raw намеренно НЕ включаем — раздувает TPM
+        if battle:
+            out["battle"] = battle
+
+        intent = {
+            k: v
+            for k, v in self.intent.to_dict().items()
+            if v not in (None, "", [], {})
+        }
+        if intent:
+            out["intent"] = intent
+
+        rec = {
+            k: v
+            for k, v in self.recommendation.to_dict().items()
+            if v not in (None, "", [], {})
+        }
+        if rec:
+            out["recommendation"] = rec
+
+        evaluation = {
+            k: v
+            for k, v in self.evaluation.to_dict().items()
+            if v not in (None, "", [], {})
+        }
+        if evaluation:
+            out["evaluation"] = evaluation
+
+        game_plan = {
+            k: v
+            for k, v in self.game_plan.to_dict().items()
+            if v not in (None, "", [], {})
+        }
+        if game_plan:
+            out["game_plan"] = game_plan
+
+        knowledge = {
+            k: v
+            for k, v in self.knowledge.to_dict().items()
+            if v not in (None, "", [], {})
+        }
+        if knowledge:
+            out["knowledge"] = knowledge
+
+        meta = {
+            k: v
+            for k, v in self.meta.to_dict().items()
+            if v not in (None, "", [], {})
+        }
+        if meta:
+            out["meta"] = meta
+
+        # session — только полезные якоря, без полной истории
+        session_src = self.session.to_dict() if hasattr(self.session, "to_dict") else {}
+        session: dict[str, Any] = {}
+        for key in (
+            "last_deck",
+            "last_opponent_deck",
+            "active_topic",
+            "last_intent",
+            "last_questions",
+        ):
+            val = session_src.get(key) if isinstance(session_src, dict) else None
+            if val not in (None, "", [], {}):
+                if key == "last_questions" and isinstance(val, list):
+                    session[key] = [str(x)[:120] for x in val[-3:]]
+                else:
+                    session[key] = val
+        if session:
+            out["session"] = session
+
+        if self.ok is False:
+            out["ok"] = False
+        if self.error_code:
+            out["error_code"] = self.error_code
+        if self.error_params:
+            out["error_params"] = dict(self.error_params)
+        if self.data:
+            # data часто дублирует tool payload — урезаем размер
+            out["data"] = _compact_mapping(self.data, depth=0)
+
+        return out
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "AIContext":
@@ -702,6 +865,31 @@ class AIContext:
             data=_as_dict(data.get("data")),
             _user=None,
         )
+
+
+def _compact_mapping(value: Any, *, depth: int) -> Any:
+    """Рекурсивно урезать большие dict/list для LLM prompt."""
+    if depth > 3:
+        return "…"
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for i, (k, v) in enumerate(value.items()):
+            if i >= 24:
+                out["…"] = f"+{len(value) - 24} keys"
+                break
+            if v in (None, "", [], {}):
+                continue
+            out[str(k)] = _compact_mapping(v, depth=depth + 1)
+        return out
+    if isinstance(value, list):
+        items = value[:12]
+        compact = [_compact_mapping(x, depth=depth + 1) for x in items]
+        if len(value) > 12:
+            compact.append(f"…+{len(value) - 12}")
+        return compact
+    if isinstance(value, str) and len(value) > 280:
+        return value[:277] + "…"
+    return value
 
 
 def get_request_intent(ctx: AIContext) -> str:

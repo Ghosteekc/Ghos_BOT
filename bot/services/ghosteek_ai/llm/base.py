@@ -24,7 +24,7 @@ class LLMConfig:
     base_url: str = ""
     api_key: str = ""
     temperature: float = 0.3
-    max_tokens: int = 1024
+    max_tokens: int = 512
     timeout_seconds: float = 60.0
     extra: dict[str, Any] = field(default_factory=dict)
 
