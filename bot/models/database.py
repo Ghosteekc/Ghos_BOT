@@ -32,6 +32,7 @@ class User(Base):
     )
     preferences: Mapped[list["CardPreference"]] = relationship(back_populates="user")
     favorite_decks: Mapped[list["FavoriteDeck"]] = relationship(back_populates="user")
+    tracked_mine_decks: Mapped[list["TrackedMineDeck"]] = relationship(back_populates="user")
     app_settings: Mapped["UserSettings | None"] = relationship(
         back_populates="user", uselist=False
     )
@@ -110,6 +111,26 @@ class FavoriteDeck(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="favorite_decks")
+
+
+class TrackedMineDeck(Base):
+    """Постоянный слот «Мои колоды» (до 10): не исчезает после ротации battlelog."""
+
+    __tablename__ = "tracked_mine_decks"
+    __table_args__ = (
+        UniqueConstraint("user_id", "deck_key", name="uq_tracked_mine_deck_user_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    deck_key: Mapped[str] = mapped_column(Text)  # sorted names joined by |
+    cards_csv: Mapped[str] = mapped_column(Text, default="")  # display order
+    last_seen: Mapped[str] = mapped_column(String(30), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped["User"] = relationship(back_populates="tracked_mine_decks")
 
 
 class FsmStorageRecord(Base):

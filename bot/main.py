@@ -58,6 +58,23 @@ async def main() -> None:
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+
+    # Кнопка WebApp в чате — всегда актуальный URL
+    webapp = (settings.webapp_url or "").strip()
+    if webapp and "your-domain" not in webapp:
+        try:
+            from aiogram.types import MenuButtonWebApp, WebAppInfo
+
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="Ghosteek",
+                    web_app=WebAppInfo(url=webapp),
+                )
+            )
+            logger.info("Chat menu WebApp button set -> %s", webapp)
+        except Exception as e:
+            logger.warning("Failed to set chat menu WebApp button: %s", e)
+
     storage = SqliteStorage()
     dp = Dispatcher(storage=storage)
 

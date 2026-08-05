@@ -59,6 +59,7 @@ from bot.services.arena_decks import build_classic_meta_entries, get_arena_popul
 from bot.services.deck_constructor import build_constructor_decks
 from bot.services.deck_compare import compare_decks
 from bot.services.deck_detail import build_mine_deck_stats
+from bot.services.mine_decks import sync_tracked_mine_decks
 from bot.services.top_players import _cards_from_current_deck, get_top_players
 from bot.services.meta_analyzer import _guess_deck_name
 from bot.services.random_deck import generate_random_deck
@@ -247,15 +248,17 @@ async def _cards_to_deck_infos(cards: list[str]) -> list[DeckCardInfo]:
     return infos
 
 
-async def _build_user_deck_entries(battles: list, tag: str) -> list[DeckEntry]:
+async def _build_user_deck_entries(battles: list, user: User) -> list[DeckEntry]:
     await ensure_cards_loaded()
-    winrates = calculate_deck_winrates(battles, normalize_tag(tag))
+    tag = user.player_tag or ""
     profile_deck = await _fetch_profile_current_deck(tag)
-    winrates = _apply_profile_deck_to_winrates(winrates, profile_deck)
+    rows = await sync_tracked_mine_decks(
+        user,
+        live_battles=battles,
+        profile_deck=profile_deck,
+    )
     decks: list[DeckEntry] = []
-    for i, (_, data) in enumerate(winrates.items()):
-        if i >= 12:
-            break
+    for i, data in enumerate(rows):
         parsed = data.get("deck_cards") or []
         cards = data["cards"]
         if len(parsed) == 8:
@@ -267,15 +270,16 @@ async def _build_user_deck_entries(battles: list, tag: str) -> list[DeckEntry]:
         elixirs = [c.cost or get_card_elixir(c.name) for c in card_infos]
         avg = round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0
         decks.append(DeckEntry(
-            id=i,
-            name=_guess_deck_name(cards),
+            id=i + 1,
+            name=f"Моя колода · {data['winrate']:.1f}%",
             cards=card_infos,
-            winrate=data["winrate"],
-            total_games=data["total"],
+            winrate=float(data["winrate"]),
+            total_games=int(data["total"]),
             avg_elixir=avg,
             type="mine",
             category="mine",
             deck_link=deck_link,
+            description=f"{data['wins']}W / {data['losses']}L · {data['total']} игр",
         ))
     return decks
 
@@ -344,7 +348,7 @@ async def list_decks(
 
     if filter_type in ("all", "mine"):
         battles = await _get_battles(user)
-        user_decks = await _build_user_deck_entries(battles, user.player_tag or "")
+        user_decks = await _build_user_deck_entries(battles, user)
         decks.extend(user_decks)
 
     return DeckListResponse(
@@ -682,13 +686,14 @@ async def battle_insights(user: User = Depends(require_subscription)) -> Insight
 async def deck_winrates(user: User = Depends(require_subscription)) -> list[WinrateEntry]:
     await ensure_cards_loaded()
     battles = await _get_battles(user)
-    winrates = calculate_deck_winrates(battles, normalize_tag(user.player_tag))
     profile_deck = await _fetch_profile_current_deck(user.player_tag or "")
-    winrates = _apply_profile_deck_to_winrates(winrates, profile_deck)
+    rows = await sync_tracked_mine_decks(
+        user,
+        live_battles=battles,
+        profile_deck=profile_deck,
+    )
     result = []
-    for i, (_, data) in enumerate(winrates.items()):
-        if i >= 10:
-            break
+    for data in rows:
         parsed = data.get("deck_cards") or []
         deck_cards = _parsed_to_deck_card_infos(parsed) if len(parsed) == 8 else []
         cards = [c.name for c in deck_cards] if deck_cards else data["cards"]
