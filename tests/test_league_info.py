@@ -56,18 +56,54 @@ def test_master_ii_new_numbering():
     assert info["unlocked"] is True
     assert info["current_league_name"] == "Мастер II"
     assert info["best_league_name"] == "Мастер III"
+    assert info["current_league_icon"].endswith("league5.png")
+    assert info["best_league_icon"].endswith("league6.png")
     assert info["is_absolute_champion"] is False
 
 
-def test_legacy_numbering_still_supported():
+def test_legacy_best_uc_does_not_force_challenger_icons():
+    """Historical best=10 (old UC) + current=1 (new Master I) must not show Претендент/swords."""
     info = build_league_info(
         {
-            "trophies": 9_000,
-            "currentPathOfLegendSeasonResult": {"leagueNumber": 6, "trophies": 0},
+            "trophies": 14_000,
+            "currentPathOfLegendSeasonResult": {"leagueNumber": 1, "trophies": 0},
             "bestPathOfLegendSeasonResult": {"leagueNumber": 10, "trophies": 2100},
         },
-        now=date(2026, 7, 26),
+        now=date(2026, 8, 5),
     )
     assert info["unlocked"] is True
+    assert info["current_league_name"] == "Мастер I"
+    assert info["best_league_name"] == "Абсолютный чемпион"
+    assert info["current_league_number"] == 1
+    assert info["best_league_number"] == 7
+    assert info["current_league_icon"].endswith("league4.png")
+    assert info["best_league_icon"].endswith("league10.png")
+    assert "league1.png" not in (info["current_league_icon"] or "")
+    assert "Претендент" not in (info["current_league_name"] or "")
+
+
+def test_master_iii_uses_lightning_bottle_icon():
+    info = build_league_info(
+        {
+            "trophies": 14_000,
+            "currentPathOfLegendSeasonResult": {"leagueNumber": 3, "trophies": 0},
+            "bestPathOfLegendSeasonResult": {"leagueNumber": 3, "trophies": 0},
+        },
+        now=date(2026, 8, 5),
+    )
+    assert info["current_league_name"] == "Мастер III"
+    assert info["current_league_icon"].endswith("league6.png")
+
+
+def test_legacy_ultimate_only_best():
+    info = build_league_info(
+        {
+            "trophies": 14_000,
+            "currentPathOfLegendSeasonResult": {"leagueNumber": 3, "trophies": 0},
+            "bestPathOfLegendSeasonResult": {"leagueNumber": 10, "trophies": 2100},
+        },
+        now=date(2026, 8, 5),
+    )
     assert info["current_league_name"] == "Мастер III"
     assert info["best_league_name"] == "Абсолютный чемпион"
+    assert info["best_league_icon"].endswith("league10.png")

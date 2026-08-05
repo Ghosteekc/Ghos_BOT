@@ -4,21 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-# Pre–July 2025 API: Challenger I … Ultimate Champion (1–10).
-_LEAGUE_NAMES_LEGACY: dict[int, str] = {
-    1: "Претендент I",
-    2: "Претендент II",
-    3: "Претендент III",
-    4: "Мастер I",
-    5: "Мастер II",
-    6: "Мастер III",
-    7: "Чемпион",
-    8: "Великий чемпион",
-    9: "Королевский чемпион",
-    10: "Абсолютный чемпион",
-}
-
-# Current Ranked API (Challengers removed): Master I … Ultimate Champion (1–7).
+# Current Ranked (Challengers removed July 2025): Master I … Ultimate Champion (1–7).
 _LEAGUE_NAMES_RANKED: dict[int, str] = {
     1: "Мастер I",
     2: "Мастер II",
@@ -29,16 +15,20 @@ _LEAGUE_NAMES_RANKED: dict[int, str] = {
     7: "Абсолютный чемпион",
 }
 
-# New leagueNumber → RoyaleAPI arena/league{n}.png (old Master I … UC art).
+# Ranked 1..7 → RoyaleAPI arenas/league{n}.png
+# league1–3 = старые «Претендент» (два меча) — больше не отдаём.
+# league4–10 = Мастер I … Абсолютный чемпион (актуальный арт: молот, банка молнии, …).
 _RANKED_ICON_INDEX: dict[int, int] = {
-    1: 4,
-    2: 5,
-    3: 6,
-    4: 7,
-    5: 8,
-    6: 9,
-    7: 10,
+    1: 4,  # Master I
+    2: 5,  # Master II
+    3: 6,  # Master III (lightning bottle)
+    4: 7,  # Champion
+    5: 8,  # Grand Champion
+    6: 9,  # Royal Champion
+    7: 10,  # Ultimate Champion
 }
+
+_ICON_CDN = "https://royaleapi.github.io/cr-api-assets/arenas"
 
 
 def ranked_unlock_trophies(now: date | None = None) -> int:
@@ -88,26 +78,37 @@ def _player_trophies(player: dict) -> int:
         return 0
 
 
-def _use_legacy_map(league_numbers: list[int]) -> bool:
-    """Legacy 1–10 numbering if any season still reports > 7."""
-    return any(n > 7 for n in league_numbers)
+def _to_ranked_number(league_number: int | None) -> int | None:
+    """Normalize API leagueNumber to Ranked scale 1..7.
 
-
-def _league_name(league_number: int | None, *, legacy: bool) -> str | None:
-    if league_number is None:
-        return None
-    table = _LEAGUE_NAMES_LEGACY if legacy else _LEAGUE_NAMES_RANKED
-    return table.get(int(league_number), f"Лига {league_number}")
-
-
-def _league_icon(league_number: int | None, *, legacy: bool) -> str | None:
+    New API (post-Challenger): 1=Master I … 7=Ultimate Champion.
+    Legacy ids 8–10 (Grand/Royal/Ultimate on old 1–10 scale) → 5–7.
+    Values 1–7 stay as Ranked — never remap to removed Challenger I–III.
+    """
     if league_number is None:
         return None
     n = int(league_number)
-    icon_n = n if legacy else _RANKED_ICON_INDEX.get(n, n)
-    if icon_n < 0 or icon_n > 10:
+    if n > 7:
+        return max(1, min(7, n - 3))
+    if n < 1:
         return None
-    return f"https://royaleapi.github.io/cr-api-assets/arenas/league{icon_n}.png"
+    return min(7, n)
+
+
+def _league_name(ranked_number: int | None) -> str | None:
+    if ranked_number is None:
+        return None
+    return _LEAGUE_NAMES_RANKED.get(int(ranked_number), f"Лига {ranked_number}")
+
+
+def _league_icon(ranked_number: int | None) -> str | None:
+    """Master+ art only (league4–10). Never Challenger swords (league1–3)."""
+    if ranked_number is None:
+        return None
+    icon_n = _RANKED_ICON_INDEX.get(int(ranked_number))
+    if icon_n is None:
+        return None
+    return f"{_ICON_CDN}/league{icon_n}.png"
 
 
 def _meaningful_ranked(
@@ -126,44 +127,57 @@ def _meaningful_ranked(
     return False
 
 
+def _better_season(
+    a_num: int | None,
+    a_cups: int | None,
+    b_num: int | None,
+    b_cups: int | None,
+) -> tuple[int | None, int | None]:
+    """Return the stronger of two normalized seasons."""
+    if b_num is None:
+        return a_num, a_cups
+    if a_num is None or b_num > a_num or (
+        b_num == a_num and (b_cups or 0) > (a_cups or 0)
+    ):
+        return b_num, b_cups
+    return a_num, a_cups
+
+
 def build_league_info(player: dict, *, now: date | None = None) -> dict:
     """Build league banner payload from Clash Royale player JSON.
 
     Display rules:
     - below trophy gate and no real Ranked progress → «opens at N cups»
     - otherwise show best/current leagues (Absolute Champion shows purple cups)
+    - names/icons always on post-Challenger Ranked scale (no sword badges)
     """
     unlock_trophies = ranked_unlock_trophies(now)
     trophies = _player_trophies(player)
 
-    current_num, current_cups, current_rank = _season_league(
+    current_raw, current_cups, current_rank = _season_league(
         player.get("currentPathOfLegendSeasonResult")
     )
-    last_num, last_cups, _ = _season_league(player.get("lastPathOfLegendSeasonResult"))
-    best_num, best_cups, _ = _season_league(player.get("bestPathOfLegendSeasonResult"))
+    last_raw, last_cups, _ = _season_league(player.get("lastPathOfLegendSeasonResult"))
+    best_raw, best_cups, _ = _season_league(player.get("bestPathOfLegendSeasonResult"))
 
-    if current_num is None:
-        current_num, current_cups, current_rank = _season_league(
+    if current_raw is None:
+        current_raw, current_cups, current_rank = _season_league(
             player.get("currentRankedSeasonResult")
         )
-    if best_num is None:
-        best_num, best_cups, _ = _season_league(player.get("bestRankedSeasonResult"))
-    if last_num is None:
-        last_num, last_cups, _ = _season_league(player.get("lastRankedSeasonResult"))
+    if best_raw is None:
+        best_raw, best_cups, _ = _season_league(player.get("bestRankedSeasonResult"))
+    if last_raw is None:
+        last_raw, last_cups, _ = _season_league(player.get("lastRankedSeasonResult"))
 
-    # Prefer the highest known season for «best» when best payload is missing/low.
-    for num, cups in ((last_num, last_cups), (current_num, current_cups)):
-        if num is None:
-            continue
-        if best_num is None or num > best_num or (
-            num == best_num and (cups or 0) > (best_cups or 0)
-        ):
-            best_num, best_cups = num, cups
+    current_num = _to_ranked_number(current_raw)
+    last_num = _to_ranked_number(last_raw)
+    best_num = _to_ranked_number(best_raw)
 
-    nums = [n for n in (current_num, best_num, last_num) if n is not None]
-    legacy = _use_legacy_map(nums)
-    absolute_n = 10 if legacy else 7
-    entry_n = 4 if legacy else 1
+    best_num, best_cups = _better_season(best_num, best_cups, last_num, last_cups)
+    best_num, best_cups = _better_season(best_num, best_cups, current_num, current_cups)
+
+    absolute_n = 7
+    entry_n = 1
 
     meaningful = _meaningful_ranked(current_num, current_cups, best_num, current_rank)
     unlocked = trophies >= unlock_trophies or meaningful
@@ -183,11 +197,11 @@ def build_league_info(player: dict, *, now: date | None = None) -> dict:
         "unlocked": unlocked,
         "unlock_trophies": unlock_trophies,
         "current_league_number": current_num if unlocked else None,
-        "current_league_name": _league_name(current_num, legacy=legacy) if unlocked else None,
-        "current_league_icon": _league_icon(current_num, legacy=legacy) if unlocked else None,
+        "current_league_name": _league_name(current_num) if unlocked else None,
+        "current_league_icon": _league_icon(current_num) if unlocked else None,
         "best_league_number": best_num if unlocked else None,
-        "best_league_name": _league_name(best_num, legacy=legacy) if unlocked else None,
-        "best_league_icon": _league_icon(best_num, legacy=legacy) if unlocked else None,
+        "best_league_name": _league_name(best_num) if unlocked else None,
+        "best_league_icon": _league_icon(best_num) if unlocked else None,
         "is_absolute_champion": bool(is_absolute),
         "absolute_trophies": current_cups if is_absolute else None,
     }
