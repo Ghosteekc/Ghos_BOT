@@ -463,8 +463,10 @@ class AIContext:
     actions: list[dict[str, str]] = field(default_factory=list)
     tool_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     data: dict[str, Any] = field(default_factory=dict)
+    # Structured UI cards (optional; text answer stays separate)
+    deck_card: dict[str, Any] | None = None
 
-    # Внутренняя ссылка на User для вызовов доменных сервисов (не для Generator / LLM)
+    # Внутренняя ссылка на User для доменных сервисов (не для Generator / LLM)
     _user: Any = field(default=None, repr=False, compare=False)
 
     # --- Совместимость с Generator / старым плоским API ---
@@ -649,6 +651,7 @@ class AIContext:
             "actions": list(self.actions),
             "tool_outputs": {k: dict(v) for k, v in self.tool_outputs.items()},
             "data": dict(self.data),
+            "deck_card": dict(self.deck_card) if isinstance(self.deck_card, dict) else None,
         }
 
     def to_llm_dict(self) -> dict[str, Any]:
@@ -690,18 +693,21 @@ class AIContext:
             deck["core"] = list(self.deck.core)[:4]
         if self.deck.build_mode:
             deck["build_mode"] = self.deck.build_mode
-        # built_decks — только имена карт первых 2 вариантов
-        if self.deck.built_decks:
+        # Если есть deck_card для UI — не отдаём LLM полный список карт (иначе перечисляет в тексте).
+        if self.deck_card and isinstance(self.deck_card, dict):
+            deck["ui_deck_card"] = {
+                "archetype": self.deck_card.get("archetype"),
+                "average_elixir": self.deck_card.get("average_elixir"),
+                "title": self.deck_card.get("title"),
+                "shown_in_ui": True,
+            }
+        elif self.deck.built_decks:
             compact_builds: list[Any] = []
             for item in self.deck.built_decks[:2]:
                 if isinstance(item, dict):
-                    cards = item.get("cards")
-                    if isinstance(cards, list):
-                        compact_builds.append([c for c in cards if isinstance(c, str)][:8])
-                    else:
-                        name = item.get("name") or item.get("archetype")
-                        if name:
-                            compact_builds.append(str(name))
+                    name = item.get("name") or item.get("archetype")
+                    if name:
+                        compact_builds.append(str(name))
             if compact_builds:
                 deck["built_decks"] = compact_builds
         if deck:
@@ -863,6 +869,7 @@ class AIContext:
             actions=actions,
             tool_outputs=tool_outputs,
             data=_as_dict(data.get("data")),
+            deck_card=_as_dict(data.get("deck_card")) or None,
             _user=None,
         )
 

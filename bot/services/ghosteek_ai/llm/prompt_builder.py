@@ -172,7 +172,7 @@ class PromptBuilder:
     @staticmethod
     def _compact_tool_content(tr: ToolResult) -> str:
         """Урезанный ToolResult для LLM: факты без тяжёлого envelope."""
-        payload = {
+        payload: dict[str, Any] = {
             "tool": tr.tool,
             "ok": bool(tr.ok),
         }
@@ -181,7 +181,30 @@ class PromptBuilder:
         if tr.error_params:
             payload["error_params"] = tr.error_params
         if tr.data:
-            payload["data"] = tr.data
+            data = dict(tr.data)
+            # Не отдаём LLM списки карт — UI рисует deck_card.
+            deck_card = data.get("deck_card")
+            if isinstance(deck_card, dict):
+                data["deck_card"] = {
+                    "archetype": deck_card.get("archetype"),
+                    "average_elixir": deck_card.get("average_elixir"),
+                    "title": deck_card.get("title"),
+                    "shown_in_ui": True,
+                    "do_not_list_cards": True,
+                }
+            decks = data.get("decks")
+            if isinstance(decks, list):
+                compact_decks = []
+                for d in decks[:3]:
+                    if isinstance(d, dict):
+                        compact_decks.append(
+                            {
+                                "name": d.get("name"),
+                                "archetype": d.get("archetype") or d.get("category"),
+                            }
+                        )
+                data["decks"] = compact_decks
+            payload["data"] = data
         if tr.actions:
             payload["actions"] = tr.actions[:3]
         text = json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))

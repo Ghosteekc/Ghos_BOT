@@ -338,41 +338,40 @@ class TemplateResponseGenerator:
                 tip="Пример: «хочу играть через Хога» или 4 карты подряд.",
             )
 
-        first = decks[0]
-        cards = first.get("cards") or first.get("card_names") or []
-        if isinstance(cards, list) and cards and isinstance(cards[0], dict):
-            names = [c.get("name") for c in cards if c.get("name")]
-        else:
-            names = [c for c in cards if isinstance(c, str)]
-        title = first.get("name")
-        label = title or _ru_list(names)
+        first = decks[0] if isinstance(decks[0], dict) else {}
+        title = first.get("name") or first.get("archetype") or ""
         core_txt = _ru_list(core, limit=4) if core else ""
+        arch = first.get("archetype") or first.get("category") or title
 
         more = ""
         if len(decks) > 1:
-            second = decks[1].get("name") or _ru_list(
-                [
-                    c if isinstance(c, str) else c.get("name")
-                    for c in (decks[1].get("cards") or [])
-                    if c
-                ][:8]
-            )
-            more = f"Запасной вариант: {second}."
+            second = decks[1] if isinstance(decks[1], dict) else {}
+            second_label = second.get("name") or second.get("archetype") or "альтернатива"
+            more = f"Есть запасной вариант («{second_label}») — открой колоды, если этот не зайдёт."
 
+        # Карты НЕ перечисляем — их рисует DeckCard на фронте.
         if mode == "meta_templates":
+            focus = f"«{title or arch}»" if (title or arch) else "готовый шаблон"
             return coach_reply(
-                f"Бери за основу «{label}».",
-                why=f"Шаблон закрывает {core_txt or 'твой win condition'} готовыми ролями."
-                if core_txt
-                else "Это проверенный шаблон под твой win condition.",
-                action=f"Состав: {_ru_list(names)}.",
-                tip=more or "Сыграй пачку, потом точечно подкрутим ответы на твои проигрышные матчапы.",
+                f"Я взял за основу {focus}.",
+                why=(
+                    f"Шаблон закрывает {core_txt} готовыми ролями."
+                    if core_txt
+                    else "Это проверенный шаблон под твой win condition."
+                ),
+                action="Сама колода показана ниже — импортируй и сыграй пачку боёв.",
+                tip=more or "Потом точечно подкрутим ответы на твои проигрышные матчапы.",
             )
 
+        around = core_txt or (str(arch) if arch else "твоё ядро")
         return coach_reply(
-            f"Собрал вариант: {_ru_list(names)}.",
-            why=f"Ядро {core_txt} закрыто ролями." if core_txt else "Сборка вокруг твоего ядра.",
-            action="Протестируй 10–15 боёв — смотри трейды, не только винрейт за вечер.",
+            f"Я собрал колоду вокруг {around}.",
+            why=(
+                f"Ядро закрыто ролями под архетип {arch}."
+                if arch and core_txt
+                else "Сборка держится на ролях и связках, а не на случайном наборе."
+            ),
+            action="Сама колода показана ниже — протестируй 10–15 боёв и смотри трейды.",
             tip=more or "Не меняй половину карт после двух поражений.",
         )
 

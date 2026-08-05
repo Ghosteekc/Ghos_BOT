@@ -836,8 +836,37 @@ class GhosteekAiAction(BaseModel):
     path: str
 
 
+class DeckCardResponse(BaseModel):
+    """Структурированная колода для UI (не текст и не markdown)."""
+
+    deck: list[str] = Field(default_factory=list)
+    average_elixir: float = 0.0
+    archetype: str = ""
+    arena: str | None = None
+    import_url: str = ""
+    gameplan: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    evaluation: dict = Field(default_factory=dict)
+    title: str | None = None
+
+
+class BattleCardResponse(BaseModel):
+    """Зарезервировано: structured battle card (пока не используется)."""
+
+    pass
+
+
+class AnalysisCardResponse(BaseModel):
+    """Зарезервировано: structured analysis card (пока не используется)."""
+
+    pass
+
+
 class GhosteekAiAskResponse(BaseModel):
     intent: str
     answer: str
     sources: dict = Field(default_factory=dict)
     actions: list[GhosteekAiAction] = Field(default_factory=list)
+    deck_card: DeckCardResponse | None = None
+    battle_card: BattleCardResponse | None = None
+    analysis_card: AnalysisCardResponse | None = None

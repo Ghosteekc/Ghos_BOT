@@ -327,4 +327,5 @@ async def ask_ghosteek_ai(
         answer=answer,
         sources=sources,
         actions=actions,
+        deck_card=dict(ai_context.deck_card) if isinstance(ai_context.deck_card, dict) else None,
     )

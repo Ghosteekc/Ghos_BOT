@@ -244,6 +244,9 @@ class GhosteekAiResponse:
     answer: str
     sources: dict[str, Any] = field(default_factory=dict)
     actions: list[GhosteekAiAction] = field(default_factory=list)
+    deck_card: dict[str, Any] | None = None
+    battle_card: dict[str, Any] | None = None
+    analysis_card: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -251,11 +254,19 @@ class GhosteekAiResponse:
             "answer": self.answer,
             "sources": self.sources,
             "actions": [a.to_dict() if hasattr(a, "to_dict") else asdict(a) for a in self.actions],
+            "deck_card": self.deck_card,
+            "battle_card": self.battle_card,
+            "analysis_card": self.analysis_card,
         }
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "GhosteekAiResponse":
         actions_raw = raw.get("actions") if isinstance(raw.get("actions"), list) else []
+        deck_card = raw.get("deck_card") if isinstance(raw.get("deck_card"), dict) else None
+        battle_card = raw.get("battle_card") if isinstance(raw.get("battle_card"), dict) else None
+        analysis_card = (
+            raw.get("analysis_card") if isinstance(raw.get("analysis_card"), dict) else None
+        )
         return cls(
             intent=str(raw.get("intent") or ""),
             answer=str(raw.get("answer") or ""),
@@ -266,4 +277,7 @@ class GhosteekAiResponse:
                 GhosteekAiAction.from_dict(a) if isinstance(a, dict) else GhosteekAiAction("navigate", "/")
                 for a in actions_raw
             ],
+            deck_card=dict(deck_card) if deck_card else None,
+            battle_card=dict(battle_card) if battle_card else None,
+            analysis_card=dict(analysis_card) if analysis_card else None,
         )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_constructor import build_constructor_decks
 from bot.services.ghosteek_ai.context.ai_context import AIContext
+from bot.services.ghosteek_ai.deck_card import deck_card_from_entry, format_arena_label
 from bot.services.ghosteek_ai.game_coach import decks_for_win_condition
 from bot.services.ghosteek_ai.models import ToolResult
 from bot.services.ghosteek_ai.tools.base import BaseTool
@@ -15,13 +16,15 @@ class DeckBuilderTool(BaseTool):
     name = "deck_builder"
     description = (
         "Build decks from a win-condition card or a 4-card core "
-        "(constructor or curated meta templates). Returns deck lists only."
+        "(constructor or curated meta templates). "
+        "Returns structured deck_card for UI — do not list cards in text."
     )
     input_schema = object_schema({"cards": COMMON_INPUT_PROPERTIES["cards"]})
 
     async def execute(self, ctx: AIContext) -> ToolResult:
         user = ctx.require_user()
         core = ctx.cards_arg()
+        arena_label = format_arena_label(ctx.arena.arena_id, ctx.arena.trophies)
 
         if len(core) >= 4:
             slots = [{"name": n, "slot": i} for i, n in enumerate(core[:4])]
@@ -40,10 +43,15 @@ class DeckBuilderTool(BaseTool):
                     data={"core": core[:4]},
                     actions=[{"type": "navigate", "path": "/decks"}],
                 )
+            deck_card = deck_card_from_entry(decks[0], arena=arena_label)
+            data: dict = {"core": core[:4], "decks": decks[:3], "mode": "constructor"}
+            if deck_card:
+                data["deck_card"] = deck_card
+                ctx.deck_card = deck_card
             return ToolResult(
                 tool=self.name,
                 ok=True,
-                data={"core": core[:4], "decks": decks[:3], "mode": "constructor"},
+                data=data,
                 actions=[{"type": "navigate", "path": "/decks"}],
             )
 
@@ -60,14 +68,19 @@ class DeckBuilderTool(BaseTool):
                 if len(templates) >= 3:
                     break
             if templates:
+                deck_card = deck_card_from_entry(templates[0], arena=arena_label)
+                data = {
+                    "core": core,
+                    "decks": templates[:3],
+                    "mode": "meta_templates",
+                }
+                if deck_card:
+                    data["deck_card"] = deck_card
+                    ctx.deck_card = deck_card
                 return ToolResult(
                     tool=self.name,
                     ok=True,
-                    data={
-                        "core": core,
-                        "decks": templates[:3],
-                        "mode": "meta_templates",
-                    },
+                    data=data,
                     actions=[{"type": "navigate", "path": "/decks"}],
                 )
             return ToolResult(

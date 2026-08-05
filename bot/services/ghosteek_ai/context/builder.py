@@ -152,6 +152,25 @@ class ContextBuilder:
             ctx.deck.built_decks = list(data["decks"])
             ctx.deck.build_mode = data.get("mode")
 
+        # Structured DeckCard for UI (from Builder entry — no recompute)
+        deck_card = data.get("deck_card")
+        if isinstance(deck_card, dict) and deck_card.get("deck"):
+            ctx.deck_card = dict(deck_card)
+        elif result.tool == "deck_builder" and result.ok:
+            from bot.services.ghosteek_ai.deck_card import (
+                deck_card_from_build_data,
+                format_arena_label,
+            )
+
+            built = deck_card_from_build_data(
+                data,
+                arena=format_arena_label(ctx.arena.arena_id, ctx.arena.trophies),
+            )
+            if built:
+                ctx.deck_card = built
+                data["deck_card"] = built
+                ctx.data = data
+
         # Recommendation / GamePlan / DeckIntent
         rec = data.get("recommendation")
         if isinstance(rec, dict):

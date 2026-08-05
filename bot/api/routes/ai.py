@@ -9,6 +9,7 @@ from bot.api.schemas import (
     GhosteekAiAction,
     GhosteekAiAskRequest,
     GhosteekAiAskResponse,
+    DeckCardResponse,
 )
 from bot.models.database import User
 from bot.services.ghosteek_ai import ask_ghosteek_ai
@@ -35,11 +36,17 @@ async def ask_ai(
             context["battle_time"] = body.context.battle_time
 
     result = await ask_ghosteek_ai(body.message, user, context=context or None)
+    deck_card = None
+    if isinstance(result.deck_card, dict) and result.deck_card.get("deck"):
+        deck_card = DeckCardResponse.model_validate(result.deck_card)
     return GhosteekAiAskResponse(
         intent=result.intent,
         answer=result.answer,
         sources=result.sources,
         actions=[GhosteekAiAction(type=a.type, path=a.path) for a in result.actions],
+        deck_card=deck_card,
+        battle_card=None,
+        analysis_card=None,
     )
 
 
