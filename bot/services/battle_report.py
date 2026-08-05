@@ -251,7 +251,7 @@ def _build_outcome_summary(
         hint = ", ".join(card_name_ru(c) for c in counters[:3]) if counters else "усилить защиту"
         return (
             f"Поражение: «{card_name_ru(missing_threat)}» соперника не была нейтрализована. "
-            f"В колоде не хватает: {hint}."
+            f"Рекомендуемая контра: {hint}."
         )
 
     opp_air = _air_in_deck(opp_deck)
