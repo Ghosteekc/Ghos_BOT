@@ -194,6 +194,10 @@ def _enrich_with_recommendation(
     entry["recommendation"] = rec.to_public_dict()
     if entry.get("evaluation_report") is None and rec.evaluation_report is not None:
         entry["evaluation_report"] = rec.evaluation_report.to_dict()
+    if rec.sanity_report is not None:
+        entry["sanity_report"] = rec.sanity_report.to_dict()
+        if not rec.sanity_report.passed:
+            entry["balanced"] = False
     return entry
 
 

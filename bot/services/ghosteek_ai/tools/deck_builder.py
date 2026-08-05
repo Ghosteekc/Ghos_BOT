@@ -68,11 +68,23 @@ class DeckBuilderTool(BaseTool):
                 if len(templates) >= 3:
                     break
             if templates:
+                from bot.services.deck_sanity_validator import validate_deck_sanity
+                from bot.services.ghosteek_ai.deck_card import extract_deck_names
+
+                first = dict(templates[0])
+                names = extract_deck_names(first)
+                if len(names) == 8:
+                    sanity = validate_deck_sanity(names)
+                    first["sanity_report"] = sanity.to_dict()
+                    if not sanity.passed:
+                        first["balanced"] = False
+                    templates[0] = first
                 deck_card = deck_card_from_entry(templates[0], arena=arena_label)
                 data = {
                     "core": core,
                     "decks": templates[:3],
                     "mode": "meta_templates",
+                    "sanity_report": templates[0].get("sanity_report"),
                 }
                 if deck_card:
                     data["deck_card"] = deck_card

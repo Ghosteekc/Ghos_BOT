@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from bot.services.card_names_ru import card_name_ru
+from bot.services.deck_sanity_validator import sanity_payload_from_data
 from bot.services.ghosteek_ai.coach_tips import pick_tip
 from bot.services.ghosteek_ai.glossary import archetype_label
 from bot.services.ghosteek_ai.intents import (
@@ -65,6 +66,26 @@ def _arch_from_data(data: dict[str, Any]) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _template_sanity_fail(sanity: dict[str, Any], *, intent: str, arch: str | None) -> str:
+    """Честный вердикт тренера — без оправдания Builder и без плана игры."""
+    msgs = [str(m) for m in (sanity.get("critical_messages") or []) if m]
+    verdict = str(sanity.get("coach_verdict") or "").strip()
+    if not verdict:
+        verdict = msgs[0] if msgs else "Эта сборка выглядит нестабильной. Я бы пересобрал её."
+    why = str(sanity.get("coach_why") or "").strip()
+    if not why and len(msgs) >= 2:
+        why = msgs[1]
+    if not why:
+        why = "Builder мог ошибиться — не буду оправдывать слабую сборку."
+    return coach_reply(
+        verdict,
+        why=why,
+        tip="Сначала закрой критические дыры, потом разберём, как ей играть.",
+        intent=intent,
+        archetype=arch,
+    )
+
+
 def template_build_deck(data: dict[str, Any]) -> str:
     core = data.get("core") or []
     decks = data.get("decks") or []
@@ -81,6 +102,10 @@ def template_build_deck(data: dict[str, Any]) -> str:
             intent=INTENT_BUILD_DECK,
             archetype=arch,
         )
+
+    sanity = sanity_payload_from_data(data)
+    if sanity is not None and not sanity.get("passed", True):
+        return _template_sanity_fail(sanity, intent=INTENT_BUILD_DECK, arch=arch)
 
     first = decks[0] if isinstance(decks[0], dict) else {}
     title = first.get("name") or arch or label
@@ -127,6 +152,17 @@ def template_analyze_deck(data: dict[str, Any], *, improve: bool = False) -> str
         if isinstance(rec.get("intent"), dict)
         else None
     ) or data.get("archetype")
+    intent = INTENT_IMPROVE_DECK if improve else INTENT_ANALYZE_DECK
+
+    sanity = sanity_payload_from_data(data)
+    if sanity is not None and not sanity.get("passed", True) and not improve:
+        # Анализ: сначала честные дыры, без «как играть».
+        return _template_sanity_fail(
+            sanity,
+            intent=intent,
+            arch=arch if isinstance(arch, str) else None,
+        )
+
     strength = _first(coaching.get("strengths"), data.get("synergy_notes"))
     weakness = _first(
         gp.get("critical_weaknesses"),
@@ -134,7 +170,6 @@ def template_analyze_deck(data: dict[str, Any], *, improve: bool = False) -> str
     )
     how = gp.get("how_to_win") or ""
     tip = pick_tip(arch if isinstance(arch, str) else None, seed=strength or weakness)
-    intent = INTENT_IMPROVE_DECK if improve else INTENT_ANALYZE_DECK
 
     if improve:
         if plan.get("needed"):

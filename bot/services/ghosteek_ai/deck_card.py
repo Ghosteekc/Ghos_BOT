@@ -26,7 +26,49 @@ def extract_deck_names(entry: dict[str, Any]) -> list[str]:
     return names[:8]
 
 
+def _weakness_lines(entry: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    sanity = entry.get("sanity_report")
+    if not isinstance(sanity, dict):
+        rec = entry.get("recommendation")
+        if isinstance(rec, dict):
+            sanity = rec.get("sanity_report")
+    if isinstance(sanity, dict) and not sanity.get("passed", True):
+        for msg in sanity.get("critical_messages") or []:
+            if isinstance(msg, str) and msg.strip() and msg.strip() not in out:
+                out.append(msg.strip())
+        verdict = sanity.get("coach_verdict")
+        if isinstance(verdict, str) and verdict.strip() and verdict.strip() not in out:
+            out.insert(0, verdict.strip())
+    gp = entry.get("game_plan")
+    if isinstance(gp, dict):
+        for w in gp.get("critical_weaknesses") or []:
+            if isinstance(w, str) and w.strip() and w.strip() not in out:
+                out.append(w.strip())
+    report = entry.get("evaluation_report")
+    if isinstance(report, dict):
+        for w in report.get("weaknesses") or []:
+            if isinstance(w, str) and w.strip() and w.strip() not in out:
+                out.append(w.strip())
+    return out[:5]
+
+
+def _sanity_failed(entry: dict[str, Any]) -> bool:
+    sanity = entry.get("sanity_report")
+    if isinstance(sanity, dict) and "passed" in sanity:
+        return not bool(sanity.get("passed"))
+    rec = entry.get("recommendation")
+    if isinstance(rec, dict):
+        nested = rec.get("sanity_report")
+        if isinstance(nested, dict) and "passed" in nested:
+            return not bool(nested.get("passed"))
+    return False
+
+
 def _gameplan_lines(entry: dict[str, Any]) -> list[str]:
+    # Пока Sanity не пройден — не отдаём «как играть».
+    if _sanity_failed(entry):
+        return []
     lines: list[str] = []
     gp = entry.get("game_plan")
     if isinstance(gp, dict):
@@ -50,21 +92,6 @@ def _gameplan_lines(entry: dict[str, Any]) -> list[str]:
     if not lines and isinstance(desc, str) and desc.strip():
         lines.append(desc.strip())
     return lines[:5]
-
-
-def _weakness_lines(entry: dict[str, Any]) -> list[str]:
-    out: list[str] = []
-    gp = entry.get("game_plan")
-    if isinstance(gp, dict):
-        for w in gp.get("critical_weaknesses") or []:
-            if isinstance(w, str) and w.strip():
-                out.append(w.strip())
-    report = entry.get("evaluation_report")
-    if isinstance(report, dict):
-        for w in report.get("weaknesses") or []:
-            if isinstance(w, str) and w.strip() and w.strip() not in out:
-                out.append(w.strip())
-    return out[:5]
 
 
 def _evaluation_payload(entry: dict[str, Any]) -> dict[str, Any]:
@@ -129,6 +156,7 @@ def deck_card_from_entry(
         "weaknesses": _weakness_lines(entry),
         "evaluation": _evaluation_payload(entry),
         "title": title,
+        "sanity_passed": not _sanity_failed(entry),
     }
 
 

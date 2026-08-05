@@ -33,6 +33,26 @@ MODE_AGENT = "agent"
 MODE_PLANNER = "planner"
 
 
+def _sanity_blocks_explain(ai_context) -> bool:
+    """Если Deck Sanity не пройден — не даём LLM оправдывать колоду."""
+    from bot.services.deck_sanity_validator import sanity_payload_from_data
+    from bot.services.ghosteek_ai.intents import (
+        INTENT_ANALYZE_DECK,
+        INTENT_BUILD_DECK,
+    )
+
+    intent = getattr(getattr(ai_context, "intent", None), "request", None)
+    if intent not in {INTENT_BUILD_DECK, INTENT_ANALYZE_DECK}:
+        return False
+    data = ai_context.primary_tool_data() if hasattr(ai_context, "primary_tool_data") else {}
+    build = getattr(ai_context, "build", None)
+    payload = build if isinstance(build, dict) and build else data
+    sanity = sanity_payload_from_data(payload if isinstance(payload, dict) else {})
+    if sanity is None:
+        return False
+    return not bool(sanity.get("passed", True))
+
+
 def _configured_backend() -> str:
     return (settings.ghosteek_ai_backend or "qwen").strip().lower()
 
@@ -263,6 +283,13 @@ async def ask_ghosteek_ai(
             provider=provider,
             reason=reason,
         )
+
+    # Sanity fail → только честный template-вердикт, без «как играть».
+    if _sanity_blocks_explain(ai_context):
+        raw_answer = _TEMPLATE.generate(ai_context)
+        gen_meta = dict(gen_meta or {})
+        gen_meta["used_backend"] = "template"
+        gen_meta["fallback_reason"] = "deck_sanity_failed"
 
     answer = SafetyLayer.apply(raw_answer, ai_context)
 

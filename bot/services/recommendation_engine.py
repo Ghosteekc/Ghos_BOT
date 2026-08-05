@@ -205,7 +205,7 @@ class RecommendationResult:
     origin: str = DeckOrigin.PLAYER.value
     coaching: DeckCoaching | None = None
     evaluation_report: object | None = None  # EvaluationReport — единый слой оценки
-
+    sanity_report: object | None = None  # DeckSanityReport — gate перед coaching
     def to_dict(self) -> dict:
         """Полный внутренний снимок (логирование / режим разработчика)."""
         def rating_dict(r: CandidateRating | None) -> dict | None:
@@ -295,6 +295,9 @@ class RecommendationResult:
             },
             "origin": self.origin,
             "coaching": self.coaching.to_dict() if self.coaching else None,
+            "sanity_report": (
+                self.sanity_report.to_dict() if self.sanity_report is not None else None
+            ),
         }
 
     def to_public_dict(self) -> dict:
@@ -374,6 +377,9 @@ class RecommendationResult:
             },
             "origin": self.origin,
             "coaching": self.coaching.to_dict() if self.coaching else None,
+            "sanity_report": (
+                self.sanity_report.to_dict() if self.sanity_report is not None else None
+            ),
         }
 
     def improvements_ui(self) -> list[dict]:
@@ -1322,7 +1328,6 @@ class RecommendationEngine:
         # RecommendationEngine не является вторым Builder.
         # Замены существуют только в явном режиме Improve My Deck.
         allow_swaps = is_improver
-        coaching: DeckCoaching | None = None
         if is_improver:
             gaps0 = _collect_improvement_gaps(work, db, intent)
             if gaps0 and not prep_notes:
@@ -1367,7 +1372,31 @@ class RecommendationEngine:
             plan.improved_deck, archetype=intent.archetype, intent=intent,
         )
 
-        if is_builder:
+        from bot.services.deck_evaluator import DeckEvaluator
+        from bot.services.deck_sanity_validator import validate_deck_sanity
+
+        evaluation = DeckEvaluator.evaluate(
+            original,
+            archetype=intent.archetype,
+            db=db,
+        )
+        risk = _risk_assessment(start_balance, game_plan, [])
+
+        # Deck Sanity Validator — до coaching / текста «как играть».
+        sanity = validate_deck_sanity(
+            plan.improved_deck,
+            intent=intent,
+            game_plan=game_plan,
+            evaluation=evaluation,
+            archetype=intent.archetype,
+            db=db,
+            balance_hard=list(start_balance.hard),
+            balance_messages=list(start_balance.messages),
+            risk_score=risk.score,
+        )
+
+        coaching: DeckCoaching | None = None
+        if is_builder and sanity.passed:
             coaching = build_deck_coaching(
                 intent,
                 game_plan,
@@ -1380,6 +1409,11 @@ class RecommendationEngine:
                 *([f"Комбинация: {c}" for c in coaching.key_combinations[:2]]),
                 *[f"Совет: {t}" for t in coaching.usage_tips[:2]],
             ]
+        elif not sanity.passed:
+            # Честные дыры вместо оправдания Builder.
+            why_picks = [
+                f"⚠ {msg}" for msg in sanity.critical_messages[:6]
+            ] or [f"⚠ {sanity.coach_verdict()}"]
 
         end_gaps = _collect_improvement_gaps(plan.improved_deck, db, intent) if is_improver else []
 
@@ -1394,14 +1428,6 @@ class RecommendationEngine:
         )
         risk = _risk_assessment(start_balance, game_plan, open_cats)
 
-        from bot.services.deck_evaluator import DeckEvaluator
-
-        evaluation = DeckEvaluator.evaluate(
-            original,
-            archetype=intent.archetype,
-            db=db,
-        )
-
         result = RecommendationResult(
             intent=intent,
             game_plan=game_plan,
@@ -1413,6 +1439,7 @@ class RecommendationEngine:
             origin=origin_val,
             coaching=coaching,
             evaluation_report=evaluation,
+            sanity_report=sanity,
         )
         if use_cache:
             recommendation_cache.put(cache_key, result)
