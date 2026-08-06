@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from bot.services.card_data import WIN_CONDITIONS
+from bot.services.card_data import (
+    WIN_CONDITIONS,
+    is_primary_win_condition,
+    is_secondary_pressure,
+    is_tower_threat,
+)
 from bot.services.card_profile import get_card_profile
 
 # Soft-issue keys, совместимые с soft_balance_issues / FE balanceIssues.
@@ -205,15 +210,20 @@ _DEFAULT_POLICY = _ArchetypePolicy(
 
 
 def detect_primary_win(cards: list[str]) -> str | None:
-    wins = [c for c in cards if c in WIN_CONDITIONS]
-    if not wins:
-        for c in cards:
-            if get_card_profile(c).is_win_condition:
-                wins.append(c)
-    if not wins:
-        return None
-    # Детерминированный выбор при нескольких win-condition.
-    return sorted(wins)[0]
+    """Главная угроза: сначала Primary WC, иначе Secondary Pressure / role."""
+    primaries = [c for c in cards if is_primary_win_condition(c)]
+    if primaries:
+        # Предпочитаем более «классическую» угрозу: дешевле обычно = cycle win.
+        return sorted(primaries, key=lambda c: (get_card_profile(c).elixir, c))[0]
+
+    secondaries = [c for c in cards if is_secondary_pressure(c) or c in WIN_CONDITIONS]
+    if secondaries:
+        return sorted(secondaries, key=lambda c: (get_card_profile(c).elixir, c))[0]
+
+    for c in cards:
+        if get_card_profile(c).is_win_condition and not is_tower_threat(c):
+            return c
+    return None
 
 
 def infer_deck_intent(

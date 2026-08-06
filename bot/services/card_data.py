@@ -253,6 +253,50 @@ WIN_CONDITIONS = {
     "Ram Rider", "Mighty Miner", "Goblin Machine", "Boss Bandit", "Rune Giant",
 }
 
+# Chip / assassin / bridge pressure: могут быть sole win, но НЕ вторая независимая WC.
+SECONDARY_PRESSURE = {
+    "Miner",
+    "Mighty Miner",
+    "Wall Breakers",
+    "Boss Bandit",
+    "Goblinstein",
+}
+
+
+def is_primary_win_condition(name: str) -> bool:
+    """Главная угроза башне (Hog, Giant, Barrel…) — считает MAX_WINS."""
+    return name in WIN_CONDITIONS and name not in SECONDARY_PRESSURE
+
+
+def is_secondary_pressure(name: str) -> bool:
+    """Доп. давление / chip — не конфликтует с primary как вторая WC."""
+    return name in SECONDARY_PRESSURE
+
+
+def is_tower_threat(name: str) -> bool:
+    """Любая карта, способная вести план атаки (primary или secondary)."""
+    return is_primary_win_condition(name) or is_secondary_pressure(name)
+
+
+def primary_wins_in(deck: list[str] | tuple[str, ...]) -> list[str]:
+    return [c for c in deck if is_primary_win_condition(c)]
+
+
+def secondary_pressure_in(deck: list[str] | tuple[str, ...]) -> list[str]:
+    return [c for c in deck if is_secondary_pressure(c)]
+
+
+def count_independent_wins(deck: list[str] | tuple[str, ...]) -> int:
+    """Сколько независимых win condition для hard MAX_WINS.
+
+    Если есть primary — secondary не считаются отдельными WC.
+    Если primary нет — secondary сами выступают win condition.
+    """
+    primaries = primary_wins_in(deck)
+    if primaries:
+        return len(primaries)
+    return len(secondary_pressure_in(deck))
+
 # TODO(card-profile): SWARM_CARDS → CardProfile.is_swarm / cards.json roles.
 SWARM_CARDS = {
     "Goblins", "Spear Goblins", "Skeleton Army", "Goblin Gang", "Barbarians",

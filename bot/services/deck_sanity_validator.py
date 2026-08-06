@@ -10,7 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from bot.services.card_data import WIN_CONDITIONS, card_has_role, get_card_elixir
+from bot.services.card_data import (
+    card_has_role,
+    get_card_elixir,
+    is_tower_threat,
+    primary_wins_in,
+)
 from bot.services.deck_builder.constants import (
     ARCHETYPE_ELIXIR,
     DEFAULT_ELIXIR_MAX,
@@ -117,11 +122,11 @@ def _role_cards(deck: list[str], role: str) -> list[str]:
 
 
 def _has_attack_win(deck: list[str]) -> bool:
-    return any(c in WIN_CONDITIONS for c in deck)
+    return any(is_tower_threat(c) for c in deck)
 
 
 def _allows_combo_wins(deck: list[str]) -> bool:
-    wins = {c for c in deck if c in WIN_CONDITIONS or card_has_role(c, ROLE_WIN)}
+    wins = {c for c in deck if is_tower_threat(c) or card_has_role(c, ROLE_WIN)}
     return any(pair <= wins for pair in _COMBO_WIN_PAIRS)
 
 
@@ -204,15 +209,16 @@ def _check_structure(
             f"Средний эликсир слишком высокий ({avg:.1f}) — сборка будет вязнуть в темпе.",
         ))
 
-    # Конфликтующие роли
+    # Конфликтующие роли — только две независимые Primary WC.
     conflict = False
     conflict_msg = ""
-    attack_wins = [c for c in deck if c in WIN_CONDITIONS]
+    attack_wins = primary_wins_in(deck)
     if len(attack_wins) >= 2 and not _allows_combo_wins(deck):
         conflict = True
+        names = " и ".join(attack_wins[:2])
         conflict_msg = (
-            "В колоде конфликтующие win condition — план атаки размыт. "
-            "Я бы оставил одну главную угрозу."
+            f"В колоде две главные угрозы ({names}) — непонятно, от чего строить атаки. "
+            "Оставьте одну основную win condition; chip и давление можно держать рядом."
         )
     tanks = _role_cards(deck, ROLE_TANK)
     heavy_tanks = [c for c in tanks if get_card_elixir(c) >= 5]
@@ -236,14 +242,15 @@ def _check_structure(
     dup_msgs: list[str] = []
     for role, limit in _DUPLICATE_ROLE_LIMITS.items():
         cards = _role_cards(deck, role)
-        if role == ROLE_WIN and _allows_combo_wins(deck):
+        if role == ROLE_WIN and (_allows_combo_wins(deck) or len(primary_wins_in(deck)) <= 1):
+            # Primary + secondary pressure — не «слишком много win condition».
             continue
         if len(cards) >= limit:
             dup = True
             label = {
                 ROLE_BIG_SPELL: "больших заклинаний",
                 ROLE_SMALL_SPELL: "маленьких заклинаний",
-                ROLE_WIN: "win condition",
+                ROLE_WIN: "главных угроз башне",
                 ROLE_TANK: "танков",
             }.get(role, role)
             dup_msgs.append(f"слишком много {label} ({len(cards)})")
@@ -261,7 +268,7 @@ def _check_structure(
 def _check_intent(deck: list[str], intent: DeckIntent) -> tuple[bool, SanityIssue | None]:
     missing: list[str] = []
     if intent.primary_win and intent.primary_win not in deck:
-        missing.append(f"нет primary win «{intent.primary_win}»")
+        missing.append(f"нет главной угрозы «{intent.primary_win}»")
 
     role_map = {
         "win_condition": ROLE_WIN,
@@ -330,23 +337,25 @@ def _check_evaluation(evaluation: EvaluationReport) -> tuple[bool, list[SanityIs
     ok = True
     if not evaluation.hard_constraints.passed:
         ok = False
-        detail = ", ".join(evaluation.hard_constraints.issues[:3]) or "жёсткие ограничения"
+        # Только игровые формулировки — без кодов ограничений.
+        detail = (evaluation.hard_constraints.messages[0]
+                  if evaluation.hard_constraints.messages
+                  else "в составе есть критичные дыры")
         issues.append(_issue(
             "evaluation_fail",
-            f"Оценка колоды провалена по жёстким ограничениям ({detail}).",
+            f"Состав пока нестабилен: {detail}",
         ))
     if evaluation.total_score < 48.0:
         ok = False
         issues.append(_issue(
             "evaluation_fail",
-            f"Суммарная оценка слишком низкая ({evaluation.total_score:.0f}/100) — "
-            "это не стабильная сборка.",
+            "Сборка пока слабая для стабильной лестницы — не хватает согласованного плана.",
         ))
     if evaluation.win_plan.score < 35.0:
         ok = False
         issues.append(_issue(
             "evaluation_fail",
-            "EvaluationReport не видит рабочего win-plan.",
+            "Не видно рабочего способа стабильно давить башню.",
         ))
     # Слабый anti-air из matchup_coverage
     details = evaluation.matchup_coverage.details or {}
@@ -369,19 +378,33 @@ def _check_recommendation(
     issues: list[SanityIssue] = []
     ok = True
     hard = list(balance_hard or [])
-    if hard:
-        ok = False
+    # Слишком много независимых WC и т.п. — только если hard реально остался.
+    structural = [k for k in hard if k not in {"too_many_wins"}]
+    # too_many_wins после Primary/Secondary уже редкий; если всплыл — мягкий warning.
+    if "too_many_wins" in hard and not structural:
         issues.append(_issue(
             "recommendation_fail",
-            "RecommendationEngine видит критический дисбаланс — колоду нужно пересобрать.",
+            "В колоде несколько главных угроз башне — атаки будут размытыми. "
+            "Оставьте одну основную win condition.",
+            critical=False,
         ))
+    elif structural:
+        ok = False
+        msg = (balance_messages or [None])[0]
+        if not msg or "too_many" in (msg or "").lower() or "win-condition" in (msg or "").lower():
+            msg = "В составе есть критичные дыры — сначала закройте их, потом шлифуйте детали."
+        issues.append(_issue("recommendation_fail", msg))
     if risk_score is not None and risk_score >= 75.0:
         ok = False
         msgs = balance_messages or []
         detail = msgs[0] if msgs else "высокий риск провала плана"
+        from bot.services.player_remarks import looks_internal, sanitize_player_line
+
+        clean = sanitize_player_line(detail) if not looks_internal(detail) else None
         issues.append(_issue(
             "recommendation_fail",
-            f"Рекомендательный анализ не подтверждает готовность сборки: {detail}.",
+            clean
+            or "План колоды пока рискованный — усильте ответы на типовые угрозы лестницы.",
         ))
     return ok, issues
 

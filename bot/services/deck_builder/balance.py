@@ -12,7 +12,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-from bot.services.card_data import WIN_CONDITIONS, get_card_elixir
+from bot.services.card_data import (
+    count_independent_wins,
+    get_card_elixir,
+    is_primary_win_condition,
+    is_tower_threat,
+)
 from bot.services.card_matchups import calculate_deck_synergy, synergy_between
 from bot.services.deck_builder.constants import (
     ARCHETYPE_ANCHORS,
@@ -135,8 +140,13 @@ def is_spell(db: DeckDatabase, name: str) -> bool:
 
 
 def is_attack_win(name: str) -> bool:
-    """Primary tower-push win condition (Hog, Giant, Ram…) — not Bandit/support push."""
-    return name in WIN_CONDITIONS
+    """Карта может вести атакующий план (primary WC или secondary pressure)."""
+    return is_tower_threat(name)
+
+
+def is_primary_attack_win(name: str) -> bool:
+    """Независимая primary win condition (считается в MAX_WINS при наличии)."""
+    return is_primary_win_condition(name)
 
 
 def count_spells(deck: list[str], db: DeckDatabase) -> int:
@@ -144,8 +154,9 @@ def count_spells(deck: list[str], db: DeckDatabase) -> int:
 
 
 def count_wins(deck: list[str], db: DeckDatabase) -> int:
-    """Count primary attacking win-conditions only (for MAX_WINS / ensure)."""
-    return sum(1 for c in deck if is_attack_win(c))
+    """Независимые WC для MAX_WINS: secondary pressure не дублирует primary."""
+    del db
+    return count_independent_wins(deck)
 
 
 def count_role(deck: list[str], db: DeckDatabase, role: str) -> int:

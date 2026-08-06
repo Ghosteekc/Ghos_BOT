@@ -42,28 +42,31 @@ from bot.services.elixir_efficiency import analyze_elixir_efficiency
 
 _HARD_MESSAGES: dict[str, str] = {
     "deck_size": "Колода должна содержать ровно 8 карт",
-    "duplicate_cards": "В колоде есть дубликаты карт",
-    "missing_core": "В колоде нет всех карт ядра",
-    "win_condition": "Нет атакующего win-condition",
-    "too_many_wins": "Слишком много win-condition",
-    "too_many_spells": "Слишком много заклинаний",
+    "duplicate_cards": "В колоде есть одинаковые карты",
+    "missing_core": "В колоде нет всех выбранных ключевых карт",
+    "win_condition": "Нет понятной главной угрозы для башни",
+    "too_many_wins": (
+        "В колоде несколько главных угроз башне — атаки размываются. "
+        "Оставьте одну основную win condition"
+    ),
+    "too_many_spells": "Слишком много заклинаний — мало юнитов для защиты и пуша",
 }
 
 _SOFT_MESSAGES: dict[str, str] = {
     "big_spell": "Нет большого заклинания для добивания / защиты",
     "small_spell": "Нет малого заклинания для цикла и контроля спама",
-    "air_defense": "Недостаточно anti-air против Balloon / Lava",
+    "air_defense": "Недостаточно ответов на воздух (Balloon / Lava)",
     "anti_tank": "Слабый ответ на тяжёлые танки",
     "anti_swarm": "Слабая защита от спама",
     "building": "Нет здания при осадном / контрольном плане",
-    "cycle": "Недостаточно карт цикла для стратегии",
-    "elixir": "Средний эликсир вне комфортного диапазона архетипа",
+    "cycle": "Мало дешёвых карт цикла — сложнее возвращать ключевые карты",
+    "elixir": "Средний эликсир вне комфортного диапазона для этого стиля",
 }
 
 _WIN_PLAN_LABELS: dict[str, str] = {
-    "primary_win": "Нет явного primary win-condition",
-    "secondary_threat": "Слабая вторичная угроза",
-    "constant_pressure": "Нет постоянного давления / цикла",
+    "primary_win": "Нет явной главной угрозы для башни",
+    "secondary_threat": "Слабое дополнительное давление",
+    "constant_pressure": "Мало постоянного давления и цикла",
     "finishing_power": "Слабое добивание башни",
     "building_break": "Слабый ответ на здания",
     "counterattack": "Слабая контратака",
@@ -88,7 +91,8 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
 
 
 def _messages_for(issues: list[str], table: dict[str, str]) -> tuple[str, ...]:
-    return tuple(table.get(key, key) for key in issues)
+    fallback = "Есть проблема с балансом колоды"
+    return tuple(table.get(key, fallback) for key in issues)
 
 
 def _constraint_score(issues: list[str], *, hard: bool) -> ConstraintScore:
@@ -331,6 +335,18 @@ def _elixir_axis(elixir_report, axis_elixir: float) -> AxisScore:
     )
 
 
+# Жёсткие коды, которые реально делают колоду «непригодной».
+_STRUCTURAL_HARD = frozenset({
+    "deck_size",
+    "duplicate_cards",
+    "missing_core",
+    "win_condition",
+    "too_many_spells",
+})
+# Слишком много независимых WC — штраф, но не обвал до ~34.
+_SOFT_HARD = frozenset({"too_many_wins"})
+
+
 def _compose_total(
     *,
     hard: ConstraintScore,
@@ -357,9 +373,18 @@ def _compose_total(
         "soft_constraints": soft.score,
     }
     total = sum(parts[k] * _TOTAL_WEIGHTS[k] for k in _TOTAL_WEIGHTS)
-    if not hard.passed:
+    structural = [i for i in hard.issues if i in _STRUCTURAL_HARD]
+    soft_hard = [i for i in hard.issues if i in _SOFT_HARD]
+    if structural:
         total = min(total, 42.0)
-        total -= 8.0 * len(hard.issues)
+        total -= 8.0 * len(structural)
+    elif soft_hard:
+        # Лёгкий штраф за две primary WC — без экстремально низкого балла.
+        total = min(total, 68.0)
+        total -= 4.0 * len(soft_hard)
+    # Пригодная колода (есть primary/secondary план) не должна выглядеть как 34/100.
+    if not structural and total < 52.0 and win_plan.score >= 45.0:
+        total = max(total, 52.0)
     return round(_clamp(total), 1)
 
 
@@ -372,35 +397,64 @@ def _strengths_weaknesses(
     matchup_coverage: AxisScore,
     game_plan,
     coaching_strengths: list[str] | None,
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    deck: list[str],
+    primary_win: str | None,
+    total_score: float,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], object]:
+    from bot.services.card_data import secondary_pressure_in
+    from bot.services.player_remarks import build_player_remarks, sanitize_player_line
+
     strengths: list[str] = []
     for s in coaching_strengths or []:
-        if s and s not in strengths:
-            strengths.append(s)
+        clean = sanitize_player_line(s)
+        if clean and clean not in strengths:
+            strengths.append(clean)
     for note in synergy.notes:
-        if note and note not in strengths and len(strengths) < 6:
-            strengths.append(note)
+        clean = sanitize_player_line(str(note))
+        if clean and clean not in strengths and len(strengths) < 6:
+            strengths.append(clean)
     if win_plan.score >= 80 and win_plan.details.get("how_to_win"):
-        line = str(win_plan.details["how_to_win"])
-        if line not in strengths:
+        line = sanitize_player_line(str(win_plan.details["how_to_win"]))
+        if line and line not in strengths:
             strengths.append(line)
 
-    weaknesses: list[str] = []
-    weaknesses.extend(hard.messages)
-    weaknesses.extend(soft.messages)
+    raw_weak: list[str] = []
+    raw_weak.extend(hard.messages)
+    raw_weak.extend(soft.messages)
     for w in game_plan.critical_weaknesses:
-        if w and w not in weaknesses:
-            weaknesses.append(w)
-    weaknesses.extend(n for n in win_plan.notes if n not in weaknesses)
-    weaknesses.extend(n for n in matchup_coverage.notes if n not in weaknesses)
+        if w:
+            raw_weak.append(w)
+    # Заметки win_plan / matchup — только если ось реально слабая.
+    if win_plan.score < 65.0:
+        raw_weak.extend(n for n in win_plan.notes if n)
+    if matchup_coverage.score < 65.0:
+        raw_weak.extend(n for n in matchup_coverage.notes if n)
+
+    structural = bool(set(hard.issues) & _STRUCTURAL_HARD)
+    deck_playable = (not structural) and total_score >= 52.0
+    remarks = build_player_remarks(
+        strengths=strengths,
+        improvements=raw_weak,
+        deck_playable=deck_playable,
+        has_mandatory_swaps=False,
+        primary_win=primary_win,
+        secondary_pressure=secondary_pressure_in(deck),
+    )
 
     reasons: list[str] = []
-    for bucket in (strengths[:3], weaknesses[:4], soft.messages[:2]):
+    for bucket in (remarks.whats_good[:3], remarks.can_improve[:3]):
         for line in bucket:
             if line and line not in reasons:
                 reasons.append(line)
+    if remarks.final_recommendation and remarks.final_recommendation not in reasons:
+        reasons.append(remarks.final_recommendation)
 
-    return tuple(strengths[:6]), tuple(weaknesses[:8]), tuple(reasons[:10])
+    return (
+        remarks.whats_good,
+        remarks.can_improve,
+        tuple(reasons[:10]),
+        remarks,
+    )
 
 
 class DeckEvaluator:
@@ -487,16 +541,6 @@ class DeckEvaluator:
         except Exception:
             coaching_strengths = []
 
-        strengths, weaknesses, reasons = _strengths_weaknesses(
-            hard=hard,
-            soft=soft,
-            win_plan=win_plan_axis,
-            synergy=synergy,
-            matchup_coverage=matchup_coverage,
-            game_plan=game_plan,
-            coaching_strengths=coaching_strengths,
-        )
-
         total = _compose_total(
             hard=hard,
             soft=soft,
@@ -508,6 +552,19 @@ class DeckEvaluator:
             matchup_coverage=matchup_coverage,
             archetype_fit=archetype_fit,
             elixir_profile=elixir_profile,
+        )
+
+        strengths, weaknesses, reasons, remarks = _strengths_weaknesses(
+            hard=hard,
+            soft=soft,
+            win_plan=win_plan_axis,
+            synergy=synergy,
+            matchup_coverage=matchup_coverage,
+            game_plan=game_plan,
+            coaching_strengths=coaching_strengths,
+            deck=cards,
+            primary_win=intent.primary_win,
+            total_score=total,
         )
 
         return EvaluationReport(
@@ -527,4 +584,7 @@ class DeckEvaluator:
             strengths=strengths,
             weaknesses=weaknesses,
             reasons=reasons,
+            whats_good=remarks.whats_good,
+            can_improve=remarks.can_improve,
+            final_recommendation=remarks.final_recommendation,
         )

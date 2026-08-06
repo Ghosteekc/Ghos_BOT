@@ -67,6 +67,9 @@ class EvaluationReport:
     strengths: tuple[str, ...] = ()
     weaknesses: tuple[str, ...] = ()
     reasons: tuple[str, ...] = ()
+    whats_good: tuple[str, ...] = ()
+    can_improve: tuple[str, ...] = ()
+    final_recommendation: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -86,6 +89,9 @@ class EvaluationReport:
             "strengths": list(self.strengths),
             "weaknesses": list(self.weaknesses),
             "reasons": list(self.reasons),
+            "whats_good": list(self.whats_good or self.strengths),
+            "can_improve": list(self.can_improve or self.weaknesses),
+            "final_recommendation": self.final_recommendation,
         }
 
     def as_dict(self) -> dict[str, Any]:

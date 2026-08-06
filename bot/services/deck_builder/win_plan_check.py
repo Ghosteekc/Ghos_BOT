@@ -12,7 +12,9 @@ from typing import Callable
 from bot.services.card_data import (
     WIN_CONDITIONS,
     card_has_role,
+    count_independent_wins,
     get_card_elixir,
+    is_tower_threat,
     spell_counter_tier_vs_building,
 )
 from bot.services.deck_builder.constants import (
@@ -95,7 +97,7 @@ class WinPlanCheck:
 
 
 def _is_attack_win(name: str) -> bool:
-    return name in WIN_CONDITIONS
+    return is_tower_threat(name)
 
 
 def _is_spell(db: DeckDatabase, name: str) -> bool:

@@ -60,21 +60,24 @@ class DeckOrigin(str, Enum):
 _SOFT_MESSAGES: dict[str, str] = {
     "big_spell": "Нет большого заклинания для добивания / защиты",
     "small_spell": "Нет малого заклинания для цикла и контроля спама",
-    "air_defense": "Недостаточно anti-air против Balloon / Lava",
+    "air_defense": "Недостаточно ответов на воздух (Balloon / Lava)",
     "anti_tank": "Слабый ответ на тяжёлые танки",
     "anti_swarm": "Слабая защита от спама",
     "building": "Нет здания при осадном / контрольном плане",
-    "cycle": "Недостаточно карт цикла для стратегии",
-    "elixir": "Средний эликсир вне комфортного диапазона архетипа",
+    "cycle": "Мало дешёвых карт цикла — сложнее возвращать ключевые карты",
+    "elixir": "Средний эликсир вне комфортного диапазона для этого стиля",
 }
 
 _HARD_MESSAGES: dict[str, str] = {
     "deck_size": "Колода должна содержать ровно 8 карт",
-    "duplicate_cards": "В колоде есть дубликаты карт",
-    "missing_core": "В колоде нет всех карт ядра",
-    "win_condition": "Нет атакующего win-condition",
-    "too_many_wins": "Слишком много win-condition",
-    "too_many_spells": "Слишком много заклинаний",
+    "duplicate_cards": "В колоде есть одинаковые карты",
+    "missing_core": "В колоде нет всех выбранных ключевых карт",
+    "win_condition": "Нет понятной главной угрозы для башни",
+    "too_many_wins": (
+        "В колоде несколько главных угроз башне — атаки размываются. "
+        "Оставьте одну основную win condition"
+    ),
+    "too_many_spells": "Слишком много заклинаний — мало юнитов для защиты и пуша",
 }
 
 # Меньше = важнее. Единый порядок для всех режимов.
@@ -435,20 +438,23 @@ def _balance_issues_for(deck: list[str], db, archetype: str) -> BalanceIssues:
     soft = soft_balance_issues(deck, db, archetype) if len(deck) == 8 else []
     messages: list[str] = []
     for key in hard:
-        messages.append(_HARD_MESSAGES.get(key, key))
+        messages.append(_HARD_MESSAGES.get(key, "Есть проблема с балансом колоды"))
     for key in soft:
-        messages.append(_SOFT_MESSAGES.get(key, key))
+        messages.append(_SOFT_MESSAGES.get(key, "Есть слабое место в составе"))
     return BalanceIssues(hard=hard, soft=soft, messages=messages)
 
 
 def _why_gap(gap: dict, intent: DeckIntent) -> str:
     cat = gap["category"]
     soft = _SOFT_FOR_CATEGORY.get(cat)
-    if soft and soft in intent.required_soft_checks:
-        return f"{cat}: требуется Intent ({intent.archetype}) — soft «{soft}»"
-    if cat in ("spells", "win_condition"):
-        return f"{cat}: базовый пробел колоды"
-    return f"{cat}: {gap.get('message', '')}"
+    msg = gap.get("message") or ""
+    if soft and soft in _SOFT_MESSAGES:
+        return _SOFT_MESSAGES[soft]
+    if cat == "win_condition":
+        return "Нет понятной главной угрозы для башни"
+    if cat == "spells":
+        return "Не хватает нормального набора заклинаний"
+    return msg or "Есть слабое место в составе"
 
 
 _CATEGORY_PRO: dict[str, str] = {
@@ -1396,6 +1402,27 @@ class RecommendationEngine:
         )
 
         coaching: DeckCoaching | None = None
+        from bot.services.card_data import secondary_pressure_in
+        from bot.services.player_remarks import build_player_remarks
+
+        deck_playable = bool(sanity.passed) or (
+            not plan.needed
+            and "win_condition" not in start_balance.hard
+            and "deck_size" not in start_balance.hard
+        )
+        # Если обязательных замен нет — никогда не пугаем «пересобрать».
+        if not plan.needed:
+            deck_playable = True
+
+        eval_good = list(evaluation.whats_good or evaluation.strengths or ())
+        eval_improve = list(evaluation.can_improve or evaluation.weaknesses or ())
+        soft_improve = [
+            m for m in start_balance.messages
+            if m and m not in eval_improve
+        ]
+        # Swap-строки уже пользовательские.
+        swap_lines = [line for line in why_picks if "→" in line or line.startswith("Добавить:")]
+
         if is_builder and sanity.passed:
             coaching = build_deck_coaching(
                 intent,
@@ -1403,17 +1430,45 @@ class RecommendationEngine:
                 deck=plan.improved_deck,
                 synergy_notes=synergy_notes,
             )
-            why_picks = [
-                f"Стиль игры: {coaching.play_style}",
-                *[f"✔ {s}" for s in coaching.strengths[:3]],
-                *([f"Комбинация: {c}" for c in coaching.key_combinations[:2]]),
-                *[f"Совет: {t}" for t in coaching.usage_tips[:2]],
-            ]
-        elif not sanity.passed:
-            # Честные дыры вместо оправдания Builder.
-            why_picks = [
-                f"⚠ {msg}" for msg in sanity.critical_messages[:6]
-            ] or [f"⚠ {sanity.coach_verdict()}"]
+            remarks = build_player_remarks(
+                strengths=coaching.strengths[:4],
+                improvements=eval_improve[:3],
+                deck_playable=True,
+                has_mandatory_swaps=False,
+                primary_win=intent.primary_win,
+                secondary_pressure=secondary_pressure_in(plan.improved_deck),
+            )
+            why_picks = remarks.as_issue_lines()
+            if coaching.play_style:
+                why_picks = [f"Стиль игры: {coaching.play_style}", *why_picks]
+        else:
+            remarks = build_player_remarks(
+                strengths=eval_good or [
+                    f"Главная угроза — {intent.primary_win}" if intent.primary_win else ""
+                ],
+                improvements=[*swap_lines, *eval_improve, *soft_improve][:6],
+                deck_playable=deck_playable,
+                has_mandatory_swaps=bool(plan.needed),
+                primary_win=intent.primary_win,
+                secondary_pressure=secondary_pressure_in(
+                    plan.improved_deck if plan.improved_deck else original
+                ),
+                final_override=(
+                    evaluation.final_recommendation
+                    if evaluation.final_recommendation and deck_playable
+                    else None
+                ),
+            )
+            why_picks = remarks.as_issue_lines()
+            # Если есть свапы — добавим их явно в «улучшить», уже внутри remarks.
+            if plan.needed and swap_lines and "Что можно улучшить" not in why_picks:
+                why_picks = [
+                    *why_picks[:-2],
+                    "Что можно улучшить",
+                    *swap_lines[:4],
+                    "Итоговая рекомендация",
+                    remarks.final_recommendation,
+                ]
 
         end_gaps = _collect_improvement_gaps(plan.improved_deck, db, intent) if is_improver else []
 
