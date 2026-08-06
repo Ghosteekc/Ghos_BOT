@@ -351,10 +351,14 @@ def build_constructor_decks(
                 "drop_scores": conflict.drop_scores,
             }
 
-    # Слабые Stage-1 сборки не отдаём как основную рекомендацию.
+    # Слабые Stage-1 сборки: отдаём альтернативу как основной результат,
+    # чтобы Ghosteek / UI всегда получили готовую колоду.
+    decks_out: list[dict] = []
+    if alternative_deck:
+        decks_out = [alternative_deck]
     return {
         "core": [deck_card_info_from_parsed(c, slot=c.get("slot", i)) for i, c in enumerate(core_parsed)],
-        "decks": [],
+        "decks": decks_out,
         "core_conflict": core_conflict_payload,
         "alternative_deck": alternative_deck,
     }

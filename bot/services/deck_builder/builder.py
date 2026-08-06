@@ -101,7 +101,11 @@ def _core_primary_win(core: list[str]) -> str | None:
     for card in _PRIMARY_WIN_PRIORITY:
         if card in core_set:
             return card
-    return next((card for card in core if card in WIN_CONDITIONS), None)
+    found = next((card for card in core if card in WIN_CONDITIONS), None)
+    if found:
+        return found
+    # Freeform: первая карта seed — осознанный якорь (танк/спам/и т.д.).
+    return core[0] if core else None
 
 
 def _pair_synergy(db: DeckDatabase, a: str, b: str) -> int:
@@ -624,8 +628,8 @@ def build_deck_from_core(
     """
     from bot.services.deck_builder.constructor_decision import prepare_constructor_decision
 
-    if len(core) not in (3, 4) or len(set(core)) != len(core):
-        raise ValueError("Нужно 3 или 4 уникальные карты")
+    if len(core) not in (1, 2, 3, 4) or len(set(core)) != len(core):
+        raise ValueError("Нужно от 1 до 4 уникальных карт")
 
     db = db or get_database()
     if pool is None:
@@ -688,8 +692,8 @@ def build_multiple_decks(
     """
     from bot.services.deck_builder.constructor_decision import prepare_constructor_decision
 
-    if len(core) not in (3, 4) or len(set(core)) != len(core):
-        raise ValueError("Нужно 3 или 4 уникальные карты")
+    if len(core) not in (1, 2, 3, 4) or len(set(core)) != len(core):
+        raise ValueError("Нужно от 1 до 4 уникальных карт")
 
     db = get_database()
     if pool is None:

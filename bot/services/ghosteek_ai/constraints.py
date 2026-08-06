@@ -147,8 +147,8 @@ def strip_internal_jargon(text: str) -> str:
         (r"Session\s*Context", "этот диалог"),
         (r"\bBuilder\b", "сборка колоды"),
         (r"\bAnalyzer\b", "разбор"),
-        (r"из базы Ghosteek", "из наших шаблонов"),
-        (r"базы Ghosteek", "готовых шаблонов"),
+        (r"из базы Ghosteek", "из наших сборок"),
+        (r"базы Ghosteek", "готовых сборок"),
         (r"конструктором Ghosteek", "сборкой"),
         (r"конструктором", "сборкой"),
     )

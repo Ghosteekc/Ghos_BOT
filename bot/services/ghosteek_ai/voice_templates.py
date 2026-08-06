@@ -90,15 +90,19 @@ def template_build_deck(data: dict[str, Any]) -> str:
     core = data.get("core") or []
     decks = data.get("decks") or []
     mode = data.get("mode")
+    stage = data.get("stage") or mode
     arch = _arch_from_data(data)
     label = archetype_label(arch)
     tip = pick_tip(arch, seed=str(arch or core))
+    primary = core[0] if core else None
+    primary_ru = card_name_ru(primary, short=True) if primary else ""
 
     if not decks:
+        # Пустой список — внутренняя ошибка; не светим шаблоны/ядро пользователю.
         return coach_reply(
-            "Для этого набора пока нет стабильной сборки.",
-            why="Нужен вин-кондишн или ядро из 4 карт.",
-            tip="Напиши, через что хочешь играть — соберём точнее.",
+            "Уточни, через какую карту собираем.",
+            why="Нужна хотя бы одна опора для стиля.",
+            tip="Напиши, например: «собери колоду через ГигСкелета».",
             intent=INTENT_BUILD_DECK,
             archetype=arch,
         )
@@ -113,26 +117,46 @@ def template_build_deck(data: dict[str, Any]) -> str:
     if len(decks) > 1 and isinstance(decks[1], dict):
         alt_name = decks[1].get("name") or decks[1].get("archetype")
         if alt_name:
-            alt = f"Ближайший запасной вариант — {archetype_label(str(alt_name))}."
+            alt = f"Запасной вариант — {archetype_label(str(alt_name))}."
 
-    if mode == "meta_templates":
+    if mode == "meta_templates" or stage == "meta_templates":
         return coach_reply(
-            f"Нашёл стабильный {title}.",
-            why=f"Шаблон закрывает роли под {label}."
-            if label
-            else "Готовый шаблон под твой вин-кондишн.",
+            f"Собрал {title}." if title else f"Собрал {label}.",
+            why=f"Стиль держится на {primary_ru}." if primary_ru else f"Стиль — {label}.",
+            tip=alt or tip,
+            intent=INTENT_BUILD_DECK,
+            archetype=arch,
+        )
+
+    if mode in {"freeform_anchor", "archetype_fallback"} or stage in {
+        "freeform_anchor",
+        "archetype_fallback",
+    }:
+        style = label or "контроль"
+        if primary_ru:
+            verdict = f"Собрал {style.lower()} вокруг {primary_ru}."
+            why = f"Добавил поддержку, спеллы и цикл под {primary_ru}."
+        else:
+            verdict = f"Собрал рабочий {style.lower()}."
+            why = "Закрыл роли под выбранный стиль."
+        return coach_reply(
+            verdict,
+            why=why,
             tip=alt or tip,
             intent=INTENT_BUILD_DECK,
             archetype=arch,
         )
 
     core_txt = _ru_list(core, limit=4) if core else ""
-    verdict = f"Нашёл стабильный {title}." if title else f"Нашёл стабильный {label}."
+    verdict = f"Собрал {title}." if title else f"Собрал {label}."
     why = (
         f"Ядро {core_txt} закрыто ролями."
         if core_txt
         else f"Сборка держится на ролях под {label}."
     )
+    # Не используем слово «ядро» в пользовательском why — перефразируем.
+    if core_txt:
+        why = f"Опора {core_txt} закрыта ролями."
     return coach_reply(
         verdict,
         why=why,
@@ -358,19 +382,35 @@ def template_error(code: str, params: dict[str, Any] | None = None) -> str | Non
             "Пришли составы или синхронизируй бой.",
         ),
         "BUILD_NEED_CORE": (
-            "Нужен ориентир для сборки.",
-            "Без вин-кондишна или ядра сборка будет гаданием.",
-            "Напиши, через что хочешь играть.",
+            "Через какую карту собираем?",
+            "Нужна опора для стиля.",
+            "Напиши, например: «собери через ГигСкелета».",
         ),
+        "BUILD_NEED_CARD": (
+            "Через какую карту собираем?",
+            "Нужна опора для стиля.",
+            "Напиши, например: «собери через Хога».",
+        ),
+        "BUILD_UNKNOWN_CARD": (
+            f"Карту «{params.get('card_ru') or 'эту'}» не узнаю.",
+            "Без точного названия собрать нельзя.",
+            "Проверь написание или пришли другое имя.",
+        ),
+        "BUILD_IMPOSSIBLE": (
+            "С этой опорой сейчас не собрать рабочий состав.",
+            "Скорее всего карта недоступна в пуле.",
+            "Попробуй другую ключевую карту.",
+        ),
+        # Legacy codes — никогда не светим шаблоны/ядро пользователю.
         "BUILD_NO_VARIANTS": (
-            "Для этого набора пока нет стабильной сборки.",
-            "Конструктор не нашёл рабочий вариант.",
-            "Ближайший путь — другое ядро или другой вин-кондишн.",
+            "Через какую карту усилим сборку?",
+            "Нужна более ясная опора.",
+            "Напиши win-condition или ключевую карту.",
         ),
         "BUILD_NO_TEMPLATES": (
-            f"Готовых шаблонов вокруг «{params.get('card_ru') or 'этой карты'}» нет.",
-            "Нет готовой колоды под эту опору.",
-            "Дай ядро из 4 карт — соберём точнее.",
+            "Через какую карту собираем?",
+            "Нужна опора для стиля.",
+            "Напиши, например: «собери через ГигСкелета».",
         ),
         "COACH_NEED_ARCHETYPE": (
             "Против кого готовимся?",
