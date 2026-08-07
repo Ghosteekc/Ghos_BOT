@@ -20,23 +20,40 @@ from bot.services.deck_builder.core_conflict import (
 )
 from bot.services.meta_analyzer import _guess_category
 
-_SLOT_EVO = {0, 2}
-_SLOT_HERO = {1}
+# Slot semantics (UI): 0 evo, 1 champion, 2 flexible wild, 3 base.
+# March 2026 deck rules: 1 Evolution + 1 Hero/Champion + 1 Wild (= evo OR hero/champion).
+_SLOT_EVO_FIXED = {0}
+_SLOT_FLEX = {1, 2}
 
 
 def slot_variant(slot_index: int, card_name: str) -> tuple[int, bool]:
     """Resolve evo/hero for a constructor slot.
 
+    Returns ``(evolution_level, is_hero)``.
+
     ``maxEvolutionLevel`` alone is not enough: hero-only cards (Magic Archer,
     Giant, …) also have maxEvolutionLevel >= 1 but no ``evolutionMedium``.
+
+    Slot 0 — fixed evolution.
+    Slot 1 — champion (or hero/evo if such a card is placed).
+    Slot 2 — flexible: heroism, evolution, or champion (no upgrade flags).
+    Slot 3 — base.
     """
     info = get_card_info(card_name) or {}
     has_evo = bool(info.get("evolution_icon"))
     has_hero = bool(info.get("hero_icon"))
-    if slot_index in _SLOT_HERO and has_hero:
-        return 0, True
-    if slot_index in _SLOT_EVO and has_evo:
+
+    if slot_index in _SLOT_EVO_FIXED and has_evo:
         return 1, False
+
+    if slot_index in _SLOT_FLEX:
+        # Prefer heroism over evolution when a card has both.
+        if has_hero:
+            return 0, True
+        if has_evo:
+            return 1, False
+        return 0, False
+
     return 0, False
 
 
