@@ -20,10 +20,25 @@ from bot.services.deck_builder.core_conflict import (
 )
 from bot.services.meta_analyzer import _guess_category
 
-# Slot semantics (UI): 0 evo, 1 champion, 2 flexible wild, 3 base.
+# Slot semantics (UI): 0 evo-only, 1 hero|champion, 2 hybrid, 3 base (no upgrades).
 # March 2026 deck rules: 1 Evolution + 1 Hero/Champion + 1 Wild (= evo OR hero/champion).
-_SLOT_EVO_FIXED = {0}
-_SLOT_FLEX = {1, 2}
+
+
+def _is_champion(card_name: str, info: dict) -> bool:
+    rarity = str(info.get("rarity") or "").strip().lower()
+    if rarity == "champion":
+        return True
+    # Fallback for catalogs without rarity.
+    return card_name in {
+        "Golden Knight",
+        "Skeleton King",
+        "Archer Queen",
+        "Mighty Miner",
+        "Monk",
+        "Little Prince",
+        "Boss Bandit",
+        "Goblinstein",
+    }
 
 
 def slot_variant(slot_index: int, card_name: str) -> tuple[int, bool]:
@@ -31,23 +46,27 @@ def slot_variant(slot_index: int, card_name: str) -> tuple[int, bool]:
 
     Returns ``(evolution_level, is_hero)``.
 
-    ``maxEvolutionLevel`` alone is not enough: hero-only cards (Magic Archer,
-    Giant, …) also have maxEvolutionLevel >= 1 but no ``evolutionMedium``.
-
-    Slot 0 — fixed evolution.
-    Slot 1 — champion (or hero/evo if such a card is placed).
-    Slot 2 — flexible: heroism, evolution, or champion (no upgrade flags).
-    Slot 3 — base.
+    Slot 0 — evolution only.
+    Slot 1 — hero or champion (never evolution art).
+    Slot 2 — hybrid: hero, evolution, or champion.
+    Slot 3 — base, no upgrades.
     """
     info = get_card_info(card_name) or {}
     has_evo = bool(info.get("evolution_icon"))
     has_hero = bool(info.get("hero_icon"))
+    champion = _is_champion(card_name, info)
 
-    if slot_index in _SLOT_EVO_FIXED and has_evo:
+    if slot_index == 0 and has_evo:
         return 1, False
 
-    if slot_index in _SLOT_FLEX:
-        # Prefer heroism over evolution when a card has both.
+    if slot_index == 1:
+        if has_hero and not champion:
+            return 0, True
+        return 0, False
+
+    if slot_index == 2:
+        if champion:
+            return 0, False
         if has_hero:
             return 0, True
         if has_evo:
