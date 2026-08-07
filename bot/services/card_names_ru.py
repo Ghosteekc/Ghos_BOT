@@ -202,3 +202,14 @@ def card_name_ru(name: str, *, short: bool = False) -> str:
     if short:
         return CARD_NAMES_SHORT.get(name) or CARD_NAMES_RU.get(name, name)
     return CARD_NAMES_RU.get(name, name)
+
+
+def format_card_combo_ru(text: str, *, short: bool = True) -> str:
+    """Переводит пары вида ``CardA + CardB`` в русские названия."""
+    raw = (text or "").strip()
+    if not raw:
+        return raw
+    if " + " not in raw:
+        return card_name_ru(raw, short=short)
+    parts = [p.strip() for p in raw.split(" + ")]
+    return " + ".join(card_name_ru(p, short=short) for p in parts if p)

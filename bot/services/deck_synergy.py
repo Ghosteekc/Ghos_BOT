@@ -231,7 +231,7 @@ def _score_roles(cards: list[str]) -> tuple[float, list[str]]:
         notes.append("Быстрый цикл + дешёвый спелл")
     if has_big_spell and (_wins(cards) or has_building):
         points += 3.0
-        notes.append("Большой спелл поддерживает win-condition / здание")
+        notes.append("Большой спелл поддерживает главную угрозу / здание")
 
     # Tornado + splash DPS — классическая control-роль
     if "Tornado" in present and any(
@@ -306,10 +306,10 @@ def _score_conflicts(cards: list[str]) -> tuple[float, list[str]]:
         arch = detect_archetype_from_cards(cards)
         if arch not in {"Beatdown", "Lava", "Bridge Spam"}:
             penalty += 14.0
-            notes.append("Две тяжёлые win-condition без общей стратегии")
+            notes.append("Две тяжёлые главные угрозы без общей стратегии")
         else:
             penalty += 6.0
-            notes.append("Две тяжёлые win-condition перегружают эликсир")
+            notes.append("Две тяжёлые главные угрозы перегружают эликсир")
 
     # Beatdown WC + siege
     if heavy and siege:
@@ -327,7 +327,7 @@ def _score_conflicts(cards: list[str]) -> tuple[float, list[str]]:
         avg = sum(get_card_elixir(c) for c in cards) / len(cards)
         if len(wins) >= 2 and avg >= 4.2:
             penalty += 6.0
-            notes.append("Тяжёлый состав при нескольких win-condition")
+            notes.append("Тяжёлый состав при нескольких главных угрозах")
 
     return -min(30.0, penalty), notes[:3]
 

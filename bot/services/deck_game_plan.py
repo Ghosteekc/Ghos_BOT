@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 
 from bot.services.card_data import WIN_CONDITIONS, card_has_role, get_card_elixir
 from bot.services.card_matchups import synergy_between
+from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_builder.archetype_detect import detect_archetype_from_cards
 from bot.services.deck_builder.constants import (
     KNOWN_SYNERGY_PAIRS,
@@ -15,23 +16,23 @@ from bot.services.deck_builder.constants import (
 from bot.services.deck_intent import DeckIntent, DeckIntentEngine
 
 _WIN_PLAN: dict[str, str] = {
-    "Cycle": "Давление дешёвым win-condition через быстрый цикл и повторные атаки",
-    "Log Bait": "Сплит-давление бочкой и bait-картами, вынуждая соперника тратить Log/малый спелл",
+    "Cycle": "Давление дешёвой угрозой для башни через быстрый цикл и повторные атаки",
+    "Log Bait": "Сплит-давление бочкой и bait-картами, вынуждая соперника тратить Бревно/малый спелл",
     "Fireball Bait": "Накопление ценности через bait и добивание большим спеллом",
     "Beatdown": "Набор танка сзади и контрпуш с поддержкой после удачной защиты",
-    "Lava": "Воздушный пуш Lava Hound + Balloon с поддержкой спеллами",
+    "Lava": "Воздушный пуш Лавовой гончей и Шаром с поддержкой спеллами",
     "Bridge Spam": "Агрессия на мосту несколькими угрозами, заставляя ошибаться в ответах",
     "Siege": "Контроль зданиями и набор урона осадной картой при минусе оппонента",
     "Control": "Выматывание обменами и точечный урон при преимуществе в эликсире",
-    "Graveyard": "Защита → накопление → Graveyard на танк/спелл-связку",
-    "Royal Giant": "Давление RG на мосту при поддержке и контроле зданиями",
+    "Graveyard": "Защита → накопление → Кладбище на танк/спелл-связку",
+    "Royal Giant": "Давление Королевским гигантом на мосту при поддержке и контроле зданиями",
     "Split Lane": "Одновременное давление на две линии дешёвыми угрозами",
     "Meta": "Гибкая игра от сильных обменов и давления основной угрозой",
 }
 
 _ATTACK_TIMING: dict[str, str] = {
-    "Быстрый цикл": "Сразу после выгодного обмена или когда win снова в руке",
-    "Сплит-пуш": "Когда у соперника нет малого спелла / Log или он потрачен на bait",
+    "Быстрый цикл": "Сразу после выгодного обмена или когда главная угроза снова в руке",
+    "Сплит-пуш": "Когда у соперника нет малого спелла / Бревна или он потрачен на bait",
     "Контрпуш": "Только после успешной защиты, превращая оставшиеся войска в пуш",
     "Агрессивная": "С первых секунд и при любом плюсе эликсира",
     "Осадная": "Когда оппонент в минусе по эликсиру или контр-пуш отбит зданием",
@@ -132,7 +133,7 @@ def _critical_weaknesses(cards: list[str], intent: DeckIntent) -> list[str]:
     out: list[str] = []
     air_n = sum(1 for c in cards if card_has_role(c, "air_defense"))
     if intent.min_air_defense > 0 and air_n < intent.min_air_defense:
-        out.append("критично уязвима к воздуху (Balloon / Lava)")
+        out.append("критично уязвима к воздуху (Шар / Лавовая гончая)")
     if intent.require_building and not any(card_has_role(c, "building") for c in cards):
         out.append("нет здания при осадном/контрольном плане")
     if intent.min_cycle_cards > 0:
@@ -163,19 +164,20 @@ def build_game_plan(
     intent = intent or DeckIntentEngine.infer(cards, archetype=arch)
     primary = _primary_win(cards, intent)
     play = intent.play_style
+    primary_ru = card_name_ru(primary, short=True) if primary else ""
 
     how = _WIN_PLAN.get(arch, _WIN_PLAN["Meta"])
     if primary:
-        how = f"{how}. Основной инструмент — {primary} ({play.lower()} стиль)"
+        how = f"{how}. Основной инструмент — {primary_ru} ({play.lower()} стиль)"
 
     if primary:
-        threat = f"{primary} — главная угроза башне и ось давления архетипа {arch}"
+        threat = f"{primary_ru} — главная угроза башне и ось давления архетипа {arch}"
     else:
-        threat = "Нет явной win-condition — давление размыто"
+        threat = "Нет явной главной угрозы для башни — давление размыто"
 
     when = _ATTACK_TIMING.get(play, _ATTACK_TIMING["Гибридная"])
     if intent.min_cycle_cards >= 2:
-        when = f"{when}. Цикл важен — атаковать при возврате win в руку"
+        when = f"{when}. Цикл важен — атаковать при возврате главной угрозы в руку"
     elif intent.attack_bias >= 0.7:
         when = f"{when}. Высокий attack bias — держать постоянное давление"
 

@@ -1,9 +1,11 @@
 """RecommendationEngine: объяснение Builder и улучшение пользовательской колоды.
 
-План улучшений строится последовательно:
-  Intent → gaps → sort by priority → solve one → virtual apply → re-detect → …
-Запрещены независимые/противоречащие рекомендации и повторное исправление
-уже закрытой категории.
+План улучшений:
+  Intent → gaps → solve one → virtual apply → EvaluationReport → re-detect → …
+
+Score колоды и тексты советов — только из Builder EvaluationReport
+(evaluate_deck). После каждого swap EvaluationReport пересчитывается.
+Собственный total_score / risk-формула по hard*18+soft*10 запрещены.
 """
 
 from __future__ import annotations
@@ -12,7 +14,12 @@ import logging
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 
-from bot.services.deck_builder.balance import hard_constraint_issues, soft_balance_issues
+from bot.services.deck_builder.quality import (
+    balance_issues_from_report,
+    evaluate_deck,
+    is_good_deck,
+)
+from bot.services.deck_builder.constraint_messages import SOFT_MESSAGES
 from bot.services.deck_builder.builder import _detect_archetype
 from bot.services.deck_builder.constants import (
     ROLE_AIR,
@@ -44,6 +51,7 @@ from bot.services.deck_improver import (
     search_gap_solution,
     SolutionTier,
 )
+from bot.services.card_names_ru import format_card_combo_ru
 from bot.services.recommendation_cache import (
     recommendation_cache,
     recommendation_cache_key,
@@ -56,29 +64,6 @@ class DeckOrigin(str, Enum):
 
     PLAYER = "player"
     BUILDER = "builder"
-
-_SOFT_MESSAGES: dict[str, str] = {
-    "big_spell": "Нет большого заклинания для добивания / защиты",
-    "small_spell": "Нет малого заклинания для цикла и контроля спама",
-    "air_defense": "Недостаточно ответов на воздух (Balloon / Lava)",
-    "anti_tank": "Слабый ответ на тяжёлые танки",
-    "anti_swarm": "Слабая защита от спама",
-    "building": "Нет здания при осадном / контрольном плане",
-    "cycle": "Мало дешёвых карт цикла — сложнее возвращать ключевые карты",
-    "elixir": "Средний эликсир вне комфортного диапазона для этого стиля",
-}
-
-_HARD_MESSAGES: dict[str, str] = {
-    "deck_size": "Колода должна содержать ровно 8 карт",
-    "duplicate_cards": "В колоде есть одинаковые карты",
-    "missing_core": "В колоде нет всех выбранных ключевых карт",
-    "win_condition": "Нет понятной главной угрозы для башни",
-    "too_many_wins": (
-        "В колоде несколько главных угроз башне — атаки размываются. "
-        "Оставьте одну основную win condition"
-    ),
-    "too_many_spells": "Слишком много заклинаний — мало юнитов для защиты и пуша",
-}
 
 # Меньше = важнее. Единый порядок для всех режимов.
 _GAP_PRIORITY: dict[str, int] = {
@@ -434,22 +419,38 @@ class RecommendationResult:
 
 
 def _balance_issues_for(deck: list[str], db, archetype: str) -> BalanceIssues:
-    hard = hard_constraint_issues(deck, db)
-    soft = soft_balance_issues(deck, db, archetype) if len(deck) == 8 else []
-    messages: list[str] = []
-    for key in hard:
-        messages.append(_HARD_MESSAGES.get(key, "Есть проблема с балансом колоды"))
-    for key in soft:
-        messages.append(_SOFT_MESSAGES.get(key, "Есть слабое место в составе"))
-    return BalanceIssues(hard=hard, soft=soft, messages=messages)
+    """Hard/soft только из EvaluationReport (Builder SoT) — без локального score."""
+    report = evaluate_deck(deck, archetype=archetype, db=db)
+    return _balance_issues_from_evaluation(report)
+
+
+def _balance_issues_from_evaluation(report) -> BalanceIssues:
+    """Срез BalanceIssues из уже посчитанного EvaluationReport (без повторного score)."""
+    view = balance_issues_from_report(report)
+    return BalanceIssues(hard=view.hard, soft=view.soft, messages=view.messages)
+
+
+def _why_gaps_from_evaluation(report) -> list[str]:
+    """Советы/пробелы только из актуального EvaluationReport."""
+    msgs = list(report.hard_constraints.messages) + list(report.soft_constraints.messages)
+    if not msgs:
+        msgs = list(report.can_improve or report.weaknesses or ())
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in msgs:
+        text = (m or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out[:16]
 
 
 def _why_gap(gap: dict, intent: DeckIntent) -> str:
     cat = gap["category"]
     soft = _SOFT_FOR_CATEGORY.get(cat)
     msg = gap.get("message") or ""
-    if soft and soft in _SOFT_MESSAGES:
-        return _SOFT_MESSAGES[soft]
+    if soft and soft in SOFT_MESSAGES:
+        return SOFT_MESSAGES[soft]
     if cat == "win_condition":
         return "Нет понятной главной угрозы для башни"
     if cat == "spells":
@@ -467,7 +468,7 @@ _CATEGORY_PRO: dict[str, str] = {
     "cycle": "поддерживает цикл колоды",
     "swarm": "усиливает контроль мелких юнитов",
     "support": "усиливает поддержку атаки",
-    "win_condition": "усиливает win-condition",
+    "win_condition": "усиливает главную угрозу для башни",
 }
 
 
@@ -510,7 +511,7 @@ def _pick_pros(
     if rating.primary_win_support >= 60 and intent.primary_win:
         pros.append(f"поддерживает {_card_ru(intent.primary_win)}")
     elif rating.primary_win_support >= 60:
-        pros.append("поддерживает win-condition")
+        pros.append("поддерживает главную угрозу для башни")
     if rating.tempo_fit >= 60:
         pros.append("сохраняет средний эликсир")
     if rating.existing_synergy >= 62:
@@ -565,7 +566,7 @@ def _reject_reasons(
         reasons.append("слабее синергия с колодой")
 
     if loser.primary_win_support + 8 <= winner.primary_win_support:
-        reasons.append("хуже поддерживает win-condition")
+        reasons.append("хуже поддерживает главную угрозу для башни")
 
     if loser.deck_identity + 8 <= winner.deck_identity:
         reasons.append(f"хуже подходит под {intent.archetype}")
@@ -890,10 +891,10 @@ def build_deck_coaching(
         strengths.append("Быстрый цикл для повторных атак")
     if intent.require_building:
         strengths.append("Опора на здания в плане игры")
-    for note in (synergy_notes or [])[:2]:
-        if note and note not in strengths:
-            strengths.append(note)
+    # synergy_notes уже показаны блоком «Синергия» — не дублируем в strengths.
     for key in game_plan.key_cards[:2]:
+        if intent.primary_win and key == intent.primary_win:
+            continue
         line = f"Ключевая карта — {_card_ru(key)}"
         if line not in strengths:
             strengths.append(line)
@@ -916,14 +917,14 @@ def build_deck_coaching(
     if not tips:
         tips.append(f"Играйте в стиле «{intent.play_style}» от сильных обменов.")
 
-    combos = list(game_plan.core_combinations[:4])
+    combos_en = list(game_plan.core_combinations[:4])
     if "Tornado" in deck and tornado_partners:
         for partner in tornado_partners:
             combo_line = f"Tornado + {partner}"
-            if combo_line not in combos and f"{partner} + Tornado" not in combos:
-                combos.insert(0, combo_line)
+            if combo_line not in combos_en and f"{partner} + Tornado" not in combos_en:
+                combos_en.insert(0, combo_line)
     role_labels = {
-        "win_condition": "главная win-condition",
+        "win_condition": "главная угроза для башни",
         "big_spell": "закрывает добивание и защиту",
         "small_spell": "контролирует мелкий спам и поддерживает цикл",
         "air_defense": "закрывает воздушную защиту",
@@ -942,9 +943,13 @@ def build_deck_coaching(
 
         roles = sorted(get_card_roles(card))
         role_text = [role_labels[role] for role in roles if role in role_labels]
-        combo = next((line for line in combos if card in line), "")
+        combo_en = next((line for line in combos_en if card in line), "")
         reason = role_text[0] if role_text else "поддерживает общий план колоды"
-        synergy = combo or "Работает в связке с ключевыми картами колоды."
+        synergy = (
+            format_card_combo_ru(combo_en)
+            if combo_en
+            else "Работает в связке с ключевыми картами колоды."
+        )
 
         if card == "Tornado":
             advantages = [_TORNADO_KING_TOWER_ADVANTAGE]
@@ -954,14 +959,13 @@ def build_deck_coaching(
                 role_text.insert(0, "доп. преимущество: прострел с лучником/палачом")
             reason = ". ".join(advantages) + "."
             if pierce:
-                synergy = (
-                    f"Tornado + {' / '.join(_card_ru(p) for p in tornado_partners)}: {pierce}."
-                )
+                partners_ru = " / ".join(_card_ru(p) for p in tornado_partners)
+                synergy = f"{_card_ru('Tornado')} + {partners_ru}: {pierce}."
             else:
                 synergy = _TORNADO_KING_TOWER_ADVANTAGE + "."
 
         card_choices.append({
-            "card": card,
+            "card": _card_ru(card),
             "roles": role_text[:3],
             "reason": reason[:1].upper() + reason[1:] if reason else reason,
             "synergy": synergy,
@@ -973,7 +977,8 @@ def build_deck_coaching(
     return DeckCoaching(
         strengths=merged_strengths,
         play_style=intent.play_style,
-        key_combinations=combos[:5],
+        # Комбинации = синергия; UI показывает их отдельным блоком, здесь не дублируем.
+        key_combinations=[],
         usage_tips=tips[:4],
         card_choices=card_choices,
     )
@@ -1072,8 +1077,21 @@ def build_improvement_plan(
             solved_categories.add(gap["category"])
             continue
 
-        # Виртуально применяем замену — следующие gaps считаются уже от новой колоды.
+        # Виртуально применяем замену.
+        deck_before = list(virtual)
         virtual[virtual.index(solution.drop)] = solution.pick
+
+        # Обязательно: EvaluationReport Builder на актуальном составе после swap.
+        post_swap_report = evaluate_deck(virtual, archetype=intent.archetype, db=db)
+        logger.debug(
+            "post-swap EvaluationReport total=%.1f hard_ok=%s soft_issues=%s after %s→%s",
+            post_swap_report.total_score,
+            post_swap_report.hard_constraints.passed,
+            list(post_swap_report.soft_constraints.issues),
+            solution.drop,
+            solution.pick,
+        )
+
         protected_picks.add(solution.pick)
         used_picks.add(solution.pick)
         solved_categories.add(gap["category"])
@@ -1083,9 +1101,7 @@ def build_improvement_plan(
         if solution.pick not in suggested:
             suggested = [solution.pick, *suggested][:4]
 
-        # Всегда добираем отклоненных на том же drop — в т.ч. suggested_cards.
-        deck_before = list(virtual)
-        deck_before[deck_before.index(solution.pick)] = solution.drop
+        # Добираем отклонённых на том же drop — в т.ч. suggested_cards.
         role = _CATEGORY_ROLE.get(gap["category"])
         suggested_for_rank = list(gap.get("suggested_cards") or [])
         cand_pool = _gather_replacement_candidates(
@@ -1141,10 +1157,18 @@ def build_improvement_plan(
         pick_explanations.append(pe)
         why_picks.extend(flatten_pick_explanation(pe))
 
+        # Текст шага — из актуального EvaluationReport (can_improve / soft), иначе gap.
+        step_message = gap["message"]
+        report_improve = list(post_swap_report.can_improve or post_swap_report.weaknesses or ())
+        if report_improve:
+            step_message = report_improve[0]
+        elif post_swap_report.soft_constraints.messages:
+            step_message = post_swap_report.soft_constraints.messages[0]
+
         steps.append(
             ImprovementStep(
                 category=gap["category"],
-                message=gap["message"],
+                message=step_message,
                 drop=solution.drop,
                 pick=solution.pick,
                 suggested_cards=suggested,
@@ -1154,12 +1178,13 @@ def build_improvement_plan(
             ),
         )
         logger.debug(
-            "swap %s → %s category=%s tier=%s total=%.2f reason=%s",
+            "swap %s → %s category=%s tier=%s candidate_total=%.2f eval_total=%.1f reason=%s",
             solution.drop,
             solution.pick,
             gap["category"],
             solution.tier.value,
             solution.rating.total,
+            post_swap_report.total_score,
             pe.reason,
         )
 
@@ -1197,12 +1222,17 @@ def build_improvement_plan(
 
 
 def _risk_assessment(
-    balance: BalanceIssues,
+    report,
     game_plan: GamePlan,
     open_gaps: list[str],
 ) -> RiskAssessment:
+    """Риск только из EvaluationReport.total_score + тексты отчёта — без своего score."""
+    balance = _balance_issues_from_evaluation(report)
     factors: list[str] = []
     factors.extend(balance.messages)
+    for note in report.can_improve or report.weaknesses or ():
+        if note and note not in factors:
+            factors.append(note)
     for w in game_plan.critical_weaknesses:
         if w not in factors:
             factors.append(w)
@@ -1211,13 +1241,8 @@ def _risk_assessment(
         if line not in factors:
             factors.append(line)
 
-    score = min(
-        100.0,
-        len(balance.hard) * 18.0
-        + len(balance.soft) * 10.0
-        + len(game_plan.critical_weaknesses) * 8.0
-        + len(open_gaps) * 12.0,
-    )
+    # Risk = инверсия Builder total_score (SoT), не локальная формула весов.
+    score = max(0.0, min(100.0, 100.0 - float(report.total_score)))
     return RiskAssessment(score=round(score, 1), factors=factors[:12], open_gaps=list(open_gaps))
 
 
@@ -1274,6 +1299,8 @@ class RecommendationEngine:
         db = get_database()
 
         if len(original) != 8:
+            from bot.services.deck_evaluator.models import empty_evaluation_report
+
             intent = DeckIntentEngine.infer(original, archetype=archetype or "Meta")
             empty_plan = GamePlan(
                 how_to_win="",
@@ -1283,7 +1310,8 @@ class RecommendationEngine:
                 core_combinations=[],
                 critical_weaknesses=["Нужна полная колода из 8 карт"],
             )
-            balance = _balance_issues_for(original, db, intent.archetype)
+            evaluation = empty_evaluation_report(original)
+            balance = _balance_issues_from_evaluation(evaluation)
             result = RecommendationResult(
                 intent=intent,
                 game_plan=empty_plan,
@@ -1297,20 +1325,16 @@ class RecommendationEngine:
                 decision_explanation=DecisionExplanation(
                     archetype=intent.archetype,
                     primary_win=intent.primary_win,
-                    why_gaps=[],
+                    why_gaps=_why_gaps_from_evaluation(evaluation),
                     why_picks=[],
                     rejected=["Нужна полная колода из 8 карт"],
                     pick_explanations=[],
                 ),
                 candidate_ranking=CandidateRanking(),
-                risk_assessment=RiskAssessment(
-                    score=100.0,
-                    factors=["Нужна полная колода из 8 карт"],
-                    open_gaps=[],
-                ),
+                risk_assessment=_risk_assessment(evaluation, empty_plan, []),
                 origin=origin_val,
                 coaching=None,
-                evaluation_report=None,
+                evaluation_report=evaluation,
             )
             if use_cache:
                 recommendation_cache.put(cache_key, result)
@@ -1329,7 +1353,6 @@ class RecommendationEngine:
         locked = _locked_cards(work, db)
         arch = archetype or _detect_archetype(list(locked) or work)
         intent = DeckIntentEngine.infer(work, archetype=arch)
-        start_balance = _balance_issues_for(work, db, arch)
 
         # RecommendationEngine не является вторым Builder.
         # Замены существуют только в явном режиме Improve My Deck.
@@ -1342,14 +1365,17 @@ class RecommendationEngine:
                 intent = DeckIntentEngine.infer(work, archetype=arch)
 
         if allow_swaps:
-            plan, ranking, why_gaps, why_picks, rejected, pick_explanations = build_improvement_plan(
-                work,
-                intent=intent,
-                pool=card_pool,
-                db=db,
-                locked=locked,
-                max_steps=6,
+            plan, ranking, _plan_why_gaps, why_picks, rejected, pick_explanations = (
+                build_improvement_plan(
+                    work,
+                    intent=intent,
+                    pool=card_pool,
+                    db=db,
+                    locked=locked,
+                    max_steps=6,
+                )
             )
+            del _plan_why_gaps  # финальные gaps — только из EvaluationReport ниже
         else:
             plan = ImprovementPlan(
                 needed=False,
@@ -1378,15 +1404,15 @@ class RecommendationEngine:
             plan.improved_deck, archetype=intent.archetype, intent=intent,
         )
 
-        from bot.services.deck_evaluator import DeckEvaluator
         from bot.services.deck_sanity_validator import validate_deck_sanity
 
-        evaluation = DeckEvaluator.evaluate(
-            original,
-            archetype=intent.archetype,
-            db=db,
-        )
-        risk = _risk_assessment(start_balance, game_plan, [])
+        # Финальный EvaluationReport на актуальном составе (после всех swap / trim).
+        judged = plan.improved_deck if len(plan.improved_deck) == 8 else original
+        evaluation = evaluate_deck(judged, archetype=intent.archetype, db=db)
+        balance = _balance_issues_from_evaluation(evaluation)
+        # Советы/gaps — только из актуального отчёта Builder (не из стартового).
+        why_gaps = _why_gaps_from_evaluation(evaluation)
+        risk = _risk_assessment(evaluation, game_plan, [])
 
         # Deck Sanity Validator — до coaching / текста «как играть».
         sanity = validate_deck_sanity(
@@ -1396,8 +1422,8 @@ class RecommendationEngine:
             evaluation=evaluation,
             archetype=intent.archetype,
             db=db,
-            balance_hard=list(start_balance.hard),
-            balance_messages=list(start_balance.messages),
+            balance_hard=list(balance.hard),
+            balance_messages=list(balance.messages),
             risk_score=risk.score,
         )
 
@@ -1405,22 +1431,11 @@ class RecommendationEngine:
         from bot.services.card_data import secondary_pressure_in
         from bot.services.player_remarks import build_player_remarks
 
-        deck_playable = bool(sanity.passed) or (
-            not plan.needed
-            and "win_condition" not in start_balance.hard
-            and "deck_size" not in start_balance.hard
-        )
-        # Если обязательных замен нет — никогда не пугаем «пересобрать».
-        if not plan.needed:
-            deck_playable = True
+        deck_playable = is_good_deck(report=evaluation)
 
         eval_good = list(evaluation.whats_good or evaluation.strengths or ())
         eval_improve = list(evaluation.can_improve or evaluation.weaknesses or ())
-        soft_improve = [
-            m for m in start_balance.messages
-            if m and m not in eval_improve
-        ]
-        # Swap-строки уже пользовательские.
+        # Swap-строки уже пользовательские (факт замен), остальное — из EvaluationReport.
         swap_lines = [line for line in why_picks if "→" in line or line.startswith("Добавить:")]
 
         if is_builder and sanity.passed:
@@ -1446,7 +1461,7 @@ class RecommendationEngine:
                 strengths=eval_good or [
                     f"Главная угроза — {intent.primary_win}" if intent.primary_win else ""
                 ],
-                improvements=[*swap_lines, *eval_improve, *soft_improve][:6],
+                improvements=[*swap_lines, *eval_improve][:6],
                 deck_playable=deck_playable,
                 has_mandatory_swaps=bool(plan.needed),
                 primary_win=intent.primary_win,
@@ -1460,7 +1475,6 @@ class RecommendationEngine:
                 ),
             )
             why_picks = remarks.as_issue_lines()
-            # Если есть свапы — добавим их явно в «улучшить», уже внутри remarks.
             if plan.needed and swap_lines and "Что можно улучшить" not in why_picks:
                 why_picks = [
                     *why_picks[:-2],
@@ -1481,12 +1495,12 @@ class RecommendationEngine:
             rejected=rejected[:16],
             pick_explanations=pick_explanations[:8],
         )
-        risk = _risk_assessment(start_balance, game_plan, open_cats)
+        risk = _risk_assessment(evaluation, game_plan, open_cats)
 
         result = RecommendationResult(
             intent=intent,
             game_plan=game_plan,
-            balance_issues=start_balance,
+            balance_issues=balance,
             improvement_plan=plan,
             decision_explanation=explanation,
             candidate_ranking=ranking,
