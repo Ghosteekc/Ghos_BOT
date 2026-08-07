@@ -100,7 +100,7 @@ CARD_META: dict[str, dict] = {
     "Clone": {"elixir": 3, "type": "spell", "role": "spell"},
     "Earthquake": {"elixir": 3, "type": "spell", "role": "spell"},
     "Barbarian Barrel": {"elixir": 2, "type": "spell", "role": "spell"},
-    "Heal Spirit": {"elixir": 1, "type": "spell", "role": "cycle"},
+    "Heal Spirit": {"elixir": 1, "type": "troop", "role": "cycle"},
     "Giant Snowball": {"elixir": 2, "type": "spell", "role": "spell"},
     "Royal Delivery": {"elixir": 3, "type": "spell", "role": "spell"},
     "Cannon": {"elixir": 3, "type": "building", "role": "building"},

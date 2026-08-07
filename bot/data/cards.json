@@ -463,11 +463,9 @@
     },
     "Heal Spirit": {
       "elixir": 1,
-      "type": "spell",
+      "type": "troop",
       "roles": [
-        "cycle",
-        "small_spell",
-        "spell"
+        "cycle"
       ]
     },
     "Hog Rider": {
