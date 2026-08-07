@@ -149,11 +149,12 @@ def validate_builder_variant(
 
     anchor_present = not primary_anchor or primary_anchor in deck
     anchor_is_primary = not primary_anchor or win_plan.primary_card == primary_anchor
+    # primary_threat — человекочитаемая RU-строка; якорь сверяем по key_cards
+    # (английские имена), иначе startswith(EN) ломает все сборки после локализации.
     anchor_plan_matches = (
         not primary_anchor
         or (
-            game_plan.primary_threat.startswith(primary_anchor)
-            and bool(game_plan.key_cards)
+            bool(game_plan.key_cards)
             and game_plan.key_cards[0] == primary_anchor
         )
     )
