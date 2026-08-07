@@ -252,11 +252,15 @@ async def _build_user_deck_entries(battles: list, user: User) -> list[DeckEntry]
     await ensure_cards_loaded()
     tag = user.player_tag or ""
     profile_deck = await _fetch_profile_current_deck(tag)
-    rows = await sync_tracked_mine_decks(
-        user,
-        live_battles=battles,
-        profile_deck=profile_deck,
-    )
+    try:
+        rows = await sync_tracked_mine_decks(
+            user,
+            live_battles=battles,
+            profile_deck=profile_deck,
+        )
+    except Exception:
+        logger.exception("sync_tracked_mine_decks failed for user_id=%s", user.id)
+        rows = []
     decks: list[DeckEntry] = []
     for i, data in enumerate(rows):
         parsed = data.get("deck_cards") or []
@@ -687,11 +691,15 @@ async def deck_winrates(user: User = Depends(require_subscription)) -> list[Winr
     await ensure_cards_loaded()
     battles = await _get_battles(user)
     profile_deck = await _fetch_profile_current_deck(user.player_tag or "")
-    rows = await sync_tracked_mine_decks(
-        user,
-        live_battles=battles,
-        profile_deck=profile_deck,
-    )
+    try:
+        rows = await sync_tracked_mine_decks(
+            user,
+            live_battles=battles,
+            profile_deck=profile_deck,
+        )
+    except Exception:
+        logger.exception("deck_winrates sync failed for user_id=%s", user.id)
+        rows = []
     result = []
     for data in rows:
         parsed = data.get("deck_cards") or []

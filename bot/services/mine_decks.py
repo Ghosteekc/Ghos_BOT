@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from bot.models.database import TrackedMineDeck, User, async_session
 from bot.services.battle_cache_reader import get_cached_battle_rows, row_to_battle_dict
@@ -19,6 +21,17 @@ from bot.services.deck_analyzer import calculate_deck_winrates
 logger = logging.getLogger(__name__)
 
 MAX_MINE_DECKS = 10
+
+# Параллельные /winrates + /decks иначе оба делают INSERT одной и той же колоды.
+_user_sync_locks: dict[int, asyncio.Lock] = {}
+
+
+def _lock_for_user(user_id: int) -> asyncio.Lock:
+    lock = _user_sync_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _user_sync_locks[user_id] = lock
+    return lock
 
 
 def deck_fingerprint(card_names: list[str]) -> str:
@@ -94,6 +107,13 @@ async def _load_full_winrates(player_tag: str, live_battles: list[dict]) -> dict
     return calculate_deck_winrates(merged, tag)
 
 
+def _touch_existing(existing: TrackedMineDeck, cards: list[str], seen: str) -> None:
+    if cards:
+        existing.cards_csv = ",".join(cards)
+    if seen and seen >= (existing.last_seen or ""):
+        existing.last_seen = seen
+
+
 async def sync_tracked_mine_decks(
     user: User,
     *,
@@ -124,89 +144,112 @@ async def sync_tracked_mine_decks(
             else:
                 winrates[profile_key] = _empty_stats(profile_names, profile_deck)
 
-    async with async_session() as session:
-        res = await session.execute(
-            select(TrackedMineDeck).where(TrackedMineDeck.user_id == user.id)
-        )
-        tracked = list(res.scalars().all())
-        by_key = {t.deck_key: t for t in tracked}
-        # Не вытеснять колоды, добавленные в этом же sync (иначе 2 новые
-        # колоды подряд выбьют друг друга).
-        protected: set[str] = set()
+    async with _lock_for_user(user.id):
+        async with async_session() as session:
+            res = await session.execute(
+                select(TrackedMineDeck).where(TrackedMineDeck.user_id == user.id)
+            )
+            tracked = list(res.scalars().all())
+            by_key = {t.deck_key: t for t in tracked}
+            # Не вытеснять колоды, добавленные в этом же sync (иначе 2 новые
+            # колоды подряд выбьют друг друга).
+            protected: set[str] = set()
 
-        def battle_count(key: str) -> int:
-            return int((winrates.get(key) or {}).get("total") or 0)
+            def battle_count(key: str) -> int:
+                return int((winrates.get(key) or {}).get("total") or 0)
 
-        def ensure_slot(key: str, cards: list[str], seen: str) -> None:
-            nonlocal by_key
-            existing = by_key.get(key)
-            if existing is not None:
-                if cards:
-                    existing.cards_csv = ",".join(cards)
-                if seen and seen >= (existing.last_seen or ""):
-                    existing.last_seen = seen
-                return
+            async def ensure_slot(key: str, cards: list[str], seen: str) -> None:
+                nonlocal by_key
+                existing = by_key.get(key)
+                if existing is not None:
+                    _touch_existing(existing, cards, seen)
+                    return
 
-            if len(by_key) < MAX_MINE_DECKS:
+                if len(by_key) >= MAX_MINE_DECKS:
+                    candidates = [t for t in by_key.values() if t.deck_key not in protected]
+                    if not candidates:
+                        return
+                    victim = min(
+                        candidates,
+                        key=lambda t: (battle_count(t.deck_key), t.last_seen or "", t.id or 0),
+                    )
+                    logger.info(
+                        "Mine decks: replace %s (battles=%s) with %s for user_id=%s",
+                        victim.deck_key,
+                        battle_count(victim.deck_key),
+                        key,
+                        user.id,
+                    )
+                    del by_key[victim.deck_key]
+                    await session.delete(victim)
+                    await session.flush()
+
                 row = TrackedMineDeck(
                     user_id=user.id,
                     deck_key=key,
                     cards_csv=",".join(cards),
                     last_seen=seen or "",
                 )
-                session.add(row)
-                by_key[key] = row
+                try:
+                    async with session.begin_nested():
+                        session.add(row)
+                        await session.flush()
+                    by_key[key] = row
+                    protected.add(key)
+                    return
+                except IntegrityError:
+                    logger.warning(
+                        "Mine decks: duplicate key %s for user_id=%s — updating existing",
+                        key,
+                        user.id,
+                    )
+
+                # Гонка / уже есть в БД — подтянуть и обновить
+                res_existing = await session.execute(
+                    select(TrackedMineDeck).where(
+                        TrackedMineDeck.user_id == user.id,
+                        TrackedMineDeck.deck_key == key,
+                    )
+                )
+                existing = res_existing.scalar_one_or_none()
+                if existing is None:
+                    return
+                by_key[key] = existing
                 protected.add(key)
-                return
+                _touch_existing(existing, cards, seen)
 
-            # Вытеснить колоду с наименьшим числом боёв
-            candidates = [t for t in by_key.values() if t.deck_key not in protected]
-            if not candidates:
-                return
-            victim = min(
-                candidates,
-                key=lambda t: (battle_count(t.deck_key), t.last_seen or "", t.id or 0),
+            # Сначала свежие бои (уже от новых к старым уникальные)
+            for key, names, seen in sightings:
+                await ensure_slot(key, names, seen)
+
+            if profile_key:
+                await ensure_slot(
+                    profile_key,
+                    profile_names,
+                    sightings[0][2] if sightings else "",
+                )
+
+            # Bootstrap: если слотов нет — заполнить топом из истории
+            if not by_key and winrates:
+                for key, data in list(winrates.items())[:MAX_MINE_DECKS]:
+                    await ensure_slot(key, list(data.get("cards") or key.split("|")), "")
+
+            try:
+                await session.commit()
+            except IntegrityError:
+                logger.exception(
+                    "Mine decks: commit IntegrityError for user_id=%s — rollback and read-only",
+                    user.id,
+                )
+                await session.rollback()
+
+            # Перечитать после commit / rollback
+            res = await session.execute(
+                select(TrackedMineDeck)
+                .where(TrackedMineDeck.user_id == user.id)
+                .order_by(TrackedMineDeck.last_seen.desc(), TrackedMineDeck.id.desc())
             )
-            logger.info(
-                "Mine decks: replace %s (battles=%s) with %s for user_id=%s",
-                victim.deck_key,
-                battle_count(victim.deck_key),
-                key,
-                user.id,
-            )
-            del by_key[victim.deck_key]
-            session.delete(victim)
-            row = TrackedMineDeck(
-                user_id=user.id,
-                deck_key=key,
-                cards_csv=",".join(cards),
-                last_seen=seen or "",
-            )
-            session.add(row)
-            by_key[key] = row
-            protected.add(key)
-
-        # Сначала свежие бои (уже от новых к старым уникальные)
-        for key, names, seen in sightings:
-            ensure_slot(key, names, seen)
-
-        if profile_key:
-            ensure_slot(profile_key, profile_names, sightings[0][2] if sightings else "")
-
-        # Bootstrap: если слотов нет — заполнить топом из истории
-        if not by_key and winrates:
-            for key, data in list(winrates.items())[:MAX_MINE_DECKS]:
-                ensure_slot(key, list(data.get("cards") or key.split("|")), "")
-
-        await session.commit()
-
-        # Перечитать после commit
-        res = await session.execute(
-            select(TrackedMineDeck)
-            .where(TrackedMineDeck.user_id == user.id)
-            .order_by(TrackedMineDeck.last_seen.desc(), TrackedMineDeck.id.desc())
-        )
-        tracked = list(res.scalars().all())
+            tracked = list(res.scalars().all())
 
     out: list[dict[str, Any]] = []
     for slot in tracked[:MAX_MINE_DECKS]:
