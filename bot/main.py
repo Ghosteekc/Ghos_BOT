@@ -59,9 +59,9 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
-    # Кнопка WebApp в чате — всегда актуальный URL
-    webapp = (settings.webapp_url or "").strip()
-    if webapp and "your-domain" not in webapp:
+    # Menu Button: только MenuButtonWebApp + WebAppInfo (не url-кнопка).
+    webapp = (settings.webapp_url or "").strip().rstrip("/")
+    if webapp and "your-domain" not in webapp and webapp.startswith("https://"):
         try:
             from aiogram.types import MenuButtonWebApp, WebAppInfo
 
@@ -74,6 +74,11 @@ async def main() -> None:
             logger.info("Chat menu WebApp button set -> %s", webapp)
         except Exception as e:
             logger.warning("Failed to set chat menu WebApp button: %s", e)
+    else:
+        logger.warning(
+            "Skip chat menu WebApp button: WEBAPP_URL missing or invalid (%r)",
+            webapp,
+        )
 
     storage = SqliteStorage()
     dp = Dispatcher(storage=storage)
