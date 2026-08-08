@@ -21,3 +21,6 @@ scripts/localtunnel/tunnel-session.log
 scripts/localtunnel/tunnel-url.txt
 scripts/localtunnel/tunnel-supervisor.pid
 scripts/localtunnel/tunnel-child.pid
+
+# Generated card icons for weekly digest collage
+data/card_icon_cache/

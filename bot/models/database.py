@@ -36,6 +36,7 @@ class User(Base):
     app_settings: Mapped["UserSettings | None"] = relationship(
         back_populates="user", uselist=False
     )
+    weekly_digests: Mapped[list["WeeklyDigestSent"]] = relationship(back_populates="user")
 
 
 class UserSettings(Base):
@@ -131,6 +132,24 @@ class TrackedMineDeck(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="tracked_mine_decks")
+
+
+class WeeklyDigestSent(Base):
+    """Идемпотентность воскресной сводки: одна запись на пользователя и ISO-неделю."""
+
+    __tablename__ = "weekly_digest_sent"
+    __table_args__ = (
+        UniqueConstraint("user_id", "week_key", name="uq_weekly_digest_user_week"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    week_key: Mapped[str] = mapped_column(String(16))  # e.g. 2026-W32
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    user: Mapped["User"] = relationship(back_populates="weekly_digests")
 
 
 class FsmStorageRecord(Base):

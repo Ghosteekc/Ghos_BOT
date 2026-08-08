@@ -64,6 +64,10 @@ def today_key_msk() -> str:
     return datetime.now(_MSK).strftime("%Y%m%d")
 
 
+def now_msk() -> datetime:
+    return datetime.now(_MSK)
+
+
 def format_battle_played_at(raw: str | None) -> str:
     """Return local time label like 19:22 from CR battleTime (UTC)."""
     if not raw:
