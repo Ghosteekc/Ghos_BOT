@@ -238,6 +238,47 @@ def build_week_stats(
     )
 
 
+def _deck_fingerprint(names: list[str]) -> str:
+    return "|".join(sorted(n for n in names if n))
+
+
+def collage_cards_for_deck(battles: list[dict], player_tag: str, deck: dict[str, Any]) -> list[dict]:
+    """Prefer newest live battle variant (evo/hero) for collage art."""
+    from bot.services.card_icons import cards_from_team
+
+    tag = normalize_tag(player_tag)
+    target = _deck_fingerprint(list(deck.get("cards") or []))
+    if not target and deck.get("deck_cards"):
+        target = _deck_fingerprint([c.get("name") or "" for c in deck["deck_cards"]])
+
+    best_live: list[dict] | None = None
+    for battle in battles:
+        team = battle.get("team", [{}])[0]
+        team_tag = team.get("tag") or ""
+        if team_tag and normalize_tag(team_tag) != tag:
+            continue
+        if battle.get("type") == "cached":
+            continue
+        parsed = cards_from_team(team)
+        if len(parsed) != 8:
+            continue
+        key = _deck_fingerprint([c["name"] for c in parsed])
+        if key != target:
+            continue
+        # First match is newest (battles sorted desc)
+        best_live = parsed
+        break
+
+    if best_live:
+        return best_live
+
+    cards = deck.get("deck_cards") or [
+        {"name": n, "evolution_level": 0, "is_hero": False, "icon": "", "cost": get_card_elixir(n)}
+        for n in (deck.get("cards") or [])
+    ]
+    return list(cards)
+
+
 def _format_trophy(delta: int) -> str:
     if delta > 0:
         return f"+{delta}"
@@ -264,7 +305,7 @@ def format_digest_caption(stats: WeekStats, player_name: str | None = None) -> s
         f"<b>Ghosteek · недельная сводка</b>{who}",
         f"<i>{period}</i> · {stats.week_key}",
         "",
-        f"⚔️ {stats.total} матчей · {stats.wins}П / {stats.losses}Пор · <b>{stats.winrate}%</b>",
+        f"⚔️ {stats.total} матчей · 🟢 {stats.wins}П · 🔴 {stats.losses}Пор · <b>{stats.winrate}%</b>",
         f"🏆 Кубки за неделю: <b>{_format_trophy(stats.trophy_delta)}</b>",
         f"🔥 Лучшая серия побед: <b>{stats.best_streak}</b>",
     ]
@@ -372,17 +413,26 @@ async def _eligible_users() -> list[User]:
         return list(by_id.values())
 
 
-async def send_digest_to_user(bot: Bot, user: User, window: WeekWindow) -> bool:
+async def send_digest_to_user(
+    bot: Bot,
+    user: User,
+    window: WeekWindow,
+    *,
+    force: bool = False,
+    mark: bool = True,
+) -> bool:
+    """Send weekly digest. ``force`` skips idempotency; ``mark=False`` for previews."""
     if not user.player_tag or not user.telegram_id:
         return False
-    if await already_sent(user.id, window.week_key):
+    if not force and await already_sent(user.id, window.week_key):
         return False
 
     battles = await _load_week_battles(user.player_tag, window)
     stats = build_week_stats(battles, user.player_tag, window)
     if stats is None:
-        # No battles — still mark so we don't spam empty retries all week
-        await mark_sent(user.id, window.week_key)
+        if mark and not force:
+            # No battles — still mark so we don't spam empty retries all week
+            await mark_sent(user.id, window.week_key)
         logger.info(
             "Digest skip (no battles) user_id=%s week=%s",
             user.id,
@@ -391,13 +441,12 @@ async def send_digest_to_user(bot: Bot, user: User, window: WeekWindow) -> bool:
         return False
 
     caption = format_digest_caption(stats, user.player_name)
+    if force and not mark:
+        caption = "👁 <b>Превью сводки</b> (тестовая отправка)\n\n" + caption
     keyboard = _open_app_keyboard()
     photo_bytes: bytes | None = None
     if stats.best_deck:
-        cards = stats.best_deck.get("deck_cards") or [
-            {"name": n, "evolution_level": 0, "is_hero": False, "icon": ""}
-            for n in (stats.best_deck.get("cards") or [])
-        ]
+        cards = collage_cards_for_deck(battles, user.player_tag, stats.best_deck)
         try:
             photo_bytes = await render_deck_collage(cards)
         except Exception:
@@ -418,7 +467,8 @@ async def send_digest_to_user(bot: Bot, user: User, window: WeekWindow) -> bool:
                 reply_markup=keyboard,
             )
     except TelegramForbiddenError:
-        await mark_sent(user.id, window.week_key)
+        if mark:
+            await mark_sent(user.id, window.week_key)
         logger.info("Digest blocked by user telegram_id=%s", user.telegram_id)
         return False
     except TelegramRetryAfter as e:
@@ -428,15 +478,33 @@ async def send_digest_to_user(bot: Bot, user: User, window: WeekWindow) -> bool:
         logger.exception("Digest send failed user_id=%s", user.id)
         return False
 
-    await mark_sent(user.id, window.week_key)
+    if mark:
+        await mark_sent(user.id, window.week_key)
     logger.info(
-        "Digest sent user_id=%s week=%s battles=%s wr=%s",
+        "Digest sent user_id=%s week=%s battles=%s wr=%s force=%s mark=%s",
         user.id,
         window.week_key,
         stats.total,
         stats.winrate,
+        force,
+        mark,
     )
     return True
+
+
+async def send_digest_preview(bot: Bot, user: User) -> tuple[bool, str]:
+    """Force-send current ISO week digest without marking as delivered."""
+    if not user.player_tag:
+        return False, "Сначала привяжите тег: /link #ВАШТЕГ"
+    await ensure_cards_loaded()
+    window = week_bounds(iso_week_key(now_msk().date()))
+    ok = await send_digest_to_user(bot, user, window, force=True, mark=False)
+    if ok:
+        return True, ""
+    return False, (
+        f"За неделю {window.start.strftime('%d.%m')}–{window.end.strftime('%d.%m')} "
+        "в кеше нет боёв — сыграйте на лестнице или дождитесь синхронизации."
+    )
 
 
 async def run_digest_cycle(bot: Bot) -> int:

@@ -6,6 +6,7 @@ from aiogram.types import Message
 from bot.keyboards.menus import main_menu
 from bot.models.database import async_session
 from bot.services.clash_api import SubscriptionService
+from bot.services.weekly_digest import send_digest_preview
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,24 @@ async def cmd_help(message: Message) -> None:
         "/link — привязать аккаунт (можно отправить только тег)\n"
         "/unlink — отвязать аккаунт Clash Royale от этого Telegram\n"
         "/cancel — отменить ввод тега (во время /link)\n"
-        "/profile — ваш профиль\n\n"
+        "/profile — ваш профиль\n"
+        "/digest — превью недельной сводки в чат\n\n"
         "Кнопка «📝 Регистрация» — то же, что /link: бот попросит тег игрока.\n\n"
         "<b>Анализ и статистика</b> — в Mini App: кнопка «📱 Открыть приложение» "
         "или Menu Button слева от поля ввода.\n\n"
         "Для работы приложения нужен привязанный тег: <code>/link #ТЕГ</code>",
         reply_markup=main_menu(),
     )
+
+
+@router.message(Command("digest"))
+async def cmd_digest_preview(message: Message) -> None:
+    """Превью недельной сводки (любое состояние FSM; не блокирует воскресную рассылку)."""
+    async with async_session() as session:
+        sub_service = SubscriptionService(session)
+        user = await sub_service.get_or_create_user(message.from_user.id)
+
+    await message.answer("⏳ Собираю превью недельной сводки…")
+    ok, err = await send_digest_preview(message.bot, user)
+    if not ok:
+        await message.answer(err or "Не удалось отправить сводку.")

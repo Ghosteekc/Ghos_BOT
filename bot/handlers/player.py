@@ -205,10 +205,15 @@ async def btn_registration(message: Message, state: FSMContext) -> None:
     await _prompt_link_tag(message, state)
 
 
-@router.message(F.text, ~F.text.in_(MENU_BUTTONS), StateFilter(LinkStates.waiting_tag))
+@router.message(
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MENU_BUTTONS),
+    StateFilter(LinkStates.waiting_tag),
+)
 async def handle_pending_tag(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
-    if not text or text.startswith("/"):
+    if not text:
         await _prompt_link_tag(message, state)
         return
 
