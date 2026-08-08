@@ -111,13 +111,11 @@ def _best_win_streak(results: list[bool]) -> int:
 def _form_note(winrate: float, total: int) -> str:
     if total < 5:
         return "Мало боёв за неделю — крути лестницу, статистика стабилизируется."
-    if winrate >= 65:
-        return "Отличная форма! Дави тем же планом атаки."
-    if winrate >= 55:
-        return "Стабильная игра — продолжай в том же духе."
-    if winrate >= 45:
-        return "Близко к балансу. Разбери пару ключевых поражений в Mini App."
-    return "Неделя тяжёлая. Смени темп или подкрути колоду под мету."
+    if winrate < 50:
+        return "Было много поражений. Разбери поражения в Mini App и улучши колоду."
+    if winrate < 60:
+        return "Винрейт стабильный — продолжай в том же духе."
+    return "Показатель винрейта замечательный, так держать!"
 
 
 def _merge_live_and_cache(live: list[dict], cached: list[dict]) -> list[dict]:
@@ -299,19 +297,21 @@ def _avg_elixir(deck: dict[str, Any]) -> float:
 
 
 def format_digest_caption(stats: WeekStats, player_name: str | None = None) -> str:
-    period = f"{stats.start.strftime('%d.%m')}–{stats.end.strftime('%d.%m')}"
-    who = f" · {player_name}" if player_name else ""
+    period = (
+        f"{stats.start.strftime('%d.%m')} - {stats.end.strftime('%d.%m')} - {stats.start.year}"
+    )
     lines = [
-        f"<b>Ghosteek · недельная сводка</b>{who}",
-        f"<i>{period}</i> · {stats.week_key}",
+        "👻Недельная сводка",
+        period,
         "",
-        f"⚔️ {stats.total} матчей · 🟢 {stats.wins}П · 🔴 {stats.losses}Пор · <b>{stats.winrate}%</b>",
-        f"🏆 Кубки за неделю: <b>{_format_trophy(stats.trophy_delta)}</b>",
-        f"🔥 Лучшая серия побед: <b>{stats.best_streak}</b>",
+        f"⚔️ {stats.total} матчей",
+        f"🟢 {stats.wins}Поб / 🔴{stats.losses}Пор · {stats.winrate}%",
+        f"🏆 Кубки за неделю: {_format_trophy(stats.trophy_delta)}",
+        f"🔥 Лучшая серия побед: {stats.best_streak}",
     ]
     if stats.best_day_name and stats.best_day_wins:
         lines.append(
-            f"📅 Лучший день: <b>{stats.best_day_name}</b> ({stats.best_day_wins} побед)"
+            f"📅 Лучший день: {stats.best_day_name} ({stats.best_day_wins} побед)"
         )
 
     if stats.best_deck:
@@ -321,8 +321,8 @@ def format_digest_caption(stats: WeekStats, player_name: str | None = None) -> s
             [
                 "",
                 (
-                    f"🥇 Лучшая колода: <b>{d.get('winrate', 0)}%</b> "
-                    f"({d.get('total', 0)} матчей · ⚡{avg})"
+                    f"🥇 Лучшая колода: {d.get('winrate', 0)}% "
+                    f"({d.get('total', 0)} матчей ⚡{avg})"
                 ),
             ]
         )
@@ -330,6 +330,8 @@ def format_digest_caption(stats: WeekStats, player_name: str | None = None) -> s
             lines.append(f"Доля игр этой колодой: {int(stats.best_deck_share)}%")
 
     lines.extend(["", stats.form_note])
+    # player_name reserved for future personalization; keep signature stable
+    _ = player_name
     return "\n".join(lines)
 
 
