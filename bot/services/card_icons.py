@@ -246,13 +246,28 @@ def merge_deck_variants(variants: list[list[dict]]) -> list[dict]:
         order_counts[tuple(c["name"] for c in variant)] += 1
     best_order = order_counts.most_common(1)[0][0]
     matching = [v for v in variants if tuple(c["name"] for c in v) == best_order]
-    # Prefer newest battle among matching order (variants are newest-first).
-    base = matching[0] if matching else variants[0]
+
+    def _richness(variant: list[dict]) -> int:
+        score = 0
+        for c in variant:
+            if c.get("is_hero"):
+                score += 10
+            score += int(c.get("evolution_level") or 0) * 5
+            if c.get("icon"):
+                score += 1
+        return score
+
+    # Cache stubs (names only) would otherwise majority-vote evo/hero back to 0.
+    rich = [v for v in matching if _richness(v) > 0]
+    mode_pool = rich if rich else matching
+    # Newest-first among rich for base art/levels
+    base = max(mode_pool, key=_richness) if mode_pool else matching[0]
+
     merged: list[dict] = []
     for slot, card in enumerate(base):
         evo_votes: Counter[int] = Counter()
         hero_votes = 0
-        for variant in matching:
+        for variant in mode_pool:
             if slot >= len(variant):
                 continue
             item = variant[slot]
@@ -262,8 +277,24 @@ def merge_deck_variants(variants: list[list[dict]]) -> list[dict]:
                 hero_votes += 1
             else:
                 evo_votes[int(item.get("evolution_level") or 0)] += 1
-        is_hero = hero_votes > len(matching) / 2
+        is_hero = hero_votes > len(mode_pool) / 2
         best_evo = 0 if is_hero else (evo_votes.most_common(1)[0][0] if evo_votes else 0)
+        # If majority still 0 but any rich sample has evo/hero, keep the equipped mode
+        if not is_hero and best_evo == 0:
+            for variant in mode_pool:
+                if slot >= len(variant):
+                    continue
+                item = variant[slot]
+                if item["name"] != card["name"]:
+                    continue
+                if item.get("is_hero"):
+                    is_hero = True
+                    best_evo = 0
+                    break
+                ev = int(item.get("evolution_level") or 0)
+                if ev >= 1:
+                    best_evo = ev
+                    break
         parsed = {
             "name": card["name"],
             "icon": "",
@@ -273,8 +304,6 @@ def merge_deck_variants(variants: list[list[dict]]) -> list[dict]:
             "cost": card.get("cost") or get_card_elixir(card["name"]),
             "slot": slot,
         }
-        # ``base`` — последняя реальная колода с наиболее частым порядком.
-        # Сохраняем её уровень, а не сбрасываем его при агрегации вариантов.
         if card.get("level") is not None:
             parsed["level"] = int(card["level"])
         if is_hero:

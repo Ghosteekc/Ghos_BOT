@@ -81,7 +81,7 @@ def week_bounds(week_key: str) -> WeekWindow:
 
 
 def target_week_for_now(now: datetime | None = None) -> WeekWindow | None:
-    """Sunday after 10:00 MSK → current week; Mon–Wed → previous week catch-up."""
+    """Sunday from 16:00 MSK → current week; Mon–Wed → previous week catch-up."""
     now = now or now_msk()
     if now.tzinfo is None:
         now = now.replace(tzinfo=now_msk().tzinfo)
@@ -89,7 +89,7 @@ def target_week_for_now(now: datetime | None = None) -> WeekWindow | None:
         now = now.astimezone(now_msk().tzinfo)
 
     wd = now.isoweekday()  # Mon=1 … Sun=7
-    if wd == 7 and now.hour >= 10:
+    if wd == 7 and now.hour >= 16:
         return week_bounds(iso_week_key(now.date()))
     if wd in (1, 2, 3):
         last_sunday = now.date() - timedelta(days=wd)
@@ -240,8 +240,33 @@ def _deck_fingerprint(names: list[str]) -> str:
     return "|".join(sorted(n for n in names if n))
 
 
+def _deck_upgrade_score(cards: list[dict]) -> int:
+    """Higher when evolutions / heroes are present (for collage art selection)."""
+    score = 0
+    for c in cards:
+        if c.get("is_hero"):
+            score += 10
+        score += int(c.get("evolution_level") or 0) * 5
+        if c.get("icon"):
+            score += 1
+    return score
+
+
+def _finalize_collage_cards(cards: list[dict]) -> list[dict]:
+    from bot.services.card_icons import _refresh_card_icon, normalize_deck_upgrades
+
+    out: list[dict] = []
+    for i, card in enumerate(cards):
+        item = dict(card)
+        item["slot"] = int(item.get("slot") if item.get("slot") is not None else i)
+        item["cost"] = int(item.get("cost") or get_card_elixir(item.get("name") or "") or 0)
+        _refresh_card_icon(item)
+        out.append(item)
+    return normalize_deck_upgrades(out)
+
+
 def collage_cards_for_deck(battles: list[dict], player_tag: str, deck: dict[str, Any]) -> list[dict]:
-    """Prefer newest live battle variant (evo/hero) for collage art."""
+    """Prefer live battle / deck_cards with evo & hero art — same as «Мои колоды»."""
     from bot.services.card_icons import cards_from_team
 
     tag = normalize_tag(player_tag)
@@ -250,11 +275,13 @@ def collage_cards_for_deck(battles: list[dict], player_tag: str, deck: dict[str,
         target = _deck_fingerprint([c.get("name") or "" for c in deck["deck_cards"]])
 
     best_live: list[dict] | None = None
+    best_score = -1
     for battle in battles:
         team = battle.get("team", [{}])[0]
         team_tag = team.get("tag") or ""
         if team_tag and normalize_tag(team_tag) != tag:
             continue
+        # Cache stubs only have names — skip for art modes
         if battle.get("type") == "cached":
             continue
         parsed = cards_from_team(team)
@@ -263,18 +290,56 @@ def collage_cards_for_deck(battles: list[dict], player_tag: str, deck: dict[str,
         key = _deck_fingerprint([c["name"] for c in parsed])
         if key != target:
             continue
-        # First match is newest (battles sorted desc)
-        best_live = parsed
-        break
+        score = _deck_upgrade_score(parsed)
+        # Newest-first list: keep first max score (prefer richer, then newer)
+        if score > best_score:
+            best_score = score
+            best_live = parsed
+
+    if best_live and best_score > 0:
+        return _finalize_collage_cards(best_live)
+
+    deck_cards = deck.get("deck_cards") or []
+    if len(deck_cards) == 8:
+        finalized = _finalize_collage_cards(deck_cards)
+        if _deck_upgrade_score(finalized) > 0 or best_live is None:
+            return finalized
 
     if best_live:
-        return best_live
+        return _finalize_collage_cards(best_live)
 
-    cards = deck.get("deck_cards") or [
-        {"name": n, "evolution_level": 0, "is_hero": False, "icon": "", "cost": get_card_elixir(n)}
-        for n in (deck.get("cards") or [])
-    ]
-    return list(cards)
+    return _finalize_collage_cards(
+        [
+            {
+                "name": n,
+                "evolution_level": 0,
+                "is_hero": False,
+                "icon": "",
+                "cost": get_card_elixir(n),
+            }
+            for n in (deck.get("cards") or [])
+        ]
+    )
+
+
+async def _profile_deck_if_matches(player_tag: str, target_fp: str) -> list[dict] | None:
+    """currentDeck from profile when it matches the digest deck fingerprint."""
+    if not player_tag or not target_fp:
+        return None
+    from bot.services.top_players import _cards_from_current_deck
+
+    try:
+        async with ClashRoyaleClient() as client:
+            player = await client.get_player(normalize_tag(player_tag))
+        profile = _cards_from_current_deck(player or {})
+    except Exception as exc:
+        logger.debug("Digest profile deck fetch failed for %s: %s", player_tag, exc)
+        return None
+    if len(profile) != 8:
+        return None
+    if _deck_fingerprint([c["name"] for c in profile]) != target_fp:
+        return None
+    return _finalize_collage_cards(profile)
 
 
 def _format_trophy(delta: int) -> str:
@@ -449,6 +514,12 @@ async def send_digest_to_user(
     photo_bytes: bytes | None = None
     if stats.best_deck:
         cards = collage_cards_for_deck(battles, user.player_tag, stats.best_deck)
+        target_fp = _deck_fingerprint([c.get("name") or "" for c in cards]) or _deck_fingerprint(
+            list(stats.best_deck.get("cards") or [])
+        )
+        profile = await _profile_deck_if_matches(user.player_tag, target_fp)
+        if profile and _deck_upgrade_score(profile) >= _deck_upgrade_score(cards):
+            cards = profile
         try:
             photo_bytes = await render_deck_collage(cards)
         except Exception:
