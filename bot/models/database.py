@@ -126,6 +126,8 @@ class TrackedMineDeck(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     deck_key: Mapped[str] = mapped_column(Text)  # sorted names joined by |
     cards_csv: Mapped[str] = mapped_column(Text, default="")  # display order
+    # JSON list of parsed cards (evo/hero) — survives battlelog rotation / name-only cache
+    cards_json: Mapped[str] = mapped_column(Text, default="", server_default="")
     last_seen: Mapped[str] = mapped_column(String(30), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -204,6 +206,27 @@ async def init_db() -> None:
     await _migrate_battle_cache_trophy()
     await _migrate_battle_cache_dedup()
     await _migrate_users_player_tag_unique()
+    await _migrate_tracked_mine_decks_cards_json()
+
+
+async def _migrate_tracked_mine_decks_cards_json() -> None:
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM pragma_table_info('tracked_mine_decks') "
+                "WHERE name='cards_json'"
+            )
+        )
+        if result.scalar_one_or_none() == 0:
+            await conn.execute(
+                text(
+                    "ALTER TABLE tracked_mine_decks ADD COLUMN cards_json TEXT "
+                    "DEFAULT '' NOT NULL"
+                )
+            )
+            logging.getLogger(__name__).info(
+                "Added 'cards_json' column to tracked_mine_decks"
+            )
 
 
 async def _migrate_battle_cache_trophy() -> None:

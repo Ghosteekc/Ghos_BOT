@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -15,6 +16,11 @@ from sqlalchemy.exc import IntegrityError
 
 from bot.models.database import TrackedMineDeck, User, async_session
 from bot.services.battle_cache_reader import get_cached_battle_rows, row_to_battle_dict
+from bot.services.card_icons import (
+    cards_from_team,
+    deck_upgrade_score,
+    or_merge_modes_onto,
+)
 from bot.services.clash_api import normalize_tag
 from bot.services.deck_analyzer import calculate_deck_winrates
 
@@ -42,12 +48,56 @@ def _battle_time(battle: dict) -> str:
     return str(battle.get("battleTime") or battle.get("battle_time") or "")
 
 
-def _recent_deck_sightings(battles: list[dict], player_tag: str) -> list[tuple[str, list[str], str]]:
-    """Новые появления колод из свежих боёв: (key, ordered_names, battle_time), свежие первыми."""
-    from bot.services.card_icons import cards_from_team
+def _serialize_deck_cards(cards: list[dict]) -> str:
+    slim = []
+    for c in cards:
+        if not c.get("name"):
+            continue
+        item = {
+            "name": c["name"],
+            "evolution_level": int(c.get("evolution_level") or 0),
+            "is_hero": bool(c.get("is_hero")),
+            "cost": int(c.get("cost") or 0),
+            "rarity": c.get("rarity") or "",
+            "slot": int(c.get("slot") or 0),
+            "icon": c.get("icon") or "",
+        }
+        if c.get("level") is not None:
+            item["level"] = int(c["level"])
+        slim.append(item)
+    return json.dumps(slim, ensure_ascii=False)
 
+
+def _parse_deck_cards_json(raw: str | None) -> list[dict]:
+    if not raw or not str(raw).strip():
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, list) or len(data) != 8:
+        return []
+    out: list[dict] = []
+    for i, c in enumerate(data):
+        if not isinstance(c, dict) or not c.get("name"):
+            return []
+        out.append({
+            "name": c["name"],
+            "evolution_level": int(c.get("evolution_level") or 0),
+            "is_hero": bool(c.get("is_hero")),
+            "cost": int(c.get("cost") or 0),
+            "rarity": c.get("rarity") or "",
+            "slot": int(c.get("slot") if c.get("slot") is not None else i),
+            "icon": c.get("icon") or "",
+            **({"level": int(c["level"])} if c.get("level") is not None else {}),
+        })
+    return out
+
+
+def _recent_deck_sightings(battles: list[dict], player_tag: str) -> list[tuple[str, list[str], str, list[dict]]]:
+    """Новые появления колод: (key, ordered_names, battle_time, parsed_cards)."""
     tag = normalize_tag(player_tag)
-    sightings: list[tuple[str, list[str], str]] = []
+    sightings: list[tuple[str, list[str], str, list[dict]]] = []
     seen_in_pass: set[str] = set()
 
     for battle in battles:
@@ -66,24 +116,27 @@ def _recent_deck_sightings(battles: list[dict], player_tag: str) -> list[tuple[s
             names = [c.get("name") for c in team.get("cards", []) if c.get("name")]
             if len(names) != 8:
                 continue
+            parsed = []
 
         key = deck_fingerprint(names)
         if not key or key in seen_in_pass:
             continue
         seen_in_pass.add(key)
-        sightings.append((key, names, _battle_time(battle)))
+        sightings.append((key, names, _battle_time(battle), parsed))
 
     return sightings
 
 
 def _merge_battles(live: list[dict], cached: list[dict]) -> list[dict]:
     by_time: dict[str, dict] = {}
-    for b in cached + live:
+    for b in cached:
         t = _battle_time(b)
-        if not t:
-            continue
-        # Prefer live (richer card metadata) over cache stubs
-        if t not in by_time or b.get("type") != "cached":
+        if t:
+            by_time[t] = b
+    # Live API payloads carry evolutionLevel / hero art — always win over cache stubs
+    for b in live:
+        t = _battle_time(b)
+        if t:
             by_time[t] = b
     return sorted(by_time.values(), key=_battle_time, reverse=True)
 
@@ -99,6 +152,16 @@ def _empty_stats(cards: list[str], deck_cards: list[dict] | None = None) -> dict
     }
 
 
+def _combine_deck_cards(*candidates: list[dict] | None) -> list[dict]:
+    """Pick richest order base, OR evo/hero from every non-empty candidate."""
+    variants = [list(c) for c in candidates if c and len(c) == 8]
+    if not variants:
+        return []
+    base = max(variants, key=deck_upgrade_score)
+    # Prefer profile/live order when scores tie — first max among equal scores keeps insertion order
+    return or_merge_modes_onto(base, variants)
+
+
 async def _load_full_winrates(player_tag: str, live_battles: list[dict]) -> dict[str, dict]:
     tag = normalize_tag(player_tag)
     rows = await get_cached_battle_rows(tag, limit=5000)
@@ -107,11 +170,27 @@ async def _load_full_winrates(player_tag: str, live_battles: list[dict]) -> dict
     return calculate_deck_winrates(merged, tag)
 
 
-def _touch_existing(existing: TrackedMineDeck, cards: list[str], seen: str) -> None:
+def _touch_existing(
+    existing: TrackedMineDeck,
+    cards: list[str],
+    seen: str,
+    deck_cards: list[dict] | None = None,
+) -> None:
     if cards:
         existing.cards_csv = ",".join(cards)
     if seen and seen >= (existing.last_seen or ""):
         existing.last_seen = seen
+    if deck_cards and len(deck_cards) == 8:
+        stored = _parse_deck_cards_json(getattr(existing, "cards_json", None))
+        combined = _combine_deck_cards(deck_cards, stored)
+        if deck_upgrade_score(combined) >= deck_upgrade_score(stored):
+            # Keep newer/richer order from incoming when it has upgrades or stored empty
+            if deck_upgrade_score(deck_cards) > 0 or not stored:
+                existing.cards_json = _serialize_deck_cards(
+                    or_merge_modes_onto(deck_cards, [deck_cards, stored] if stored else [deck_cards])
+                )
+            elif combined:
+                existing.cards_json = _serialize_deck_cards(combined)
 
 
 async def sync_tracked_mine_decks(
@@ -135,11 +214,14 @@ async def sync_tracked_mine_decks(
         profile_names = [c["name"] for c in profile_deck if c.get("name")]
         if len(profile_names) == 8:
             profile_key = deck_fingerprint(profile_names)
-            # Подтянуть порядок/evo из профиля в winrates
             if profile_key in winrates:
                 row = dict(winrates[profile_key])
                 row["cards"] = profile_names
-                row["deck_cards"] = profile_deck
+                # OR profile modes onto battle-derived cards (never wipe evo from history)
+                row["deck_cards"] = _combine_deck_cards(
+                    profile_deck,
+                    row.get("deck_cards") or [],
+                )
                 winrates[profile_key] = row
             else:
                 winrates[profile_key] = _empty_stats(profile_names, profile_deck)
@@ -158,11 +240,16 @@ async def sync_tracked_mine_decks(
             def battle_count(key: str) -> int:
                 return int((winrates.get(key) or {}).get("total") or 0)
 
-            async def ensure_slot(key: str, cards: list[str], seen: str) -> None:
+            async def ensure_slot(
+                key: str,
+                cards: list[str],
+                seen: str,
+                deck_cards: list[dict] | None = None,
+            ) -> None:
                 nonlocal by_key
                 existing = by_key.get(key)
                 if existing is not None:
-                    _touch_existing(existing, cards, seen)
+                    _touch_existing(existing, cards, seen, deck_cards)
                     return
 
                 if len(by_key) >= MAX_MINE_DECKS:
@@ -188,6 +275,7 @@ async def sync_tracked_mine_decks(
                     user_id=user.id,
                     deck_key=key,
                     cards_csv=",".join(cards),
+                    cards_json=_serialize_deck_cards(deck_cards) if deck_cards and len(deck_cards) == 8 else "",
                     last_seen=seen or "",
                 )
                 try:
@@ -216,23 +304,37 @@ async def sync_tracked_mine_decks(
                     return
                 by_key[key] = existing
                 protected.add(key)
-                _touch_existing(existing, cards, seen)
+                _touch_existing(existing, cards, seen, deck_cards)
 
             # Сначала свежие бои (уже от новых к старым уникальные)
-            for key, names, seen in sightings:
-                await ensure_slot(key, names, seen)
+            for key, names, seen, parsed in sightings:
+                rich = parsed if len(parsed) == 8 else (winrates.get(key) or {}).get("deck_cards")
+                await ensure_slot(key, names, seen, rich if rich and len(rich) == 8 else None)
 
             if profile_key:
                 await ensure_slot(
                     profile_key,
                     profile_names,
                     sightings[0][2] if sightings else "",
+                    profile_deck,
                 )
+
+            # Подтянуть evo/hero из winrates в уже существующие слоты
+            for key, slot in list(by_key.items()):
+                stats = winrates.get(key)
+                if not stats:
+                    continue
+                dc = stats.get("deck_cards") or []
+                if len(dc) == 8:
+                    names = [c.get("name") for c in dc if c.get("name")]
+                    if len(names) == 8:
+                        _touch_existing(slot, names, slot.last_seen or "", dc)
 
             # Bootstrap: если слотов нет — заполнить топом из истории
             if not by_key and winrates:
                 for key, data in list(winrates.items())[:MAX_MINE_DECKS]:
-                    await ensure_slot(key, list(data.get("cards") or key.split("|")), "")
+                    cards = list(data.get("cards") or key.split("|"))
+                    await ensure_slot(key, cards, "", data.get("deck_cards"))
 
             try:
                 await session.commit()
@@ -255,25 +357,35 @@ async def sync_tracked_mine_decks(
     for slot in tracked[:MAX_MINE_DECKS]:
         stats = winrates.get(slot.deck_key)
         cards_from_csv = [c for c in (slot.cards_csv or "").split(",") if c]
+        stored_cards = _parse_deck_cards_json(getattr(slot, "cards_json", None))
         if stats:
             row = dict(stats)
-            if len(cards_from_csv) == 8 and not row.get("deck_cards"):
+            combined = _combine_deck_cards(
+                row.get("deck_cards") or [],
+                stored_cards,
+            )
+            if combined:
+                row["deck_cards"] = combined
+                row["cards"] = [c["name"] for c in combined]
+            elif len(cards_from_csv) == 8 and not row.get("deck_cards"):
                 row["cards"] = cards_from_csv
             out.append(row)
         else:
             cards = cards_from_csv or slot.deck_key.split("|")
-            out.append(_empty_stats(cards))
+            out.append(_empty_stats(cards, stored_cards or None))
 
     # Текущая колода профиля — первой, если есть в списке
     if profile_key:
         pinned = [r for r in out if deck_fingerprint(r.get("cards") or []) == profile_key]
         rest = [r for r in out if deck_fingerprint(r.get("cards") or []) != profile_key]
         if pinned:
-            # обновить карточки профиля
             pinned[0] = {
                 **pinned[0],
                 "cards": profile_names,
-                "deck_cards": profile_deck or pinned[0].get("deck_cards") or [],
+                "deck_cards": _combine_deck_cards(
+                    profile_deck,
+                    pinned[0].get("deck_cards") or [],
+                ),
             }
             out = pinned + rest
 

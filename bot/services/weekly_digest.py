@@ -241,15 +241,10 @@ def _deck_fingerprint(names: list[str]) -> str:
 
 
 def _deck_upgrade_score(cards: list[dict]) -> int:
-    """Higher when evolutions / heroes are present (for collage art selection)."""
-    score = 0
-    for c in cards:
-        if c.get("is_hero"):
-            score += 10
-        score += int(c.get("evolution_level") or 0) * 5
-        if c.get("icon"):
-            score += 1
-    return score
+    """Higher when evolutions / heroes are present (icons alone must not win)."""
+    from bot.services.card_icons import deck_upgrade_score
+
+    return deck_upgrade_score(cards)
 
 
 def _finalize_collage_cards(cards: list[dict]) -> list[dict]:
@@ -266,23 +261,23 @@ def _finalize_collage_cards(cards: list[dict]) -> list[dict]:
 
 
 def collage_cards_for_deck(battles: list[dict], player_tag: str, deck: dict[str, Any]) -> list[dict]:
-    """Prefer live battle / deck_cards with evo & hero art — same as «Мои колоды»."""
-    from bot.services.card_icons import cards_from_team
+    """Prefer richest evo/hero among live OR-merge, deck_cards, and matching profile."""
+    from bot.services.card_icons import cards_from_team, or_merge_modes_onto
 
     tag = normalize_tag(player_tag)
     target = _deck_fingerprint(list(deck.get("cards") or []))
     if not target and deck.get("deck_cards"):
         target = _deck_fingerprint([c.get("name") or "" for c in deck["deck_cards"]])
 
-    best_live: list[dict] | None = None
-    best_score = -1
+    live_variants: list[list[dict]] = []
     for battle in battles:
         team = battle.get("team", [{}])[0]
         team_tag = team.get("tag") or ""
         if team_tag and normalize_tag(team_tag) != tag:
             continue
-        # Cache stubs only have names — skip for art modes
-        if battle.get("type") == "cached":
+        # Name-only cache stubs — skip for art modes
+        raw_cards = team.get("cards") or []
+        if raw_cards and not any(c.get("evolutionLevel") is not None or c.get("iconUrls") for c in raw_cards):
             continue
         parsed = cards_from_team(team)
         if len(parsed) != 8:
@@ -290,23 +285,29 @@ def collage_cards_for_deck(battles: list[dict], player_tag: str, deck: dict[str,
         key = _deck_fingerprint([c["name"] for c in parsed])
         if key != target:
             continue
-        score = _deck_upgrade_score(parsed)
-        # Newest-first list: keep first max score (prefer richer, then newer)
-        if score > best_score:
-            best_score = score
-            best_live = parsed
+        live_variants.append(parsed)
 
-    if best_live and best_score > 0:
-        return _finalize_collage_cards(best_live)
+    candidates: list[list[dict]] = []
+    if live_variants:
+        base = max(live_variants, key=_deck_upgrade_score)
+        candidates.append(or_merge_modes_onto(base, live_variants))
 
     deck_cards = deck.get("deck_cards") or []
     if len(deck_cards) == 8:
-        finalized = _finalize_collage_cards(deck_cards)
-        if _deck_upgrade_score(finalized) > 0 or best_live is None:
-            return finalized
+        candidates.append(list(deck_cards))
 
-    if best_live:
-        return _finalize_collage_cards(best_live)
+    # Compare finalized candidates; pick richest upgrade score, then any 8-card deck
+    best: list[dict] | None = None
+    best_score = -1
+    for cand in candidates:
+        finalized = _finalize_collage_cards(cand)
+        score = _deck_upgrade_score(finalized)
+        if score > best_score:
+            best_score = score
+            best = finalized
+
+    if best is not None:
+        return best
 
     return _finalize_collage_cards(
         [
@@ -518,8 +519,11 @@ async def send_digest_to_user(
             list(stats.best_deck.get("cards") or [])
         )
         profile = await _profile_deck_if_matches(user.player_tag, target_fp)
-        if profile and _deck_upgrade_score(profile) >= _deck_upgrade_score(cards):
-            cards = profile
+        if profile:
+            from bot.services.card_icons import or_merge_modes_onto
+
+            # Profile order + OR evo/hero from battles (never wipe richer modes)
+            cards = _finalize_collage_cards(or_merge_modes_onto(profile, [profile, cards]))
         try:
             photo_bytes = await render_deck_collage(cards)
         except Exception:

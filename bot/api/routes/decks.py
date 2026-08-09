@@ -211,14 +211,21 @@ def _apply_profile_deck_to_winrates(
     winrates: dict[str, dict],
     profile_deck: list[dict],
 ) -> dict[str, dict]:
-    """Overlay profile currentDeck order/evos onto matching winrate row; pin it first."""
+    """Overlay profile currentDeck order; OR evo/hero with battle-derived modes."""
+    from bot.services.card_icons import or_merge_modes_onto
+
     if len(profile_deck) != 8:
         return winrates
     key = "|".join(sorted(c["name"] for c in profile_deck))
     if key in winrates:
         row = dict(winrates[key])
         row["cards"] = [c["name"] for c in profile_deck]
-        row["deck_cards"] = profile_deck
+        existing = row.get("deck_cards") or []
+        row["deck_cards"] = (
+            or_merge_modes_onto(profile_deck, [profile_deck, existing])
+            if existing
+            else profile_deck
+        )
         rest = {k: v for k, v in winrates.items() if k != key}
         return {key: row, **rest}
     # Profile deck not in recent battles — still show it first with zero stats.

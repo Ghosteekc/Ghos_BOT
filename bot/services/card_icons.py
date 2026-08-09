@@ -235,79 +235,85 @@ def deck_card_info_from_parsed(parsed: dict, *, slot: int | None = None) -> dict
     return info
 
 
+def deck_upgrade_score(cards: list[dict]) -> int:
+    """Score only evolutions / heroes — plain icons must not beat upgrade modes."""
+    score = 0
+    for c in cards:
+        if c.get("is_hero"):
+            score += 10
+        score += int(c.get("evolution_level") or 0) * 5
+    return score
+
+
+def or_merge_modes_onto(base: list[dict], variants: list[list[dict]]) -> list[dict]:
+    """Keep ``base`` slot order; OR evolution/hero flags by card name from any variant.
+
+    Cache stubs (all zeros) and alternate slot orders no longer wipe modes that
+    appeared in any live/profile sighting of the same eight cards.
+    """
+    modes: dict[str, tuple[int, bool]] = {}
+    for variant in variants:
+        for c in variant:
+            name = c.get("name") or ""
+            if not name:
+                continue
+            evo = int(c.get("evolution_level") or 0)
+            hero = bool(c.get("is_hero"))
+            prev = modes.get(name)
+            if prev is None:
+                modes[name] = (0 if hero else evo, hero)
+                continue
+            prev_evo, prev_hero = prev
+            if hero or prev_hero:
+                modes[name] = (0, True)
+            else:
+                modes[name] = (max(prev_evo, evo), False)
+
+    merged: list[dict] = []
+    for slot, card in enumerate(base):
+        name = card.get("name") or ""
+        evo, is_hero = modes.get(name, (int(card.get("evolution_level") or 0), bool(card.get("is_hero"))))
+        if is_hero:
+            evo = 0
+        parsed = {
+            "name": name,
+            "icon": "",
+            "rarity": card.get("rarity") or _card_rarity(card),
+            "evolution_level": evo,
+            "is_hero": is_hero,
+            "cost": card.get("cost") or get_card_elixir(name),
+            "slot": slot,
+        }
+        if card.get("level") is not None:
+            parsed["level"] = int(card["level"])
+        _refresh_card_icon(parsed)
+        merged.append(parsed)
+    return normalize_deck_upgrades(merged)
+
+
 def merge_deck_variants(variants: list[list[dict]]) -> list[dict]:
-    """Pick the most common card order and evolution/hero per slot (as in-game)."""
+    """Pick the most common card order; OR evolution/hero across all same-set variants."""
     from collections import Counter
 
     if not variants:
         return []
     order_counts: Counter[tuple[str, ...]] = Counter()
     for variant in variants:
+        if len(variant) != 8:
+            continue
         order_counts[tuple(c["name"] for c in variant)] += 1
+    if not order_counts:
+        return []
     best_order = order_counts.most_common(1)[0][0]
-    matching = [v for v in variants if tuple(c["name"] for c in v) == best_order]
-
-    def _richness(variant: list[dict]) -> int:
-        score = 0
-        for c in variant:
-            if c.get("is_hero"):
-                score += 10
-            score += int(c.get("evolution_level") or 0) * 5
-            if c.get("icon"):
-                score += 1
-        return score
-
-    # Cache stubs (names only) would otherwise majority-vote evo/hero back to 0.
-    rich = [v for v in matching if _richness(v) > 0]
-    mode_pool = rich if rich else matching
-    # Newest-first among rich for base art/levels
-    base = max(mode_pool, key=_richness) if mode_pool else matching[0]
-
-    merged: list[dict] = []
-    for slot, card in enumerate(base):
-        evo_votes: Counter[int] = Counter()
-        hero_votes = 0
-        for variant in mode_pool:
-            if slot >= len(variant):
-                continue
-            item = variant[slot]
-            if item["name"] != card["name"]:
-                continue
-            if item.get("is_hero"):
-                hero_votes += 1
-            else:
-                evo_votes[int(item.get("evolution_level") or 0)] += 1
-        is_hero = hero_votes > len(mode_pool) / 2
-        best_evo = 0 if is_hero else (evo_votes.most_common(1)[0][0] if evo_votes else 0)
-        # If majority still 0 but any rich sample has evo/hero, keep the equipped mode
-        if not is_hero and best_evo == 0:
-            for variant in mode_pool:
-                if slot >= len(variant):
-                    continue
-                item = variant[slot]
-                if item["name"] != card["name"]:
-                    continue
-                if item.get("is_hero"):
-                    is_hero = True
-                    best_evo = 0
-                    break
-                ev = int(item.get("evolution_level") or 0)
-                if ev >= 1:
-                    best_evo = ev
-                    break
-        parsed = {
-            "name": card["name"],
-            "icon": "",
-            "rarity": card.get("rarity") or _card_rarity(card),
-            "evolution_level": best_evo,
-            "is_hero": is_hero,
-            "cost": card.get("cost") or get_card_elixir(card["name"]),
-            "slot": slot,
-        }
-        if card.get("level") is not None:
-            parsed["level"] = int(card["level"])
-        if is_hero:
-            parsed["evolution_level"] = 0
-        _refresh_card_icon(parsed)
-        merged.append(parsed)
-    return normalize_deck_upgrades(merged)
+    card_set = frozenset(best_order)
+    same_set = [
+        v for v in variants
+        if len(v) == 8 and frozenset(c["name"] for c in v) == card_set
+    ]
+    matching = [v for v in same_set if tuple(c["name"] for c in v) == best_order]
+    pool = matching or same_set
+    # Prefer a variant that already carries upgrades for levels / rarity hints
+    base = max(pool, key=deck_upgrade_score)
+    if deck_upgrade_score(base) == 0 and matching:
+        base = matching[0]
+    return or_merge_modes_onto(base, same_set)
