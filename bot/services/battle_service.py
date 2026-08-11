@@ -128,6 +128,8 @@ async def load_pvp_battles(
 
 def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
     """Build insert payload for BattleCache or None if battle time is missing."""
+    from bot.services.card_icons import cards_from_team, serialize_deck_cards
+
     battle_time = battle_time_from_record(battle)
     if not battle_time:
         logger.debug("Skipping battle without battleTime/warTime for %s", player_tag)
@@ -138,6 +140,14 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
     team_cards = [c.get("name") for c in team.get("cards", [])]
     opp_cards = [c.get("name") for c in opponent.get("cards", [])]
     result = "win" if team.get("crowns", 0) > opponent.get("crowns", 0) else "loss"
+
+    user_deck_json = ""
+    try:
+        parsed = cards_from_team(team)
+        if len(parsed) == 8:
+            user_deck_json = serialize_deck_cards(parsed)
+    except Exception as exc:
+        logger.debug("Battle deck JSON parse failed for %s: %s", player_tag, exc)
 
     try:
         analysis_obj = analyze_battle(team, opponent)
@@ -160,6 +170,7 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
         "result": result,
         "user_deck": ",".join(c for c in team_cards if c),
         "opponent_deck": ",".join(c for c in opp_cards if c),
+        "user_deck_json": user_deck_json,
         "opponent_name": opp_name,
         "opponent_tag": opp_tag,
         "trophy_change": trophy_change,
@@ -169,6 +180,13 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
 
 async def _insert_battle_row(session, row: dict) -> bool:
     """Insert battle row; return True when this call stored a new battle."""
+    from bot.services.card_icons import (
+        deck_upgrade_score,
+        or_merge_modes_onto,
+        parse_deck_cards_json,
+        serialize_deck_cards,
+    )
+
     existing = await session.execute(
         select(BattleCache).where(
             BattleCache.player_tag == row["player_tag"],
@@ -188,6 +206,28 @@ async def _insert_battle_row(session, row: dict) -> bool:
         if new_trophy is not None and battle_row.trophy_change != int(new_trophy):
             battle_row.trophy_change = int(new_trophy)
             updated = True
+        # Backfill / OR-upgrade evo-hero JSON on existing name-only rows
+        incoming_json = (row.get("user_deck_json") or "").strip()
+        if incoming_json:
+            incoming = parse_deck_cards_json(incoming_json)
+            stored = parse_deck_cards_json(getattr(battle_row, "user_deck_json", None))
+            if incoming and (
+                not stored
+                or deck_upgrade_score(incoming) > deck_upgrade_score(stored)
+                or (
+                    deck_upgrade_score(or_merge_modes_onto(incoming, [incoming, stored]))
+                    > deck_upgrade_score(stored)
+                )
+            ):
+                merged = (
+                    or_merge_modes_onto(incoming, [incoming, stored], clamp=False)
+                    if stored
+                    else incoming
+                )
+                new_json = serialize_deck_cards(merged)
+                if new_json != (getattr(battle_row, "user_deck_json", None) or ""):
+                    battle_row.user_deck_json = new_json
+                    updated = True
         if updated:
             await session.flush()
         return False

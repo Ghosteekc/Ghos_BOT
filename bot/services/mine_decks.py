@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from typing import Any
 
@@ -20,6 +19,8 @@ from bot.services.card_icons import (
     cards_from_team,
     deck_upgrade_score,
     or_merge_modes_onto,
+    parse_deck_cards_json,
+    serialize_deck_cards,
 )
 from bot.services.clash_api import normalize_tag
 from bot.services.deck_analyzer import calculate_deck_winrates
@@ -48,57 +49,15 @@ def _battle_time(battle: dict) -> str:
     return str(battle.get("battleTime") or battle.get("battle_time") or "")
 
 
-def _serialize_deck_cards(cards: list[dict]) -> str:
-    slim = []
-    for c in cards:
-        if not c.get("name"):
-            continue
-        item = {
-            "name": c["name"],
-            "evolution_level": int(c.get("evolution_level") or 0),
-            "is_hero": bool(c.get("is_hero")),
-            "cost": int(c.get("cost") or 0),
-            "rarity": c.get("rarity") or "",
-            "slot": int(c.get("slot") or 0),
-            "icon": c.get("icon") or "",
-        }
-        if c.get("level") is not None:
-            item["level"] = int(c["level"])
-        slim.append(item)
-    return json.dumps(slim, ensure_ascii=False)
-
-
-def _parse_deck_cards_json(raw: str | None) -> list[dict]:
-    if not raw or not str(raw).strip():
-        return []
-    try:
-        data = json.loads(raw)
-    except (TypeError, json.JSONDecodeError):
-        return []
-    if not isinstance(data, list) or len(data) != 8:
-        return []
-    out: list[dict] = []
-    for i, c in enumerate(data):
-        if not isinstance(c, dict) or not c.get("name"):
-            return []
-        out.append({
-            "name": c["name"],
-            "evolution_level": int(c.get("evolution_level") or 0),
-            "is_hero": bool(c.get("is_hero")),
-            "cost": int(c.get("cost") or 0),
-            "rarity": c.get("rarity") or "",
-            "slot": int(c.get("slot") if c.get("slot") is not None else i),
-            "icon": c.get("icon") or "",
-            **({"level": int(c["level"])} if c.get("level") is not None else {}),
-        })
-    return out
-
-
 def _recent_deck_sightings(battles: list[dict], player_tag: str) -> list[tuple[str, list[str], str, list[dict]]]:
-    """Новые появления колод: (key, ordered_names, battle_time, parsed_cards)."""
+    """Колоды из боёв: (key, ordered_names, newest_battle_time, OR-merged parsed cards).
+
+    OR-merge across *all* sightings of the same fingerprint so a newer base-art
+    battle cannot hide evo/hero that appeared in an older battle in the same window.
+    """
     tag = normalize_tag(player_tag)
-    sightings: list[tuple[str, list[str], str, list[dict]]] = []
-    seen_in_pass: set[str] = set()
+    # key -> (names, newest_time, list of parsed variants)
+    acc: dict[str, tuple[list[str], str, list[list[dict]]]] = {}
 
     for battle in battles:
         battle_type = battle.get("type") or "PvP"
@@ -119,12 +78,35 @@ def _recent_deck_sightings(battles: list[dict], player_tag: str) -> list[tuple[s
             parsed = []
 
         key = deck_fingerprint(names)
-        if not key or key in seen_in_pass:
+        if not key:
             continue
-        seen_in_pass.add(key)
-        sightings.append((key, names, _battle_time(battle), parsed))
+        bt = _battle_time(battle)
+        if key not in acc:
+            variants = [parsed] if parsed else []
+            acc[key] = (names, bt, variants)
+            continue
+        prev_names, prev_time, variants = acc[key]
+        if parsed:
+            variants.append(parsed)
+        # Keep newest battle time; prefer names from a rich variant when available
+        use_names = names if parsed else prev_names
+        newest = bt if bt >= (prev_time or "") else prev_time
+        acc[key] = (use_names, newest, variants)
 
-    return sightings
+    out: list[tuple[str, list[str], str, list[dict]]] = []
+    for key, (names, seen, variants) in acc.items():
+        if variants:
+            merged = or_merge_modes_onto(
+                max(variants, key=deck_upgrade_score),
+                variants,
+                clamp=False,
+            )
+        else:
+            merged = []
+        out.append((key, names, seen, merged))
+    # Newest first for slot replacement priority
+    out.sort(key=lambda item: item[2] or "", reverse=True)
+    return out
 
 
 def _merge_battles(live: list[dict], cached: list[dict]) -> list[dict]:
@@ -158,8 +140,7 @@ def _combine_deck_cards(*candidates: list[dict] | None) -> list[dict]:
     if not variants:
         return []
     base = max(variants, key=deck_upgrade_score)
-    # Prefer profile/live order when scores tie — first max among equal scores keeps insertion order
-    return or_merge_modes_onto(base, variants)
+    return or_merge_modes_onto(base, variants, clamp=False)
 
 
 async def _load_full_winrates(player_tag: str, live_battles: list[dict]) -> dict[str, dict]:
@@ -180,17 +161,29 @@ def _touch_existing(
         existing.cards_csv = ",".join(cards)
     if seen and seen >= (existing.last_seen or ""):
         existing.last_seen = seen
-    if deck_cards and len(deck_cards) == 8:
-        stored = _parse_deck_cards_json(getattr(existing, "cards_json", None))
-        combined = _combine_deck_cards(deck_cards, stored)
-        if deck_upgrade_score(combined) >= deck_upgrade_score(stored):
-            # Keep newer/richer order from incoming when it has upgrades or stored empty
-            if deck_upgrade_score(deck_cards) > 0 or not stored:
-                existing.cards_json = _serialize_deck_cards(
-                    or_merge_modes_onto(deck_cards, [deck_cards, stored] if stored else [deck_cards])
-                )
-            elif combined:
-                existing.cards_json = _serialize_deck_cards(combined)
+    if not deck_cards or len(deck_cards) != 8:
+        return
+    stored = parse_deck_cards_json(getattr(existing, "cards_json", None))
+    # Prefer incoming order when it carries upgrades; always OR modes so nothing is lost
+    if deck_upgrade_score(deck_cards) > 0 or not stored:
+        base = deck_cards
+    else:
+        base = stored
+    combined = or_merge_modes_onto(
+        base,
+        [deck_cards, stored] if stored else [deck_cards],
+        clamp=False,
+    )
+    # Never write a poorer snapshot over a richer stored one
+    if deck_upgrade_score(combined) < deck_upgrade_score(stored):
+        return
+    if not stored or deck_upgrade_score(combined) > deck_upgrade_score(stored) or (
+        [c.get("name") for c in combined] != [c.get("name") for c in stored]
+        and deck_upgrade_score(combined) >= deck_upgrade_score(stored)
+    ):
+        existing.cards_json = serialize_deck_cards(combined)
+    elif not getattr(existing, "cards_json", None):
+        existing.cards_json = serialize_deck_cards(combined)
 
 
 async def sync_tracked_mine_decks(
@@ -271,11 +264,14 @@ async def sync_tracked_mine_decks(
                     await session.delete(victim)
                     await session.flush()
 
+                initial_json = ""
+                if deck_cards and len(deck_cards) == 8:
+                    initial_json = serialize_deck_cards(deck_cards)
                 row = TrackedMineDeck(
                     user_id=user.id,
                     deck_key=key,
                     cards_csv=",".join(cards),
-                    cards_json=_serialize_deck_cards(deck_cards) if deck_cards and len(deck_cards) == 8 else "",
+                    cards_json=initial_json,
                     last_seen=seen or "",
                 )
                 try:
@@ -357,7 +353,7 @@ async def sync_tracked_mine_decks(
     for slot in tracked[:MAX_MINE_DECKS]:
         stats = winrates.get(slot.deck_key)
         cards_from_csv = [c for c in (slot.cards_csv or "").split(",") if c]
-        stored_cards = _parse_deck_cards_json(getattr(slot, "cards_json", None))
+        stored_cards = parse_deck_cards_json(getattr(slot, "cards_json", None))
         if stats:
             row = dict(stats)
             combined = _combine_deck_cards(

@@ -95,6 +95,8 @@ class BattleCache(Base):
     result: Mapped[str] = mapped_column(String(10))
     user_deck: Mapped[str] = mapped_column(Text)
     opponent_deck: Mapped[str] = mapped_column(Text)
+    # JSON of parsed cards (name, evolution_level, is_hero, …) — survives name-only CSV
+    user_deck_json: Mapped[str] = mapped_column(Text, default="", server_default="")
     opponent_name: Mapped[str] = mapped_column(String(100), default="", server_default="")
     opponent_tag: Mapped[str] = mapped_column(String(20), default="", server_default="")
     trophy_change: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -207,6 +209,27 @@ async def init_db() -> None:
     await _migrate_battle_cache_dedup()
     await _migrate_users_player_tag_unique()
     await _migrate_tracked_mine_decks_cards_json()
+    await _migrate_battle_cache_user_deck_json()
+
+
+async def _migrate_battle_cache_user_deck_json() -> None:
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM pragma_table_info('battle_cache') "
+                "WHERE name='user_deck_json'"
+            )
+        )
+        if result.scalar_one_or_none() == 0:
+            await conn.execute(
+                text(
+                    "ALTER TABLE battle_cache ADD COLUMN user_deck_json TEXT "
+                    "DEFAULT '' NOT NULL"
+                )
+            )
+            logging.getLogger(__name__).info(
+                "Added 'user_deck_json' column to battle_cache"
+            )
 
 
 async def _migrate_tracked_mine_decks_cards_json() -> None:

@@ -21,7 +21,13 @@ async def get_cached_battle_rows(player_tag: str, limit: int = 100) -> list[Batt
 
 
 def row_to_battle_dict(row: BattleCache, player_tag: str) -> dict:
-    user_cards = [{"name": c} for c in (row.user_deck or "").split(",") if c]
+    from bot.services.card_icons import parse_deck_cards_json
+
+    rich = parse_deck_cards_json(getattr(row, "user_deck_json", None))
+    if rich:
+        user_cards = rich
+    else:
+        user_cards = [{"name": c} for c in (row.user_deck or "").split(",") if c]
     opp_cards = [{"name": c} for c in (row.opponent_deck or "").split(",") if c]
     won = row.result == "win"
     tag = normalize_tag(player_tag)

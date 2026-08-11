@@ -118,10 +118,8 @@ def parse_battle_card(card: dict) -> dict:
 
 
 def cards_from_team(team: dict) -> list[dict]:
-    parsed = [parse_battle_card(c) for c in team.get("cards", []) if c.get("name")]
-    for i, item in enumerate(parsed):
-        item["slot"] = i
-    return normalize_deck_upgrades(parsed)
+    cards = [c for c in team.get("cards", []) if c.get("name")]
+    return cards_from_parsed_or_api(cards)
 
 
 def _card_rarity(card: dict) -> str:
@@ -245,11 +243,104 @@ def deck_upgrade_score(cards: list[dict]) -> int:
     return score
 
 
-def or_merge_modes_onto(base: list[dict], variants: list[list[dict]]) -> list[dict]:
+def serialize_deck_cards(cards: list[dict]) -> str:
+    """Compact JSON for battle_cache / tracked_mine_decks persistence."""
+    import json
+
+    slim = []
+    for c in cards:
+        if not c.get("name"):
+            continue
+        item = {
+            "name": c["name"],
+            "evolution_level": int(c.get("evolution_level") or 0),
+            "is_hero": bool(c.get("is_hero")),
+            "cost": int(c.get("cost") or 0),
+            "rarity": c.get("rarity") or "",
+            "slot": int(c.get("slot") or 0),
+            "icon": c.get("icon") or "",
+        }
+        if c.get("level") is not None:
+            item["level"] = int(c["level"])
+        slim.append(item)
+    return json.dumps(slim, ensure_ascii=False)
+
+
+def parse_deck_cards_json(raw: str | None) -> list[dict]:
+    import json
+
+    if not raw or not str(raw).strip():
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, list) or len(data) != 8:
+        return []
+    out: list[dict] = []
+    for i, c in enumerate(data):
+        if not isinstance(c, dict) or not c.get("name"):
+            return []
+        item = {
+            "name": c["name"],
+            "evolution_level": int(c.get("evolution_level") or 0),
+            "is_hero": bool(c.get("is_hero")),
+            "cost": int(c.get("cost") or 0),
+            "rarity": c.get("rarity") or "",
+            "slot": int(c.get("slot") if c.get("slot") is not None else i),
+            "icon": c.get("icon") or "",
+        }
+        if c.get("level") is not None:
+            item["level"] = int(c["level"])
+        _refresh_card_icon(item)
+        out.append(item)
+    return out
+
+
+def cards_from_parsed_or_api(cards: list[dict]) -> list[dict]:
+    """Accept already-parsed cache cards or raw battlelog card objects."""
+    if not cards:
+        return []
+    # Restored from user_deck_json / cards_json — already has our mode fields.
+    if any("evolution_level" in c or "is_hero" in c for c in cards):
+        parsed: list[dict] = []
+        for i, c in enumerate(cards):
+            if not c.get("name"):
+                continue
+            item = {
+                "name": c["name"],
+                "evolution_level": int(c.get("evolution_level") or 0),
+                "is_hero": bool(c.get("is_hero")),
+                "cost": int(c.get("cost") or get_card_elixir(c["name"])),
+                "rarity": c.get("rarity") or _card_rarity(c),
+                "icon": c.get("icon") or "",
+                "slot": int(c.get("slot") if c.get("slot") is not None else i),
+            }
+            if c.get("level") is not None:
+                item["level"] = int(c["level"])
+            _refresh_card_icon(item)
+            parsed.append(item)
+        # Display restore: do not clamp historical unions here.
+        return parsed
+    parsed = [parse_battle_card(c) for c in cards if c.get("name")]
+    for i, item in enumerate(parsed):
+        item["slot"] = i
+    return normalize_deck_upgrades(parsed)
+
+
+def or_merge_modes_onto(
+    base: list[dict],
+    variants: list[list[dict]],
+    *,
+    clamp: bool = False,
+) -> list[dict]:
     """Keep ``base`` slot order; OR evolution/hero flags by card name from any variant.
 
     Cache stubs (all zeros) and alternate slot orders no longer wipe modes that
     appeared in any live/profile sighting of the same eight cards.
+
+    ``clamp=False`` (default for mine/history display): do not demote upgrades that
+    were seen across different legal loadouts of the same fingerprint.
     """
     modes: dict[str, tuple[int, bool]] = {}
     for variant in variants:
@@ -288,7 +379,16 @@ def or_merge_modes_onto(base: list[dict], variants: list[list[dict]]) -> list[di
             parsed["level"] = int(card["level"])
         _refresh_card_icon(parsed)
         merged.append(parsed)
-    return normalize_deck_upgrades(merged)
+    if clamp:
+        return normalize_deck_upgrades(merged)
+    # Still enforce per-card mutual exclusion (hero XOR evo), without slot budget demote.
+    for card in merged:
+        if card.get("is_hero"):
+            card["evolution_level"] = 0
+        elif int(card.get("evolution_level") or 0) >= 1:
+            card["is_hero"] = False
+        _refresh_card_icon(card)
+    return merged
 
 
 def merge_deck_variants(variants: list[list[dict]]) -> list[dict]:
@@ -316,4 +416,4 @@ def merge_deck_variants(variants: list[list[dict]]) -> list[dict]:
     base = max(pool, key=deck_upgrade_score)
     if deck_upgrade_score(base) == 0 and matching:
         base = matching[0]
-    return or_merge_modes_onto(base, same_set)
+    return or_merge_modes_onto(base, same_set, clamp=False)
