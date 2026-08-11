@@ -206,10 +206,11 @@ async def init_db() -> None:
 
     await _migrate_battle_cache_opponent()
     await _migrate_battle_cache_trophy()
+    # Must run before dedup: ORM select(BattleCache) requires user_deck_json column
+    await _migrate_battle_cache_user_deck_json()
+    await _migrate_tracked_mine_decks_cards_json()
     await _migrate_battle_cache_dedup()
     await _migrate_users_player_tag_unique()
-    await _migrate_tracked_mine_decks_cards_json()
-    await _migrate_battle_cache_user_deck_json()
 
 
 async def _migrate_battle_cache_user_deck_json() -> None:
