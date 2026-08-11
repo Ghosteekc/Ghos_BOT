@@ -256,7 +256,7 @@ def template_card_info(data: dict[str, Any]) -> str:
     roles = [str(r) for r in roles_raw if r] if isinstance(roles_raw, list) else []
     cost = f"за {elixir} эликсира" if elixir is not None else "в своём косте"
 
-    if any("воздух" in r.lower() or "air" in r.lower() for r in roles):
+    if any(str(r).lower() in ("air_defense", "air") for r in roles):
         verdict = f"{name} — универсальная защита {cost}."
         why = "Хорошо останавливает воздух и помогает пережить давление."
     elif roles:
@@ -400,6 +400,13 @@ def template_error(code: str, params: dict[str, Any] | None = None) -> str | Non
             "С этой опорой сейчас не собрать рабочий состав.",
             "Скорее всего карта недоступна в пуле.",
             "Попробуй другую ключевую карту.",
+        ),
+        "NO_VALID_BUILD": (
+            params.get("reason")
+            or "Не удалось собрать стабильную колоду вокруг выбранных карт.",
+            params.get("suggestion")
+            or "Добавьте спелл / поддержку в ядро или смените главную угрозу.",
+            "Могу попробовать с другим набором карт.",
         ),
         # Legacy codes — никогда не светим шаблоны/ядро пользователю.
         "BUILD_NO_VARIANTS": (

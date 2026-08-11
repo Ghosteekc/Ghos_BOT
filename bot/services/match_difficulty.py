@@ -109,14 +109,15 @@ def _buildings(deck: list[str]) -> list[str]:
 
 
 def _air_threats(deck: list[str]) -> list[str]:
-    return [
-        c for c in deck
-        if c in _AIR_THREATS or card_has_role(c, "air")
-    ]
+    from bot.services.card_data import card_is_flying
+
+    return [c for c in deck if c in _AIR_THREATS or card_is_flying(c)]
 
 
 def _air_defense(deck: list[str]) -> list[str]:
-    return [c for c in deck if card_has_role(c, "air_defense")]
+    from bot.services.card_data import card_can_target_air
+
+    return [c for c in deck if card_can_target_air(c)]
 
 
 def _value_spells(deck: list[str]) -> list[str]:

@@ -380,14 +380,9 @@ def _phase_2(
     for w in enemy_plan.critical_weaknesses[:2]:
         low = w.lower()
         if "воздух" in low:
-            air = next(
-                (
-                    c for c in my
-                    if card_has_role(c, "air")
-                    or c in {"Balloon", "Minions", "Flying Machine", "Lava Hound"}
-                ),
-                None,
-            )
+            from bot.services.card_data import card_is_flying
+
+            air = next((c for c in my if card_is_flying(c)), None)
             if air:
                 _add_unique_topic(phase, f"Преимущество: дави {_ru(air)} в слабую ПВО.", seen)
         if "здание" in low and my_win and my_win in _BRIDGE_WINS | _SIEGE and not _buildings(enemy):

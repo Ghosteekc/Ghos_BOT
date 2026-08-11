@@ -44,6 +44,12 @@ AIR_DEFENSE = {
     "Witch", "Spear Goblins", "Zappies", "Rascals", "Archer Queen", "Little Prince",
     "Night Witch", "Tesla", "Inferno Tower",
 }
+# Units that are themselves airborne (not ground AA like Musketeer/Tesla).
+FLYING = {
+    "Minions", "Minion Horde", "Mega Minion", "Inferno Dragon", "Baby Dragon",
+    "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix",
+    "Flying Machine", "Electro Dragon", "Skeleton Barrel",
+}
 SPLASH = {
     "Baby Dragon", "Wizard", "Executioner", "Bowler", "Valkyrie", "Bomber",
     "Electro Dragon", "Goblin Demolisher", "Witch", "Electro Wizard", "Ice Wizard",
@@ -128,6 +134,8 @@ def _roles_for(name: str, meta: dict) -> list[str]:
         roles.append("building")
     if name in AIR_DEFENSE or base == "air":
         roles.append("air_defense")
+    if name in FLYING:
+        roles.append("flying")
     if base == "swarm" or name in {"Goblins", "Skeleton Army", "Goblin Gang", "Barbarians"}:
         roles.append("swarm")
     if base == "cycle" or name in {"Skeletons", "Ice Spirit", "Electro Spirit", "Fire Spirit", "Heal Spirit", "Bats"}:

@@ -406,6 +406,20 @@ def card_has_role(name: str, role: str) -> bool:
     return get_card_profile(name).has_role(role)
 
 
+def card_is_flying(name: str) -> bool:
+    """True if the card itself is an airborne unit."""
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).is_flying
+
+
+def card_can_target_air(name: str) -> bool:
+    """True if the card can attack airborne targets (anti-air)."""
+    from bot.services.card_profile import get_card_profile
+
+    return get_card_profile(name).can_target_air
+
+
 def is_spam_card(name: str) -> bool:
     from bot.services.card_profile import get_card_profile
 

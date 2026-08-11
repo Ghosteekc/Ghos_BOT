@@ -140,13 +140,9 @@ def _opp_needs_swarm_clear(opp: list[str]) -> bool:
 
 
 def _opp_has_air(opp: list[str]) -> bool:
-    return any(
-        card_has_role(c, "air") or c in {
-            "Balloon", "Lava Hound", "Baby Dragon", "Minions", "Minion Horde", "Bats",
-            "Flying Machine", "Inferno Dragon", "Skeleton Dragons", "Electro Dragon",
-        }
-        for c in opp
-    )
+    from bot.services.card_data import card_is_flying
+
+    return any(card_is_flying(c) for c in opp)
 
 
 def _spell_answers_target(spell: str, target: str) -> bool:
@@ -422,14 +418,9 @@ def _pressure_from_plans(
     for weakness in opp_plan.critical_weaknesses[:3]:
         low = weakness.lower()
         if "воздух" in low:
-            air = next(
-                (
-                    c for c in user
-                    if card_has_role(c, "air")
-                    or c in {"Balloon", "Minions", "Minion Horde", "Flying Machine", "Lava Hound"}
-                ),
-                None,
-            )
+            from bot.services.card_data import card_is_flying
+
+            air = next((c for c in user if card_is_flying(c)), None)
             if air:
                 _add(out.pressure_points, f"Дави воздухом ({_ru(air)}) — у соперника слабая ПВО.")
         if "спам" in low:

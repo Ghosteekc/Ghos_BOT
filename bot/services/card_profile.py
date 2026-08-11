@@ -19,6 +19,14 @@ from dataclasses import dataclass
 # fallback из CARD_META кэшировался навсегда и ломал big_spell/air_defense/анализ.
 _PROFILE_CACHE: dict[str, "CardProfile"] = {}
 
+# Airborne units only (not ground anti-air). Kept as fallback when cards.json
+# lacks role "flying"; generator writes the same set into roles.
+_FLYING_UNITS = frozenset({
+    "Minions", "Minion Horde", "Mega Minion", "Inferno Dragon", "Baby Dragon",
+    "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix",
+    "Flying Machine", "Electro Dragon", "Skeleton Barrel",
+})
+
 
 @dataclass(frozen=True)
 class CardProfile:
@@ -32,11 +40,14 @@ class CardProfile:
     def has_role(self, role: str) -> bool:
         """Проверка по полному roles[], не только primary.
 
-        Учитывает синонимы уже существующих ролей (air ↔ air_defense,
-        spell ↔ big_spell/small_spell). Новые роли не создаёт.
+        Legacy: role ``air`` is an *anti-air* synonym for ``air_defense``
+        (CARD_META primary role), NOT ``is_flying``. Prefer ``is_flying`` /
+        ``can_target_air`` for new code.
         """
         if role in ("air", "air_defense"):
             return "air_defense" in self.roles or "air" in self.roles
+        if role == "flying":
+            return self.is_flying
         if role == "spell":
             return (
                 self.card_type == "spell"
@@ -76,7 +87,20 @@ class CardProfile:
 
     @property
     def is_air_defense(self) -> bool:
-        return self.has_role("air_defense")
+        """Legacy alias for can_target_air (role air_defense)."""
+        return "air_defense" in self.roles or "air" in self.roles
+
+    @property
+    def can_target_air(self) -> bool:
+        """True if this card can attack airborne targets (anti-air)."""
+        return self.is_air_defense
+
+    @property
+    def is_flying(self) -> bool:
+        """True if the card itself is an airborne unit — independent of anti-air."""
+        if "flying" in self.roles:
+            return True
+        return self.name in _FLYING_UNITS
 
     @property
     def is_splash(self) -> bool:
@@ -143,6 +167,8 @@ def _profile_from_meta(name: str) -> CardProfile:
         roles.add("building")
     if name in _AIR_META or base_role == "air":
         roles.add("air_defense")
+    if name in _FLYING_UNITS:
+        roles.add("flying")
     if base_role == "splash":
         roles.add("splash")
     if not roles:

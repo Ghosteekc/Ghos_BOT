@@ -98,7 +98,9 @@ class EnhancedBattleAnalysis(BattleAnalysis):
     evaluation_report: object | None = None  # EvaluationReport — оценка колоды игрока
 
 def _generic_counters(threat: str) -> list[str]:
-    if threat in AIR_CARDS or card_has_role(threat, "air"):
+    from bot.services.card_data import card_is_flying
+
+    if threat in AIR_CARDS or card_is_flying(threat):
         return ["Inferno Tower", "Musketeer", "Inferno Dragon", "Wizard"]
     if is_spam_card(threat) or threat in {
         "Skeleton King", "Skeleton Barrel", "Royal Recruits", "Goblin Hut", "Furnace",
@@ -216,7 +218,9 @@ def _relevant_user_cards(user_deck: list[str], opp_deck: list[str], threats: lis
 
 
 def _air_in_deck(deck: list[str]) -> list[str]:
-    return [c for c in deck if c in AIR_CARDS or card_has_role(c, "air")]
+    from bot.services.card_data import card_is_flying
+
+    return [c for c in deck if c in AIR_CARDS or card_is_flying(c)]
 
 
 def _swarm_in_deck(deck: list[str]) -> list[str]:

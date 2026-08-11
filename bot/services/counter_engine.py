@@ -718,7 +718,9 @@ def _trim_excess(
 
 
 def _deck_has_air(deck: list[str]) -> bool:
-    return any(c in _AIR_OFFENSE or card_has_role(c, "air") for c in deck)
+    from bot.services.card_data import card_is_flying
+
+    return any(c in _AIR_OFFENSE or card_is_flying(c) for c in deck)
 
 
 def _is_anti_air_specialist(card: str) -> bool:
