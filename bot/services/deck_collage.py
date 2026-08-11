@@ -436,4 +436,3 @@ async def render_deck_collage(cards: list[dict]) -> bytes | None:
     out = io.BytesIO()
     canvas.convert("RGB").save(out, format="PNG", optimize=True)
     return out.getvalue()
-    return out.getvalue()
