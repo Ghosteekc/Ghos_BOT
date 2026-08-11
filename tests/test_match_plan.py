@@ -120,6 +120,26 @@ def test_plan_phases_do_not_repeat_window_topic():
     assert len(phases) == len(set(phases))
 
 
+def test_advantage_lines_include_reason():
+    my = _deck([
+        "Hog Rider", "Ice Golem", "Musketeer", "Cannon",
+        "Ice Spirit", "Skeletons", "The Log", "Fireball",
+    ])
+    enemy = _deck([
+        "Giant", "Witch", "Mega Minion", "Knight",
+        "Zap", "Bats", "Mini P.E.K.K.A", "Poison",
+    ])
+    plan = MatchPlanBuilder.build(my, enemy)
+    adv = [x for x in plan.game_plan.phase_2 if x.startswith("Преимущество:")]
+    for line in adv:
+        assert "—" in line or ":" in line
+        assert len(line) >= 40
+        assert "после траты" not in line.lower()
+    assert plan.win_condition_window
+    assert "—" in plan.win_condition_window or ":" in plan.win_condition_window
+    assert "после траты" not in plan.win_condition_window.lower()
+
+
 def test_save_fireball_barbarians_over_witch():
     my = _deck([
         "Hog Rider", "Ice Golem", "Musketeer", "Cannon",

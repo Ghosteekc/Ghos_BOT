@@ -227,9 +227,20 @@ def template_analyze_deck(data: dict[str, Any], *, improve: bool = False) -> str
 
 def template_matchup(data: dict[str, Any]) -> str:
     rating = str(data.get("rating") or "спорный").strip()
-    # Не повторяем проценты/score — их покажет карточка, если будет.
-    reason = _first(data.get("reasons"), data.get("disadvantages"))
-    tip = pick_tip(data.get("archetype") if isinstance(data.get("archetype"), str) else None)
+    # Факты из evaluate_matchup — не выдумываем tip поверх.
+    reason = _first(
+        data.get("reasons"),
+        data.get("advantages"),
+        data.get("disadvantages"),
+    )
+    adv = data.get("advantages") or []
+    tip = ""
+    if isinstance(adv, list) and adv and isinstance(adv[0], str) and adv[0].strip():
+        tip = adv[0].strip()
+    if not tip:
+        tip = pick_tip(
+            data.get("archetype") if isinstance(data.get("archetype"), str) else None
+        )
 
     hard = rating.lower() in {"сложный", "hard", "плохой", "невыгодный"}
     easy = rating.lower() in {"лёгкий", "легкий", "easy", "хороший", "выгодный"}
@@ -240,7 +251,7 @@ def template_matchup(data: dict[str, Any]) -> str:
     else:
         verdict = "Матчап спорный."
 
-    why = reason or "Главное — не отдавать преимущество по эликсиру."
+    why = reason or "Точного вывода по этому матчапу недостаточно — смотри состав и ключевые контры."
     return coach_reply(
         verdict,
         why=why,
@@ -286,15 +297,17 @@ def template_battle(data: dict[str, Any]) -> str:
         why = ""
     mp = data.get("match_plan") or {}
     avoid = mp.get("avoid") or []
+    window = str(mp.get("win_condition_window") or "").strip()
+    # Tip из фактов плана (ошибка / окно), не из универсального coach_tips.
     tip_raw = avoid[0] if avoid and isinstance(avoid[0], str) else ""
-    tip = tip_raw.strip() if tip_raw else pick_tip(None, seed=str(won))
-    if tip.lower().startswith("в похожем"):
-        tip = pick_tip(None, seed="battle")
+    tip = tip_raw.strip() if tip_raw else window
+    if not tip or tip.lower().startswith("в похожем"):
+        tip = pick_tip(None, seed=str(won))
     # Не дублируем why тем же текстом, что уже в verdict
     if why and won is False and "рано" in why.lower() and "атак" in why.lower():
         why = "До двойного эликсира играй спокойнее."
         if tip.lower() in why.lower() or "рано" in tip.lower():
-            tip = pick_tip(None, seed="loss")
+            tip = window or pick_tip(None, seed="loss")
 
     if won:
         verdict = "Ключ победы — контроль темпа."

@@ -292,34 +292,53 @@ def _win_condition_window(
         return ""
 
     enemy_bld = _buildings(enemy)
-    if my_win in _BRIDGE_WINS and enemy_bld:
-        return f"{_ru(my_win)} — после траты {_ru(enemy_bld[0])} или когда здание на кулдауне."
-    if my_win in _BRIDGE_WINS and not enemy_bld:
-        return f"{_ru(my_win)} — с первых минут, как только цикл собран (у соперника нет здания)."
+    enemy_def = [c for c in enemy if c in _DEF_BUILDINGS]
+    if my_win in _BRIDGE_WINS and enemy_def:
+        return (
+            f"Окно для {_ru(my_win)}: после того как {_ru(enemy_def[0])} потрачен "
+            f"или на кулдауне — иначе атака закрывается дёшево."
+        )
+    if my_win in _BRIDGE_WINS and not enemy_def:
+        return (
+            f"Окно для {_ru(my_win)}: с первых минут, как только цикл собран — "
+            f"у соперника нет здания для дешёвого стопа."
+        )
     if my_win in _BEATDOWN:
-        return f"{_ru(my_win)} — после выгодной защиты, набор сзади в плюсе по эликсиру."
+        return (
+            f"Окно для {_ru(my_win)}: после выгодной защиты, набор сзади "
+            f"уже в плюсе по эликсиру."
+        )
     if my_win in _SIEGE:
-        return f"{_ru(my_win)} — когда соперник в минусе или его контрпуш отбит."
+        return (
+            f"Окно для {_ru(my_win)}: когда соперник в минусе или его контрпуш отбит — "
+            f"иначе осаду сносят бесплатно."
+        )
     if my_win == "Graveyard":
         spell = next((c for c in my if c in {"Poison", "Freeze", "Barbarian Barrel"}), None)
         if spell:
-            return f"{_ru(my_win)} — в паре с {_ru(spell)} после стопа пуша соперника."
-        return f"{_ru(my_win)} — после стопа пуша, на танк или в плюсе."
+            return (
+                f"Окно для {_ru(my_win)}: в паре с {_ru(spell)} после стопа пуша — "
+                f"так кладбище успевает нанести урон."
+            )
+        return f"Окно для {_ru(my_win)}: после стопа пуша, на танк или в плюсе по эликсиру."
     if my_win == "Goblin Barrel":
         small = next(
             (c for c in enemy if c in {"The Log", "Zap", "Arrows", "Barbarian Barrel"}),
             None,
         )
         if small:
-            return f"{_ru(my_win)} — после траты {_ru(small)} соперника на bait."
-        return f"{_ru(my_win)} — в сплите со второй bait-угрозой."
+            return (
+                f"Окно для {_ru(my_win)}: после того как {_ru(small)} ушёл на bait — "
+                f"у соперника нет дешёвого сброса бочки, урон по башне чище."
+            )
+        return f"Окно для {_ru(my_win)}: в сплите со второй bait-угрозой."
 
     for line in tactical.best_openings:
         if _ru(my_win) in line or my_win in line:
             return line
     if my_plan.when_to_attack and my_win in my:
         return f"{_ru(my_win)}: {my_plan.when_to_attack}"
-    return f"Атакуй {_ru(my_win)}, когда ответ соперника потрачен или ты в плюсе."
+    return ""
 
 
 def _phase_1(
@@ -384,11 +403,19 @@ def _phase_2(
 
             air = next((c for c in my if card_is_flying(c)), None)
             if air:
-                _add_unique_topic(phase, f"Преимущество: дави {_ru(air)} в слабую ПВО.", seen)
-        if "здание" in low and my_win and my_win in _BRIDGE_WINS | _SIEGE and not _buildings(enemy):
+                _add_unique_topic(
+                    phase,
+                    f"Преимущество: дави {_ru(air)} — у соперника слабая ПВО, "
+                    f"воздушный урон проходит в башню.",
+                    seen,
+                )
+        if "здание" in low and my_win and my_win in _BRIDGE_WINS | _SIEGE:
+            if any(c in _DEF_BUILDINGS for c in enemy):
+                continue
             _add_unique_topic(
                 phase,
-                f"Преимущество: {_ru(my_win)} без здания у соперника.",
+                f"Преимущество: {_ru(my_win)} без здания у соперника — "
+                f"дешёвой защиты bridge-атаки нет.",
                 seen,
             )
         if "спам" in low:
@@ -396,7 +423,8 @@ def _phase_2(
             if spam:
                 _add_unique_topic(
                     phase,
-                    f"Преимущество: {_ru(spam)} против слабого anti-swarm.",
+                    f"Преимущество: {_ru(spam)} против слабого anti-swarm — "
+                    f"дешёвое давление наносит урон.",
                     seen,
                 )
 
