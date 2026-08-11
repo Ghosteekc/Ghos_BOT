@@ -56,8 +56,6 @@ _EVO_BADGE = (232, 121, 249, 255)
 _EVO_BADGE_DARK = (126, 34, 206, 255)
 _HERO_BADGE = (253, 230, 138, 255)
 _HERO_BADGE_DARK = (217, 119, 6, 255)
-_EVO_RIM = (232, 121, 249, 230)
-_HERO_RIM = (251, 191, 36, 230)
 
 
 def _font(size: int) -> ImageFont.ImageFont:
@@ -375,32 +373,8 @@ def _draw_upgrade_badge(
     canvas.alpha_composite(layer)
 
 
-def _draw_upgrade_rim(
-    canvas: Image.Image,
-    slot: tuple[int, int, int, int],
-    *,
-    is_hero: bool,
-    is_evo: bool,
-) -> None:
-    """Thin inset rim matching Mini App card-frame-evo / card-frame-hero."""
-    if not is_hero and not is_evo:
-        return
-    x, y, w, h = slot
-    color = _HERO_RIM if is_hero else _EVO_RIM
-    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    # 2px inset rectangle around the card art area
-    pad = 4
-    for t in range(2):
-        draw.rectangle(
-            (x + pad + t, y + pad + t, x + w - pad - t - 1, y + h - pad - t - 1),
-            outline=color,
-        )
-    canvas.alpha_composite(layer)
-
-
 async def render_deck_collage(cards: list[dict]) -> bytes | None:
-    """Build PNG: clean BG → centered card icons → evo/hero cues → elixir → title."""
+    """Build PNG: clean BG → centered card icons → evo/hero badges → elixir → title."""
     if not cards:
         return None
 
@@ -427,7 +401,6 @@ async def render_deck_collage(cards: list[dict]) -> bytes | None:
         canvas.alpha_composite(arts[idx], dest=(x, y))
         is_hero = bool(card.get("is_hero"))
         is_evo = (not is_hero) and int(card.get("evolution_level") or 0) >= 1
-        _draw_upgrade_rim(canvas, (x, y, fw, fh), is_hero=is_hero, is_evo=is_evo)
         _draw_upgrade_badge(canvas, (x, y, fw, fh), is_hero=is_hero, is_evo=is_evo)
         name = (card.get("name") or "").strip()
         elixir = int(card.get("cost") or (get_card_elixir(name) if name else 0) or 0)
