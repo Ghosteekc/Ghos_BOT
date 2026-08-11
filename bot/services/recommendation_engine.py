@@ -445,6 +445,47 @@ def _why_gaps_from_evaluation(report) -> list[str]:
     return out[:16]
 
 
+def _remarks_for_final_deck(
+    lines: list[str],
+    *,
+    final_deck: list[str],
+    original: list[str],
+) -> list[str]:
+    """Убрать советы, которые всё ещё описывают уже выкинутые карты как присутствующие.
+
+    Строки с «→» (факт замены) оставляем. Имена карт только из final_deck / pick.
+    """
+    from bot.services.card_names_ru import card_name_ru
+
+    dropped = set(original) - set(final_deck)
+    if not dropped:
+        return list(lines)
+
+    dropped_labels = set()
+    for name in dropped:
+        dropped_labels.add(name.lower())
+        ru = (card_name_ru(name) or "").strip()
+        if ru:
+            dropped_labels.add(ru.lower())
+        short = (card_name_ru(name, short=True) or "").strip()
+        if short:
+            dropped_labels.add(short.lower())
+
+    kept: list[str] = []
+    for raw in lines:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        if "→" in text or text.startswith("Добавить:"):
+            kept.append(text)
+            continue
+        low = text.lower()
+        if any(label and label in low for label in dropped_labels):
+            continue
+        kept.append(text)
+    return kept
+
+
 def _why_gap(gap: dict, intent: DeckIntent) -> str:
     cat = gap["category"]
     soft = _SOFT_FOR_CATEGORY.get(cat)
@@ -1157,13 +1198,9 @@ def build_improvement_plan(
         pick_explanations.append(pe)
         why_picks.extend(flatten_pick_explanation(pe))
 
-        # Текст шага — из актуального EvaluationReport (can_improve / soft), иначе gap.
-        step_message = gap["message"]
-        report_improve = list(post_swap_report.can_improve or post_swap_report.weaknesses or ())
-        if report_improve:
-            step_message = report_improve[0]
-        elif post_swap_report.soft_constraints.messages:
-            step_message = post_swap_report.soft_constraints.messages[0]
+        # Текст шага = проблема, которую закрыли этим swap (+ reason).
+        # Не подставляем post_swap.can_improve: там уже СЛЕДУЮЩие дыры другой колоды.
+        step_message = pe.reason or gap["message"]
 
         steps.append(
             ImprovementStep(
@@ -1399,24 +1436,37 @@ class RecommendationEngine:
                 locked=sorted(_locked_cards(improved, db) | locked_set),
             )
 
-        intent = DeckIntentEngine.infer(plan.improved_deck, archetype=arch)
+        # ── Final SoT: всегда одна колода = improved_deck (или original, если trim сломал 8).
+        final_deck = (
+            list(plan.improved_deck) if len(plan.improved_deck) == 8 else list(original)
+        )
+        if final_deck != list(plan.improved_deck):
+            plan = ImprovementPlan(
+                needed=plan.needed,
+                steps=plan.steps,
+                improved_deck=final_deck,
+                locked=plan.locked,
+            )
+
+        intent = DeckIntentEngine.infer(final_deck, archetype=arch)
         game_plan = build_game_plan(
-            plan.improved_deck, archetype=intent.archetype, intent=intent,
+            final_deck, archetype=intent.archetype, intent=intent,
         )
 
         from bot.services.deck_sanity_validator import validate_deck_sanity
 
-        # Финальный EvaluationReport на актуальном составе (после всех swap / trim).
-        judged = plan.improved_deck if len(plan.improved_deck) == 8 else original
-        evaluation = evaluate_deck(judged, archetype=intent.archetype, db=db)
+        # Единственный итоговый EvaluationReport — по final_deck.
+        # Нет отдельного «original_evaluation», который мог бы просочиться в result.
+        evaluation = evaluate_deck(final_deck, archetype=intent.archetype, db=db)
         balance = _balance_issues_from_evaluation(evaluation)
-        # Советы/gaps — только из актуального отчёта Builder (не из стартового).
         why_gaps = _why_gaps_from_evaluation(evaluation)
         risk = _risk_assessment(evaluation, game_plan, [])
 
-        # Deck Sanity Validator — до coaching / текста «как играть».
+        # playable / hard-fail — только из evaluation final_deck, не из plan.needed.
+        deck_playable = is_good_deck(report=evaluation)
+
         sanity = validate_deck_sanity(
-            plan.improved_deck,
+            final_deck,
             intent=intent,
             game_plan=game_plan,
             evaluation=evaluation,
@@ -1431,27 +1481,34 @@ class RecommendationEngine:
         from bot.services.card_data import secondary_pressure_in
         from bot.services.player_remarks import build_player_remarks
 
-        deck_playable = is_good_deck(report=evaluation)
-
         eval_good = list(evaluation.whats_good or evaluation.strengths or ())
-        eval_improve = list(evaluation.can_improve or evaluation.weaknesses or ())
-        # Swap-строки уже пользовательские (факт замен), остальное — из EvaluationReport.
+        eval_improve = _remarks_for_final_deck(
+            list(evaluation.can_improve or evaluation.weaknesses or ()),
+            final_deck=final_deck,
+            original=original,
+        )
+        # Факт уже применённых замен (стрелки) — не путать с «ещё нужны замены».
         swap_lines = [line for line in why_picks if "→" in line or line.startswith("Добавить:")]
 
-        if is_builder and sanity.passed:
+        # Swaps уже внутри final_deck: has_mandatory_swaps только если итог всё ещё плох
+        # и остались нерешённые шаги без pick (дыры без замены).
+        unresolved = any(s.drop is None and s.pick is None for s in plan.steps)
+        has_mandatory_swaps = (not deck_playable) and unresolved
+
+        if is_builder and sanity.passed and deck_playable:
             coaching = build_deck_coaching(
                 intent,
                 game_plan,
-                deck=plan.improved_deck,
+                deck=final_deck,
                 synergy_notes=synergy_notes,
             )
             remarks = build_player_remarks(
                 strengths=coaching.strengths[:4],
                 improvements=eval_improve[:3],
-                deck_playable=True,
+                deck_playable=deck_playable,
                 has_mandatory_swaps=False,
                 primary_win=intent.primary_win,
-                secondary_pressure=secondary_pressure_in(plan.improved_deck),
+                secondary_pressure=secondary_pressure_in(final_deck),
             )
             why_picks = remarks.as_issue_lines()
             if coaching.play_style:
@@ -1463,11 +1520,9 @@ class RecommendationEngine:
                 ],
                 improvements=[*swap_lines, *eval_improve][:6],
                 deck_playable=deck_playable,
-                has_mandatory_swaps=bool(plan.needed),
+                has_mandatory_swaps=has_mandatory_swaps,
                 primary_win=intent.primary_win,
-                secondary_pressure=secondary_pressure_in(
-                    plan.improved_deck if plan.improved_deck else original
-                ),
+                secondary_pressure=secondary_pressure_in(final_deck),
                 final_override=(
                     evaluation.final_recommendation
                     if evaluation.final_recommendation and deck_playable
@@ -1475,7 +1530,7 @@ class RecommendationEngine:
                 ),
             )
             why_picks = remarks.as_issue_lines()
-            if plan.needed and swap_lines and "Что можно улучшить" not in why_picks:
+            if swap_lines and plan.needed and "Что можно улучшить" not in why_picks:
                 why_picks = [
                     *why_picks[:-2],
                     "Что можно улучшить",
@@ -1484,7 +1539,7 @@ class RecommendationEngine:
                     remarks.final_recommendation,
                 ]
 
-        end_gaps = _collect_improvement_gaps(plan.improved_deck, db, intent) if is_improver else []
+        end_gaps = _collect_improvement_gaps(final_deck, db, intent) if is_improver else []
 
         open_cats = [g["category"] for g in end_gaps]
         explanation = DecisionExplanation(
