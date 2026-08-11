@@ -120,12 +120,14 @@ def _form_note(winrate: float, total: int) -> str:
 
 def _merge_live_and_cache(live: list[dict], cached: list[dict]) -> list[dict]:
     by_time: dict[str, dict] = {}
-    for b in cached + live:
+    for b in cached:
         t = str(b.get("battleTime") or b.get("battle_time") or "")
-        if not t:
-            continue
-        # Prefer live (richer card metadata) over cache stubs
-        if t not in by_time or b.get("type") != "cached":
+        if t:
+            by_time[t] = b
+    # Live always wins for the same battleTime; cache keeps older + user_deck_json restores
+    for b in live:
+        t = str(b.get("battleTime") or b.get("battle_time") or "")
+        if t:
             by_time[t] = b
     return sorted(
         by_time.values(),
@@ -248,20 +250,40 @@ def _deck_upgrade_score(cards: list[dict]) -> int:
 
 
 def _finalize_collage_cards(cards: list[dict]) -> list[dict]:
-    from bot.services.card_icons import _refresh_card_icon, normalize_deck_upgrades
+    """Refresh icons for collage — do not clamp historical upgrade unions."""
+    from bot.services.card_icons import _refresh_card_icon
 
     out: list[dict] = []
     for i, card in enumerate(cards):
         item = dict(card)
         item["slot"] = int(item.get("slot") if item.get("slot") is not None else i)
         item["cost"] = int(item.get("cost") or get_card_elixir(item.get("name") or "") or 0)
+        if item.get("is_hero"):
+            item["evolution_level"] = 0
+        elif int(item.get("evolution_level") or 0) >= 1:
+            item["is_hero"] = False
         _refresh_card_icon(item)
         out.append(item)
-    return normalize_deck_upgrades(out)
+    return out
 
 
-def collage_cards_for_deck(battles: list[dict], player_tag: str, deck: dict[str, Any]) -> list[dict]:
-    """Prefer richest evo/hero among live OR-merge, deck_cards, and matching profile."""
+def _card_has_mode_payload(card: dict) -> bool:
+    """True when card carries API upgrade fields or restored cache modes."""
+    if card.get("evolutionLevel") is not None or card.get("iconUrls"):
+        return True
+    if "evolution_level" in card or "is_hero" in card:
+        return True
+    return False
+
+
+def collage_cards_for_deck(
+    battles: list[dict],
+    player_tag: str,
+    deck: dict[str, Any],
+    *,
+    extra_variants: list[list[dict]] | None = None,
+) -> list[dict]:
+    """Prefer richest evo/hero among live/cache restore, deck_cards, profile, mine slots."""
     from bot.services.card_icons import cards_from_team, or_merge_modes_onto
 
     tag = normalize_tag(player_tag)
@@ -269,15 +291,15 @@ def collage_cards_for_deck(battles: list[dict], player_tag: str, deck: dict[str,
     if not target and deck.get("deck_cards"):
         target = _deck_fingerprint([c.get("name") or "" for c in deck["deck_cards"]])
 
-    live_variants: list[list[dict]] = []
+    rich_variants: list[list[dict]] = []
     for battle in battles:
         team = battle.get("team", [{}])[0]
         team_tag = team.get("tag") or ""
         if team_tag and normalize_tag(team_tag) != tag:
             continue
-        # Name-only cache stubs — skip for art modes
         raw_cards = team.get("cards") or []
-        if raw_cards and not any(c.get("evolutionLevel") is not None or c.get("iconUrls") for c in raw_cards):
+        # Skip name-only stubs; keep live API + user_deck_json restores
+        if raw_cards and not any(_card_has_mode_payload(c) for c in raw_cards):
             continue
         parsed = cards_from_team(team)
         if len(parsed) != 8:
@@ -285,18 +307,26 @@ def collage_cards_for_deck(battles: list[dict], player_tag: str, deck: dict[str,
         key = _deck_fingerprint([c["name"] for c in parsed])
         if key != target:
             continue
-        live_variants.append(parsed)
+        rich_variants.append(parsed)
 
     candidates: list[list[dict]] = []
-    if live_variants:
-        base = max(live_variants, key=_deck_upgrade_score)
-        candidates.append(or_merge_modes_onto(base, live_variants))
+    if rich_variants:
+        base = max(rich_variants, key=_deck_upgrade_score)
+        candidates.append(or_merge_modes_onto(base, rich_variants, clamp=False))
 
     deck_cards = deck.get("deck_cards") or []
     if len(deck_cards) == 8:
         candidates.append(list(deck_cards))
 
-    # Compare finalized candidates; pick richest upgrade score, then any 8-card deck
+    for variant in extra_variants or []:
+        if variant and len(variant) == 8:
+            candidates.append(list(variant))
+
+    # OR everything together first so mine-slot modes win even if battles are stubs
+    if len(candidates) > 1:
+        base = max(candidates, key=_deck_upgrade_score)
+        candidates.insert(0, or_merge_modes_onto(base, candidates, clamp=False))
+
     best: list[dict] | None = None
     best_score = -1
     for cand in candidates:
@@ -321,6 +351,26 @@ def collage_cards_for_deck(battles: list[dict], player_tag: str, deck: dict[str,
             for n in (deck.get("cards") or [])
         ]
     )
+
+
+async def _tracked_mine_deck_cards(user_id: int, fingerprint: str) -> list[dict]:
+    """cards_json from «Мои колоды» — same source the Mini App uses for evo/hero."""
+    if not fingerprint:
+        return []
+    from bot.models.database import TrackedMineDeck
+    from bot.services.card_icons import parse_deck_cards_json
+
+    async with async_session() as session:
+        res = await session.execute(
+            select(TrackedMineDeck).where(
+                TrackedMineDeck.user_id == user_id,
+                TrackedMineDeck.deck_key == fingerprint,
+            )
+        )
+        row = res.scalar_one_or_none()
+    if row is None:
+        return []
+    return parse_deck_cards_json(getattr(row, "cards_json", None))
 
 
 async def _profile_deck_if_matches(player_tag: str, target_fp: str) -> list[dict] | None:
@@ -514,16 +564,27 @@ async def send_digest_to_user(
     keyboard = _open_app_keyboard()
     photo_bytes: bytes | None = None
     if stats.best_deck:
-        cards = collage_cards_for_deck(battles, user.player_tag, stats.best_deck)
-        target_fp = _deck_fingerprint([c.get("name") or "" for c in cards]) or _deck_fingerprint(
-            list(stats.best_deck.get("cards") or [])
+        target_fp = _deck_fingerprint(list(stats.best_deck.get("cards") or []))
+        if not target_fp and stats.best_deck.get("deck_cards"):
+            target_fp = _deck_fingerprint(
+                [c.get("name") or "" for c in stats.best_deck["deck_cards"]]
+            )
+        tracked = await _tracked_mine_deck_cards(user.id, target_fp)
+        cards = collage_cards_for_deck(
+            battles,
+            user.player_tag,
+            stats.best_deck,
+            extra_variants=[tracked] if tracked else None,
         )
+        target_fp = _deck_fingerprint([c.get("name") or "" for c in cards]) or target_fp
         profile = await _profile_deck_if_matches(user.player_tag, target_fp)
         if profile:
             from bot.services.card_icons import or_merge_modes_onto
 
-            # Profile order + OR evo/hero from battles (never wipe richer modes)
-            cards = _finalize_collage_cards(or_merge_modes_onto(profile, [profile, cards]))
+            # Profile order + OR evo/hero from battles / mine slot (never wipe richer modes)
+            cards = _finalize_collage_cards(
+                or_merge_modes_onto(profile, [profile, cards], clamp=False)
+            )
         try:
             photo_bytes = await render_deck_collage(cards)
         except Exception:

@@ -52,6 +52,12 @@ _TITLE = "ЛУЧШАЯ КОЛОДА НЕДЕЛИ"
 _TITLE_FILL = (211, 169, 44, 255)
 _TITLE_OUTLINE = (18, 28, 70, 255)
 _ELIXIR_PINK = (224, 64, 251)
+_EVO_BADGE = (232, 121, 249, 255)
+_EVO_BADGE_DARK = (126, 34, 206, 255)
+_HERO_BADGE = (253, 230, 138, 255)
+_HERO_BADGE_DARK = (217, 119, 6, 255)
+_EVO_RIM = (232, 121, 249, 230)
+_HERO_RIM = (251, 191, 36, 230)
 
 
 def _font(size: int) -> ImageFont.ImageFont:
@@ -320,8 +326,81 @@ def _load_background() -> Image.Image:
     return Image.open(_BG_PATH).convert("RGBA")
 
 
+def _draw_upgrade_badge(
+    canvas: Image.Image,
+    slot: tuple[int, int, int, int],
+    *,
+    is_hero: bool,
+    is_evo: bool,
+) -> None:
+    """Diamond badge at top-center — same signal as Mini App card-upgrade-badges."""
+    if not is_hero and not is_evo:
+        return
+    x, y, w, h = slot
+    cx = x + w // 2
+    cy = y + 12
+    size = 11
+    # Diamond polygon (rotated square)
+    pts = [
+        (cx, cy - size),
+        (cx + size, cy),
+        (cx, cy + size),
+        (cx - size, cy),
+    ]
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    # Soft shadow
+    shadow = [(p[0] + 1, p[1] + 2) for p in pts]
+    draw.polygon(shadow, fill=(0, 0, 0, 120))
+    if is_hero:
+        draw.polygon(pts, fill=_HERO_BADGE_DARK)
+        inset = [
+            (cx, cy - size + 3),
+            (cx + size - 3, cy),
+            (cx, cy + size - 3),
+            (cx - size + 3, cy),
+        ]
+        draw.polygon(inset, fill=_HERO_BADGE)
+    else:
+        draw.polygon(pts, fill=_EVO_BADGE_DARK)
+        inset = [
+            (cx, cy - size + 3),
+            (cx + size - 3, cy),
+            (cx, cy + size - 3),
+            (cx - size + 3, cy),
+        ]
+        draw.polygon(inset, fill=_EVO_BADGE)
+    # White rim
+    draw.polygon(pts, outline=(255, 255, 255, 230))
+    canvas.alpha_composite(layer)
+
+
+def _draw_upgrade_rim(
+    canvas: Image.Image,
+    slot: tuple[int, int, int, int],
+    *,
+    is_hero: bool,
+    is_evo: bool,
+) -> None:
+    """Thin inset rim matching Mini App card-frame-evo / card-frame-hero."""
+    if not is_hero and not is_evo:
+        return
+    x, y, w, h = slot
+    color = _HERO_RIM if is_hero else _EVO_RIM
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    # 2px inset rectangle around the card art area
+    pad = 4
+    for t in range(2):
+        draw.rectangle(
+            (x + pad + t, y + pad + t, x + w - pad - t - 1, y + h - pad - t - 1),
+            outline=color,
+        )
+    canvas.alpha_composite(layer)
+
+
 async def render_deck_collage(cards: list[dict]) -> bytes | None:
-    """Build PNG: clean BG → centered card icons → elixir drops → title."""
+    """Build PNG: clean BG → centered card icons → evo/hero cues → elixir → title."""
     if not cards:
         return None
 
@@ -344,12 +423,17 @@ async def render_deck_collage(cards: list[dict]) -> bytes | None:
                 arts.append(_fit_card_contain(img, fw, fh))
 
     for idx, card in enumerate(slots):
-        x, y, _, _ = _SLOT_INNERS[idx]
+        x, y, fw, fh = _SLOT_INNERS[idx]
         canvas.alpha_composite(arts[idx], dest=(x, y))
+        is_hero = bool(card.get("is_hero"))
+        is_evo = (not is_hero) and int(card.get("evolution_level") or 0) >= 1
+        _draw_upgrade_rim(canvas, (x, y, fw, fh), is_hero=is_hero, is_evo=is_evo)
+        _draw_upgrade_badge(canvas, (x, y, fw, fh), is_hero=is_hero, is_evo=is_evo)
         name = (card.get("name") or "").strip()
         elixir = int(card.get("cost") or (get_card_elixir(name) if name else 0) or 0)
         _draw_elixir_drop_at(canvas, _DROP_ORIGINS[idx], elixir)
 
     out = io.BytesIO()
     canvas.convert("RGB").save(out, format="PNG", optimize=True)
+    return out.getvalue()
     return out.getvalue()
