@@ -6,6 +6,7 @@ Does not extract frames or inspect Clash Royale content.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -129,31 +130,75 @@ def validate_size(size_bytes: int) -> None:
         raise ReplayError(CODE_TOO_LARGE)
 
 
-def find_ffprobe() -> str | None:
-    probe = shutil.which("ffprobe")
-    if probe:
-        return probe
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        return None
-    probe_name = "ffprobe.exe" if ffmpeg.lower().endswith(".exe") else "ffprobe"
-    sibling = Path(ffmpeg).with_name(probe_name)
+def _env_binary(*names: str) -> str | None:
+    for name in names:
+        raw = (os.environ.get(name) or "").strip().strip('"')
+        if raw and Path(raw).is_file():
+            return raw
+    return None
+
+
+def _sibling_binary(path: str, sibling_name: str) -> str | None:
+    sibling = Path(path).with_name(sibling_name)
     if sibling.is_file():
         return str(sibling)
     return None
 
 
+def _common_ffmpeg_bins() -> list[Path]:
+    roots: list[Path] = []
+    for drive in ("G:/", "C:/", "D:/"):
+        root = Path(drive)
+        roots.append(root / "ffmpeg" / "bin")
+        try:
+            for child in root.glob("ffmpeg*/bin"):
+                roots.append(child)
+        except OSError:
+            continue
+    local = Path.home() / "AppData" / "Local" / "Microsoft" / "WinGet" / "Links"
+    roots.append(local)
+    return roots
+
+
+def find_ffprobe() -> str | None:
+    env = _env_binary("REPLAY_FFPROBE", "FFPROBE_PATH", "FFPROBE_BINARY")
+    if env:
+        return env
+    probe = shutil.which("ffprobe")
+    if probe:
+        return probe
+    ffmpeg = find_ffmpeg()
+    if ffmpeg:
+        name = "ffprobe.exe" if ffmpeg.lower().endswith(".exe") else "ffprobe"
+        sibling = _sibling_binary(ffmpeg, name)
+        if sibling:
+            return sibling
+    for folder in _common_ffmpeg_bins():
+        for name in ("ffprobe.exe", "ffprobe"):
+            candidate = folder / name
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
 def find_ffmpeg() -> str | None:
+    env = _env_binary("REPLAY_FFMPEG", "FFMPEG_PATH", "FFMPEG_BINARY")
+    if env:
+        return env
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg:
         return ffmpeg
     probe = shutil.which("ffprobe")
-    if not probe:
-        return None
-    ffmpeg_name = "ffmpeg.exe" if probe.lower().endswith(".exe") else "ffmpeg"
-    sibling = Path(probe).with_name(ffmpeg_name)
-    if sibling.is_file():
-        return str(sibling)
+    if probe:
+        name = "ffmpeg.exe" if probe.lower().endswith(".exe") else "ffmpeg"
+        sibling = _sibling_binary(probe, name)
+        if sibling:
+            return sibling
+    for folder in _common_ffmpeg_bins():
+        for name in ("ffmpeg.exe", "ffmpeg"):
+            candidate = folder / name
+            if candidate.is_file():
+                return str(candidate)
     return None
 
 

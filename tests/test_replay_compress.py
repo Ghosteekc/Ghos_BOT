@@ -71,7 +71,7 @@ def test_transcode_invokes_ffmpeg(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     out.unlink()
 
 
-def test_transcode_failure_is_compress_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_transcode_failure_keeps_original(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     src = tmp_path / "in.mp4"
     src.write_bytes(b"x" * 600_000)
 
@@ -81,9 +81,8 @@ def test_transcode_failure_is_compress_error(monkeypatch: pytest.MonkeyPatch, tm
     monkeypatch.setattr(compressor, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(compressor.subprocess, "run", fake_run)
 
-    with pytest.raises(ReplayError) as exc:
-        compress_replay_video(src, size_bytes=600_000, width=1920, height=1080, fps=30.0)
-    assert exc.value.code == CODE_COMPRESS_FAILED
+    out = compress_replay_video(src, size_bytes=600_000, width=1920, height=1080, fps=30.0)
+    assert out == src
 
 
 def test_keeps_original_if_compress_not_smaller(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
