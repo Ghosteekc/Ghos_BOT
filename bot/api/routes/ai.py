@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.responses import JSONResponse
 
 from bot.api.deps import require_subscription
 from bot.api.schemas import (
@@ -10,10 +11,13 @@ from bot.api.schemas import (
     GhosteekAiAskRequest,
     GhosteekAiAskResponse,
     DeckCardResponse,
+    ReplayAnalyzeSuccess,
+    ReplayDetectionResponse,
 )
 from bot.models.database import User
 from bot.services.ghosteek_ai import ask_ghosteek_ai
 from bot.services.ghosteek_ai.conversation.manager import ConversationManager
+from bot.services.ghosteek_ai.replay import ReplayError, get_replay_service
 from bot.services.ghosteek_ai.session_context import clear_session
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -47,6 +51,57 @@ async def ask_ai(
         deck_card=deck_card,
         battle_card=None,
         analysis_card=None,
+    )
+
+
+_REPLAY_HTTP_STATUS = {
+    "REPLAY_BUSY": 409,
+    "REPLAY_FFMPEG_UNAVAILABLE": 503,
+    "REPLAY_INTERNAL_ERROR": 500,
+    "REPLAY_FRAME_EXTRACTION_FAILED": 400,
+    "REPLAY_FRAME_ANALYSIS_FAILED": 400,
+    "REPLAY_ANALYSIS_TIMEOUT": 400,
+}
+
+
+@router.post("/replay/analyze", response_model=None)
+async def analyze_replay(
+    user: User = Depends(require_subscription),
+    file: UploadFile = File(...),
+):
+    """Validate video, sample frames, heuristic CR detection. No Qwen."""
+    del user
+    service = get_replay_service()
+    try:
+        outcome = await service.analyze_upload(
+            filename=file.filename,
+            content_type=file.content_type,
+            read=file.read,
+        )
+    except ReplayError as exc:
+        status = _REPLAY_HTTP_STATUS.get(exc.code, 400)
+        return JSONResponse(
+            status_code=status,
+            content={"ok": False, "error_code": exc.code},
+        )
+    finally:
+        await file.close()
+    detection = outcome.detection
+    return ReplayAnalyzeSuccess(
+        status=detection.status,
+        filename=outcome.filename,
+        mime_type=outcome.mime_type,
+        size_bytes=outcome.size_bytes,
+        duration_seconds=outcome.duration_seconds,
+        width=outcome.width,
+        height=outcome.height,
+        fps=outcome.fps,
+        replay_detection=ReplayDetectionResponse(
+            status=detection.status,
+            confidence=detection.confidence,
+            frames_analyzed=detection.frames_analyzed,
+            observations=list(detection.observations),
+        ),
     )
 
 

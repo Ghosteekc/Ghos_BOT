@@ -862,6 +862,31 @@ class AnalysisCardResponse(BaseModel):
     pass
 
 
+class ReplayDetectionResponse(BaseModel):
+    status: str
+    confidence: float
+    frames_analyzed: int
+    observations: list[str] = Field(default_factory=list)
+
+
+class ReplayAnalyzeSuccess(BaseModel):
+    ok: bool = True
+    status: str
+    filename: str
+    mime_type: str
+    size_bytes: int
+    duration_seconds: float
+    width: int
+    height: int
+    fps: float | None = None
+    replay_detection: ReplayDetectionResponse | None = None
+
+
+class ReplayAnalyzeError(BaseModel):
+    ok: bool = False
+    error_code: str
+
+
 class GhosteekAiAskResponse(BaseModel):
     intent: str
     answer: str
