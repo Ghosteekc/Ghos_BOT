@@ -819,11 +819,21 @@ class BattleHistoryClearResponse(BaseModel):
     deleted_count: int = 0
 
 
+class GhosteekAiReplayContext(BaseModel):
+    status: str
+    filename: str | None = None
+    duration_seconds: float | None = None
+    width: int | None = None
+    height: int | None = None
+    confidence: float | None = None
+
+
 class GhosteekAiContext(BaseModel):
     cards: list[str] | None = None
     opponent_cards: list[str] | None = None
     battle_index: int | None = None
     battle_time: str | None = None
+    replay: GhosteekAiReplayContext | None = None
 
 
 class GhosteekAiAskRequest(BaseModel):

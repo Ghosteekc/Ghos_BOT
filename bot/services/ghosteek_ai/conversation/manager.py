@@ -178,7 +178,19 @@ class ConversationManager:
 
         ctx["session"] = session.to_public()
         ctx["memory"] = session.memory_context()
+        if session.last_replay and "replay" not in ctx:
+            ctx["replay"] = dict(session.last_replay)
         return ctx
+
+    @staticmethod
+    def set_last_replay(session: ConversationState, meta: dict[str, Any]) -> None:
+        from bot.services.ghosteek_ai.replay_followup import normalize_replay_meta
+
+        normalized = normalize_replay_meta(meta)
+        session.last_replay = dict(normalized) if normalized else {}
+        if normalized and normalized.get("accepted"):
+            session.active_topic = "replay"
+        session.touch()
 
     @staticmethod
     def apply_followup_enrichment(
@@ -223,6 +235,109 @@ class ConversationManager:
                     detail=str(session.last_battle_index),
                     intent=intent,
                 )
+
+        # Follow-up: «Как ею играть?» after build/analyze — reuse last deck.
+        if intent == "clarify" and len(session.last_deck) >= 8:
+            from bot.services.ghosteek_ai.intents import (
+                INTENT_GAME_COACH,
+                SERVICE_BY_INTENT,
+                _is_how_to_play_request,
+            )
+
+            play_low = (message or "").lower().replace("ё", "е")
+            if _is_how_to_play_request(play_low):
+                detected.intent = INTENT_GAME_COACH
+                detected.service = SERVICE_BY_INTENT.get(INTENT_GAME_COACH, "Game Coach")
+                detected.cards = list(session.last_deck)
+                detected.coach_topic = "how_to_play"
+                ConversationManager.record_followup(
+                    session,
+                    kind="how_to_play_followup",
+                    detail="last_deck",
+                    intent=INTENT_GAME_COACH,
+                )
+                return detected
+
+        # Follow-up: «а что заменить / медленная / оставить карту» при clarify + last_deck.
+        if intent == "clarify" and len(session.last_deck) >= 8:
+            from bot.services.ghosteek_ai.intents import (
+                INTENT_BUILD_DECK,
+                INTENT_IMPROVE_DECK,
+                SERVICE_BY_INTENT,
+            )
+
+            follow_low = (message or "").lower().replace("ё", "е")
+            # «а почему?» оставляем clarify → service reuse last_render_facts.
+            if follow_low.startswith("а почему") or follow_low in {
+                "почему",
+                "почему?",
+                "а почему?",
+            }:
+                ConversationManager.record_followup(
+                    session,
+                    kind="why_followup",
+                    detail="await_facts_reuse",
+                    intent=session.last_intent or "clarify",
+                )
+                return detected
+            improve_keys = (
+                "замен",
+                "помен",
+                "вместо",
+                "медлен",
+                "тормоз",
+                "тяжел",
+                "улучш",
+                "что тут",
+            )
+            keep_keys = ("оста", "оставить", "можно оставить")
+            if any(k in follow_low for k in improve_keys):
+                detected.intent = INTENT_IMPROVE_DECK
+                detected.service = SERVICE_BY_INTENT.get(
+                    INTENT_IMPROVE_DECK, "Recommendation"
+                )
+                detected.cards = list(session.last_deck)
+                ConversationManager.record_followup(
+                    session,
+                    kind="improve_followup",
+                    detail="last_deck",
+                    intent=INTENT_IMPROVE_DECK,
+                )
+                return detected
+            if any(k in follow_low for k in keep_keys) and (
+                cards or session.last_intent == INTENT_BUILD_DECK
+            ):
+                keep = cards[:4] if cards else []
+                detected.intent = INTENT_BUILD_DECK
+                detected.service = SERVICE_BY_INTENT.get(INTENT_BUILD_DECK, "Deck Builder")
+                detected.cards = keep or list(session.last_deck)[:4]
+                ConversationManager.record_followup(
+                    session,
+                    kind="keep_card_rebuild",
+                    detail=",".join(detected.cards),
+                    intent=INTENT_BUILD_DECK,
+                )
+                return detected
+
+        # Follow-up: после «собери колоду?» бот просит карту → игрок пишет только имя карты.
+        if intent == "clarify" and cards and session.last_intent == "build_deck":
+            from bot.services.ghosteek_ai.intents import (
+                INTENT_BUILD_DECK,
+                SERVICE_BY_INTENT,
+            )
+
+            words = [w for w in (message or "").split() if w.strip()]
+            if len(words) <= 8 and len(cards) <= 4:
+                detected.intent = INTENT_BUILD_DECK
+                detected.service = SERVICE_BY_INTENT.get(INTENT_BUILD_DECK, "Deck Builder")
+                detected.cards = cards[:4]
+                ConversationManager.record_followup(
+                    session,
+                    kind="build_card_followup",
+                    detail=",".join(cards[:4]),
+                    intent=INTENT_BUILD_DECK,
+                )
+                return detected
 
         # Follow-up по местоимениям: «а это?», «подробнее» при clarify → reuse last topic
         low = (message or "").lower().strip()

@@ -32,10 +32,18 @@ MODE_AUTO = "auto"
 MODE_AGENT = "agent"
 MODE_PLANNER = "planner"
 
+# Tools that never feed the LLM renderer (safe template responses only).
+_TEMPLATE_ONLY_TOOLS = frozenset({"clarify", "unsupported"})
+
 
 def _sanity_blocks_explain(ai_context) -> bool:
-    """Если Deck Sanity не пройден — не даём LLM оправдывать колоду."""
+    """Если Deck Sanity не пройден — не даём LLM оправдывать колоду игрока.
+
+    Исключение: Builder уже вернул полную 8-карточную колоду. Это готовое
+    предложение, его нельзя подменять текстом «доделай сам».
+    """
     from bot.services.deck_sanity_validator import sanity_payload_from_data
+    from bot.services.ghosteek_ai.deck_card import deck_card_from_build_data
     from bot.services.ghosteek_ai.intents import (
         INTENT_ANALYZE_DECK,
         INTENT_BUILD_DECK,
@@ -47,7 +55,13 @@ def _sanity_blocks_explain(ai_context) -> bool:
     data = ai_context.primary_tool_data() if hasattr(ai_context, "primary_tool_data") else {}
     build = getattr(ai_context, "build", None)
     payload = build if isinstance(build, dict) and build else data
-    sanity = sanity_payload_from_data(payload if isinstance(payload, dict) else {})
+    if not isinstance(payload, dict):
+        payload = {}
+    if intent == INTENT_BUILD_DECK:
+        card = deck_card_from_build_data(payload)
+        if card and len(card.get("deck") or []) >= 8:
+            return False
+    sanity = sanity_payload_from_data(payload)
     if sanity is None:
         return False
     return not bool(sanity.get("passed", True))
@@ -61,6 +75,76 @@ def _configured_mode() -> str:
     return (settings.ghosteek_ai_mode or MODE_AUTO).strip().lower()
 
 
+def _provider_model(provider: LLMProvider | None) -> str:
+    if provider is None:
+        return ""
+    cfg = getattr(provider, "config", None)
+    return str(getattr(cfg, "model", "") or "").strip()
+
+
+def _runtime_capabilities(
+    backend: str,
+    provider: LLMProvider | None,
+):
+    """Единая capability-проверка для runtime selection."""
+    from bot.services.ghosteek_ai.llm.runtime_capabilities import (
+        resolve_cloud_capabilities,
+        resolve_local_ollama_capabilities,
+        warn_conflicting_ollama_tools_config,
+        is_local_renderer_first_model,
+    )
+    from bot.services.ghosteek_ai.llm.base import LLMCapabilities
+
+    key = (backend or "").strip().lower()
+    if provider is not None:
+        caps = provider.capabilities()
+        # Conflict warning for local renderer-first + ENABLE_TOOLS
+        if key in {"ollama", "local"}:
+            cfg = getattr(provider, "config", None)
+            model = _provider_model(provider) or (settings.ollama_model or "")
+            extra = dict(getattr(cfg, "extra", None) or {})
+            if is_local_renderer_first_model(model) and bool(extra.get("enable_tools")):
+                warn_conflicting_ollama_tools_config(model)
+        return caps
+
+    if key in {"ollama", "local"}:
+        return resolve_local_ollama_capabilities(
+            settings.ollama_model,
+            enable_tools_config=bool(getattr(settings, "ollama_enable_tools", False)),
+        )
+    if key in {"qwen", "dashscope", "openai", "openai_compatible", "groq"}:
+        return resolve_cloud_capabilities(enable_tools=True)
+    return LLMCapabilities()
+
+
+def _force_planner_first(backend: str, provider: LLMProvider | None) -> bool:
+    """When True, Agent Mode is not used — planner-first is mandatory."""
+    caps = _runtime_capabilities(backend, provider)
+    if not caps.supports_agent_loop:
+        return True
+    # Local with tools disabled → planner-first.
+    if (backend or "").strip().lower() in {"ollama", "local"}:
+        if not caps.supports_tools:
+            return True
+    return False
+
+
+def _is_local_renderer_first(backend: str, provider: LLMProvider | None) -> bool:
+    """Local backend + renderer-first capability profile (e.g. qwen3 8B class)."""
+    if (backend or "").strip().lower() not in {"ollama", "local"}:
+        return False
+    from bot.services.ghosteek_ai.llm.runtime_capabilities import (
+        is_local_renderer_first_model,
+    )
+
+    model = _provider_model(provider) or (settings.ollama_model or "")
+    return is_local_renderer_first_model(model)
+
+
+# Back-compat alias for older tests / call sites.
+_is_local_qwen3_8b = _is_local_renderer_first
+
+
 def _resolve_provider(backend: str) -> LLMProvider | None:
     if backend in {"template", "default", ""}:
         return None
@@ -71,15 +155,87 @@ def _resolve_provider(backend: str) -> LLMProvider | None:
     return get_llm_provider(backend)
 
 
-def _resolve_runtime_mode(provider: LLMProvider | None) -> str:
-    """agent если LLM умеет tools; planner — только fallback / явный force."""
+def _resolve_runtime_mode(
+    provider: LLMProvider | None,
+    *,
+    backend: str = "",
+) -> str:
+    """agent только если capabilities.agent_loop; иначе planner-first."""
     configured = _configured_mode()
-    # Явный planner — для отладки / когда LLM отключён оператором.
     if configured == MODE_PLANNER:
         return MODE_PLANNER
-    if provider is not None and provider.supports_tools():
+
+    caps = _runtime_capabilities(backend, provider)
+    if not caps.supports_agent_loop or _force_planner_first(backend, provider):
+        return MODE_PLANNER
+
+    if configured == MODE_AGENT:
+        if caps.supports_tools:
+            return MODE_AGENT
+        return MODE_PLANNER
+
+    # auto
+    if caps.supports_tools and caps.supports_agent_loop:
         return MODE_AGENT
     return MODE_PLANNER
+
+
+def _successful_tool_results(results: list) -> list:
+    """ToolResult, на которых разрешён LLM renderer (ok=True, не clarify/unsupported)."""
+    out = []
+    for r in results or []:
+        name = str(getattr(r, "tool", "") or "")
+        if name in _TEMPLATE_ONLY_TOOLS:
+            continue
+        if bool(getattr(r, "ok", False)):
+            out.append(r)
+    return out
+
+
+def _make_renderer(backend: str, provider: LLMProvider | None):
+    """Response generator bound to the request provider (shared session/config).
+
+    Local Ollama → facts-only LocalRendererPromptBuilder (voice layer).
+    Cloud Qwen/Groq → default PromptBuilder (Agent Mode uses its own builder).
+    """
+    from bot.services.ghosteek_ai.generator.llm_generator import (
+        OllamaResponseGenerator,
+        QwenResponseGenerator,
+    )
+    from bot.services.ghosteek_ai.llm.local_renderer import LocalRendererPromptBuilder
+
+    key = (backend or "").strip().lower()
+    if key in {"ollama", "local"}:
+        return OllamaResponseGenerator(
+            provider=provider,
+            prompt_builder=LocalRendererPromptBuilder(),
+        )
+    if key in {"qwen", "dashscope", "openai", "openai_compatible", "groq"}:
+        return QwenResponseGenerator(provider=provider) if provider else QwenResponseGenerator()
+    return get_response_generator(key)
+
+
+def _log_planner_turn(
+    *,
+    backend: str,
+    model: str,
+    intent: str,
+    tools: list[str],
+    tool_ok: list[bool],
+    renderer_invoked: bool,
+    reason: str,
+) -> None:
+    logger.info(
+        "ghosteek_ai planner backend=%s model=%s intent=%s tools=%s "
+        "tool_ok=%s renderer_invoked=%s reason=%s",
+        backend,
+        model or "-",
+        intent or "-",
+        tools,
+        tool_ok,
+        renderer_invoked,
+        reason,
+    )
 
 
 async def _run_planner_fallback(
@@ -90,62 +246,195 @@ async def _run_planner_fallback(
     provider: LLMProvider | None,
     reason: str,
 ) -> tuple[str, list[str], dict[str, Any]]:
-    """Planner определяет tools только когда LLM недоступен или упал."""
+    """Planner-first: INTENT_TOOL_MAP → tools → LLM renderer only after ok ToolResult.
+
+    Used as:
+    - primary path for local qwen3:8b / tools-disabled Ollama;
+    - fallback when Agent Mode fails / LLM unavailable.
+    """
+    model = _provider_model(provider) or (
+        (settings.ollama_model if backend in {"ollama", "local"} else settings.llm_model) or ""
+    )
+    intent = getattr(getattr(ai_context, "intent", None), "request", None) or plan.intent
     meta: dict[str, Any] = {
         "mode": MODE_PLANNER,
         "llm_backend": backend,
         "used_backend": backend,
         "response_time_ms": None,
         "fallback_reason": reason,
+        "renderer_invoked": False,
+        "tool_success": False,
+        "model": model,
     }
     t0 = time.perf_counter()
-    tool_results = await _CALLER.execute_plan(plan, ai_context)
-    tool_names = [tr.tool for tr in tool_results]
+
+    tool_names: list[str] = []
+    tool_ok_flags: list[bool] = []
+
+    # Conversational (INTENT_CHAT): нет tools → LLM voice на persona facts.
+    # Прочие no-tool планы — только template.
+    if not plan.tools:
+        intent_l = str(intent or "").strip().lower()
+        if backend in {"ollama", "local"} and intent_l == "chat" and provider is not None:
+            from bot.services.ghosteek_ai.llm.local_renderer import (
+                attach_conversational_facts,
+                attach_render_facts,
+                can_reuse_last_facts_for_followup,
+            )
+
+            # Small talk никогда не берёт старый CR ToolResult.
+            # «А почему?» после игрового ответа — reuse last_render_facts.
+            if can_reuse_last_facts_for_followup(ai_context):
+                attach_render_facts(ai_context)
+                meta["followup_reuse_facts"] = True
+                meta["tool_success"] = False
+            else:
+                attach_conversational_facts(ai_context)
+                meta["conversational"] = True
+                meta["tool_success"] = False
+        else:
+            text = _TEMPLATE.generate(ai_context)
+            meta["used_backend"] = "template"
+            meta["fallback_reason"] = f"{reason};no_plan_tools"
+            meta["response_time_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            _log_planner_turn(
+                backend=backend,
+                model=model,
+                intent=intent,
+                tools=[],
+                tool_ok=[],
+                renderer_invoked=False,
+                reason=meta["fallback_reason"],
+            )
+            return text, [], meta
+    else:
+        tool_results = await _CALLER.execute_plan(plan, ai_context)
+        tool_names = [tr.tool for tr in tool_results]
+        tool_ok_flags = [bool(tr.ok) for tr in tool_results]
+        success = _successful_tool_results(tool_results)
+        meta["tool_success"] = bool(success)
+
+        # Failed / clarify / unsupported → template, never LLM.
+        # Exceptions:
+        # - local follow-up («подробнее» / «а почему?») с сохранёнными facts;
+        # - conversational / soft-clarify с persona/capability-facts only.
+        if not success:
+            from bot.services.ghosteek_ai.llm.local_renderer import (
+                attach_capability_clarify_facts,
+                attach_conversational_facts,
+                attach_render_facts,
+                can_render_capability_clarify,
+                can_render_conversational,
+                can_reuse_last_facts_for_followup,
+            )
+
+            if backend in {"ollama", "local"} and can_reuse_last_facts_for_followup(
+                ai_context
+            ):
+                attach_render_facts(ai_context)
+                meta["tool_success"] = False
+                meta["followup_reuse_facts"] = True
+            elif backend in {"ollama", "local"} and (
+                can_render_conversational(ai_context)
+                or can_render_capability_clarify(ai_context)
+            ):
+                if can_render_conversational(ai_context):
+                    attach_conversational_facts(ai_context)
+                    meta["conversational"] = True
+                else:
+                    attach_capability_clarify_facts(ai_context)
+                    meta["capability_clarify"] = True
+                meta["tool_success"] = False
+            else:
+                text = _TEMPLATE.generate(ai_context)
+                meta["used_backend"] = "template"
+                meta["fallback_reason"] = f"{reason};tool_failed_or_clarify"
+                meta["response_time_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+                _log_planner_turn(
+                    backend=backend,
+                    model=model,
+                    intent=intent,
+                    tools=tool_names,
+                    tool_ok=tool_ok_flags,
+                    renderer_invoked=False,
+                    reason=meta["fallback_reason"],
+                )
+                return text, tool_names, meta
 
     if backend in {"template", "default", ""} or provider is None:
         text = _TEMPLATE.generate(ai_context)
         meta["used_backend"] = "template"
         meta["llm_backend"] = "template" if backend in {"template", "default", ""} else backend
+        meta["fallback_reason"] = f"{reason};template_backend"
         meta["response_time_ms"] = round((time.perf_counter() - t0) * 1000, 1)
-        logger.info(
-            "ghosteek_ai mode=%s used_backend=template response_time_ms=%s fallback_reason=%s",
-            MODE_PLANNER,
-            meta["response_time_ms"],
-            reason,
+        _log_planner_turn(
+            backend=backend,
+            model=model,
+            intent=intent,
+            tools=tool_names,
+            tool_ok=tool_ok_flags,
+            renderer_invoked=False,
+            reason=meta["fallback_reason"],
         )
         return text, tool_names, meta
 
+    # LLM = renderer only (no tool schemas → cannot invent tool calls as primary path).
     try:
-        generator = get_response_generator(
-            "ollama" if backend in {"ollama", "local"} else backend
-        )
+        render_kwargs: dict[str, Any] = {}
+        if backend in {"ollama", "local"}:
+            from bot.services.ghosteek_ai.llm.local_renderer import (
+                attach_render_facts,
+                renderer_generate_kwargs,
+            )
+
+            # conversational / capability уже положили FACTS — не перетирать.
+            if not meta.get("capability_clarify") and not meta.get("conversational"):
+                attach_render_facts(ai_context)
+            render_kwargs = renderer_generate_kwargs(
+                conversational=bool(
+                    meta.get("conversational") or meta.get("capability_clarify")
+                )
+            )
+        generator = _make_renderer(backend, provider)
         agenerate = getattr(generator, "agenerate", None)
         if agenerate is None:
             raise RuntimeError("generator has no agenerate()")
-        text = await agenerate(ai_context)
+        text = await agenerate(ai_context, tools=None, **render_kwargs)
         if not isinstance(text, str):
-            # ToolCallResult в fallback-path не ожидаем — на template
-            raise RuntimeError("fallback generator returned non-text result")
+            raise RuntimeError("planner renderer returned non-text result")
+        meta["renderer_invoked"] = True
         meta["response_time_ms"] = round((time.perf_counter() - t0) * 1000, 1)
         meta["used_backend"] = "ollama" if backend in {"ollama", "local"} else backend
-        logger.info(
-            "ghosteek_ai mode=%s llm_backend=%s used_backend=%s response_time_ms=%s fallback_reason=%s",
-            MODE_PLANNER,
-            meta["llm_backend"],
-            meta["used_backend"],
-            meta["response_time_ms"],
-            reason,
+        _log_planner_turn(
+            backend=backend,
+            model=model,
+            intent=intent,
+            tools=tool_names,
+            tool_ok=tool_ok_flags,
+            renderer_invoked=True,
+            reason=reason,
         )
         return text, tool_names, meta
     except Exception as exc:
         meta["fallback_reason"] = f"{reason}; template: {type(exc).__name__}: {exc}"
         meta["used_backend"] = "template"
+        meta["renderer_invoked"] = False
         meta["response_time_ms"] = round((time.perf_counter() - t0) * 1000, 1)
         logger.warning(
-            "ghosteek_ai mode=%s used_backend=template response_time_ms=%s fallback_reason=%s",
-            MODE_PLANNER,
-            meta["response_time_ms"],
-            meta["fallback_reason"],
+            "ghosteek_ai planner renderer_failed backend=%s model=%s intent=%s err=%s",
+            backend,
+            model or "-",
+            intent or "-",
+            type(exc).__name__,
+        )
+        _log_planner_turn(
+            backend=backend,
+            model=model,
+            intent=intent,
+            tools=tool_names,
+            tool_ok=tool_ok_flags,
+            renderer_invoked=False,
+            reason=meta["fallback_reason"],
         )
         text = _TEMPLATE.generate(ai_context)
         return text, tool_names, meta
@@ -158,7 +447,7 @@ async def _run_agent_mode(
     backend: str,
     provider: LLMProvider,
 ) -> tuple[str, list[str], dict[str, Any]]:
-    """LLM Tool Calling loop. При ошибке → Planner fallback."""
+    """LLM Tool Calling loop (cloud / strong models). При ошибке → Planner path."""
     meta: dict[str, Any] = {
         "mode": MODE_AGENT,
         "llm_backend": backend,
@@ -167,8 +456,15 @@ async def _run_agent_mode(
         "fallback_reason": None,
         "agent_rounds": None,
         "used_tool_calling": False,
+        "model": _provider_model(provider),
     }
     t0 = time.perf_counter()
+    logger.info(
+        "ghosteek_ai agent backend=%s model=%s intent=%s",
+        backend,
+        meta["model"] or "-",
+        getattr(getattr(ai_context, "intent", None), "request", None) or plan.intent,
+    )
     try:
         result = await run_llm_agent(
             ai_context,
@@ -196,7 +492,7 @@ async def _run_agent_mode(
     except Exception as exc:
         reason = f"agent_failed: {type(exc).__name__}: {exc}"
         logger.warning(
-            "ghosteek_ai mode=%s llm_backend=%s fallback_reason=%s — Planner fallback",
+            "ghosteek_ai mode=%s llm_backend=%s fallback_reason=%s — Planner path",
             MODE_AGENT,
             backend,
             reason,
@@ -222,18 +518,46 @@ async def ask_ghosteek_ai(
     """
     Orchestrator:
 
-    Conversation → Intent
-      → LLM available: PromptBuilder → Qwen → tool_calls → ToolCaller
-           → role=tool → Qwen → … ≤5 → Safety → Response
-      → LLM unavailable / error: Planner → ToolCaller(plan) → Template/LLM text
-           → Safety → Response
-
-    Planner не выбирает tools, пока LLM работает.
+    Conversation → Intent → Plan (INTENT_TOOL_MAP)
+      → local qwen3:8b / planner: ToolCaller(plan) → (ok ToolResult) → LLM renderer
+      → cloud Agent: PromptBuilder → LLM tool_calls → … → Safety
+      → tool fail / clarify / unsupported: Template only (no LLM)
     """
     session = ConversationManager.get_or_create(user.telegram_id)
     ConversationManager.add_user_message(session, message)
 
     req_ctx = ConversationManager.merge_request_context(session, context)
+    # Local renderer follow-ups: previous facts / brief answer only (not full history).
+    if isinstance(session.last_render_facts, dict) and session.last_render_facts:
+        req_ctx["last_render_facts"] = dict(session.last_render_facts)
+    if session.last_answer_brief:
+        req_ctx["last_answer_brief"] = session.last_answer_brief
+    elif session.last_assistant_messages:
+        req_ctx["last_answer_brief"] = str(session.last_assistant_messages[-1])[:180]
+
+    # Accepted CR replay is known, but Stage 4 coaching is not ready yet.
+    from bot.services.ghosteek_ai.replay_followup import (
+        is_replay_coaching_request,
+        reply_replay_pending_analysis,
+        resolve_replay_meta,
+    )
+
+    replay_meta = resolve_replay_meta(session.last_replay, req_ctx)
+    if replay_meta and is_replay_coaching_request(message):
+        answer = reply_replay_pending_analysis(replay_meta)
+        ConversationManager.add_assistant_message(session, answer, intent="replay_pending")
+        session.last_answer_brief = answer[:180]
+        session.active_topic = "replay"
+        ConversationManager.save(user.telegram_id, session)
+        return GhosteekAiResponse(
+            intent="replay_pending",
+            answer=answer,
+            sources={
+                "intent": "replay_pending",
+                "replay": replay_meta,
+                "stage": "detection_only",
+            },
+        )
 
     context_cards: list[str] = []
     if isinstance(req_ctx.get("cards"), list):
@@ -244,8 +568,7 @@ async def ask_ghosteek_ai(
         session, detected, message, req_ctx
     )
 
-    # Plan строится заранее: seed args для AIContext + fallback, если LLM упадёт.
-    # В Agent Mode plan НЕ исполняется и НЕ диктует tools.
+    # Plan: seed args + executed in planner-first / agent fallback.
     plan = Planner.plan(detected)
     tool_args = dict(plan.tools[0].args) if plan.tools else {}
 
@@ -260,29 +583,62 @@ async def ask_ghosteek_ai(
 
     backend = _configured_backend()
     provider = _resolve_provider(backend)
-    runtime_mode = _resolve_runtime_mode(provider)
+    runtime_mode = _resolve_runtime_mode(provider, backend=backend)
+    runtime_model = _provider_model(provider) or (
+        (settings.ollama_model or "").strip()
+        if backend in {"ollama", "local"}
+        else ""
+    )
+    # Diagnostic only: backend / model / mode (no prompts, keys, or user text).
+    logger.info(
+        "ghosteek_ai runtime backend=%s model=%s mode=%s provider=%s",
+        backend,
+        runtime_model or "-",
+        runtime_mode,
+        getattr(provider, "name", None) or "none",
+    )
 
-    if runtime_mode == MODE_AGENT and provider is not None:
-        raw_answer, tool_names, gen_meta = await _run_agent_mode(
-            ai_context, plan, backend=backend, provider=provider
-        )
-    else:
-        reason = (
-            "llm_unavailable"
-            if provider is None
-            else (
-                "mode_planner"
-                if runtime_mode == MODE_PLANNER
-                else "tools_unsupported"
+    try:
+        # Chat / empty-plan → всегда planner conversational path (не Agent tool-loop).
+        if not plan.tools or str(detected.intent or "") == "chat":
+            raw_answer, tool_names, gen_meta = await _run_planner_fallback(
+                ai_context,
+                plan,
+                backend=backend,
+                provider=provider,
+                reason="conversational_no_tools",
             )
-        )
-        raw_answer, tool_names, gen_meta = await _run_planner_fallback(
-            ai_context,
-            plan,
-            backend=backend,
-            provider=provider,
-            reason=reason,
-        )
+        elif runtime_mode == MODE_AGENT and provider is not None:
+            raw_answer, tool_names, gen_meta = await _run_agent_mode(
+                ai_context, plan, backend=backend, provider=provider
+            )
+        else:
+            reason = (
+                "llm_unavailable"
+                if provider is None
+                else (
+                    "local_planner_first"
+                    if _force_planner_first(backend, provider)
+                    else (
+                        "mode_planner"
+                        if runtime_mode == MODE_PLANNER
+                        else "tools_unsupported"
+                    )
+                )
+            )
+            raw_answer, tool_names, gen_meta = await _run_planner_fallback(
+                ai_context,
+                plan,
+                backend=backend,
+                provider=provider,
+                reason=reason,
+            )
+    finally:
+        if provider is not None:
+            try:
+                await provider.close()
+            except Exception:
+                logger.debug("ghosteek_ai provider.close failed", exc_info=True)
 
     # Sanity fail → только честный template-вердикт, без «как играть».
     if _sanity_blocks_explain(ai_context):
@@ -290,6 +646,7 @@ async def ask_ghosteek_ai(
         gen_meta = dict(gen_meta or {})
         gen_meta["used_backend"] = "template"
         gen_meta["fallback_reason"] = "deck_sanity_failed"
+        gen_meta["renderer_invoked"] = False
 
     answer = SafetyLayer.apply(raw_answer, ai_context)
 
@@ -303,6 +660,11 @@ async def ask_ghosteek_ai(
         active_topic=intent_name,
         tools=tool_names,
     )
+    # Persist compact facts for next local follow-up («подробнее» / «а почему?»).
+    if isinstance(getattr(ai_context, "render_facts", None), dict) and ai_context.render_facts:
+        session.last_render_facts = dict(ai_context.render_facts)
+    if answer:
+        session.last_answer_brief = str(answer)[:180]
     ConversationManager.add_assistant_message(session, answer, intent=intent_name)
     ConversationManager.save(user.telegram_id, session)
 
@@ -326,10 +688,13 @@ async def ask_ghosteek_ai(
             "mode": gen_meta.get("mode"),
             "backend": gen_meta.get("llm_backend"),
             "used_backend": gen_meta.get("used_backend"),
+            "model": gen_meta.get("model"),
             "response_time_ms": gen_meta.get("response_time_ms"),
             "fallback_reason": gen_meta.get("fallback_reason"),
             "agent_rounds": gen_meta.get("agent_rounds"),
             "used_tool_calling": gen_meta.get("used_tool_calling"),
+            "renderer_invoked": gen_meta.get("renderer_invoked"),
+            "tool_success": gen_meta.get("tool_success"),
             "planner_suggestion": [t.name for t in plan.tools],
         },
         "memory": {

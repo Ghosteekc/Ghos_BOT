@@ -38,6 +38,8 @@ async def ask_ai(
             context["battle_index"] = body.context.battle_index
         if body.context.battle_time is not None:
             context["battle_time"] = body.context.battle_time
+        if body.context.replay is not None:
+            context["replay"] = body.context.replay.model_dump()
 
     result = await ask_ghosteek_ai(body.message, user, context=context or None)
     deck_card = None
@@ -71,7 +73,6 @@ async def analyze_replay(
     file: UploadFile = File(...),
 ):
     """Validate video, sample frames, heuristic CR detection. No Qwen."""
-    del user
     service = get_replay_service()
     try:
         outcome = await service.analyze_upload(
@@ -88,6 +89,20 @@ async def analyze_replay(
     finally:
         await file.close()
     detection = outcome.detection
+    if detection.status in {"cr_replay", "uncertain", "not_cr_replay"}:
+        session = ConversationManager.get_or_create(user.telegram_id)
+        ConversationManager.set_last_replay(
+            session,
+            {
+                "status": detection.status,
+                "filename": outcome.filename,
+                "duration_seconds": outcome.duration_seconds,
+                "width": outcome.width,
+                "height": outcome.height,
+                "confidence": detection.confidence,
+            },
+        )
+        ConversationManager.save(user.telegram_id, session)
     return ReplayAnalyzeSuccess(
         status=detection.status,
         filename=outcome.filename,

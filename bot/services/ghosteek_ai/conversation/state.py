@@ -36,6 +36,11 @@ class ConversationState:
     last_battle: dict[str, Any] = field(default_factory=dict)
     last_recommendation: dict[str, Any] = field(default_factory=dict)
     last_analysis: dict[str, Any] = field(default_factory=dict)
+    # Compact facts envelope for local renderer follow-ups («подробнее», «а почему?»).
+    last_render_facts: dict[str, Any] = field(default_factory=dict)
+    last_answer_brief: str = ""
+    # Last accepted/uncertain CR replay upload (meta only — video file is deleted).
+    last_replay: dict[str, Any] = field(default_factory=dict)
 
     last_intent: str | None = None
     last_service: str | None = None
@@ -79,6 +84,8 @@ class ConversationState:
             "has_matchup": len(self.last_deck) >= 8 and len(self.last_opponent_deck) >= 8,
             "has_battle": self.last_battle_index is not None or bool(self.last_battle),
             "has_recommendation": bool(self.last_recommendation),
+            "has_replay": bool(self.last_replay),
+            "last_replay": dict(self.last_replay) if self.last_replay else None,
             "has_summary": bool(self.summary.strip()),
             "summary_preview": (self.summary[:160] + "…")
             if len(self.summary) > 160
@@ -110,6 +117,7 @@ class ConversationState:
             "last_recommendation": dict(self.last_recommendation)
             if self.last_recommendation
             else None,
+            "last_replay": dict(self.last_replay) if self.last_replay else None,
             "active_topic": self.active_topic,
             "last_intent": self.last_intent,
         }
