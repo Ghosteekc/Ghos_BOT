@@ -8,6 +8,7 @@ import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from bot.services.ghosteek_ai.replay.compressor import compress_replay_video
 from bot.services.ghosteek_ai.replay.hud_analyzer import HeuristicHudAnalyzer
 from bot.services.ghosteek_ai.replay.models import ReplayAnalyzeOutcome, ReplayDetection
 from bot.services.ghosteek_ai.replay.sampler import FrameSampler
@@ -94,14 +95,27 @@ class ReplayAnalyzeService:
         if self._busy:
             raise ReplayError(CODE_BUSY)
         self._busy = True
-        tmp_path: Path | None = None
+        temps: list[Path] = []
         try:
             header, tmp_path, size_bytes = await _spool_limited(read)
+            temps.append(tmp_path)
             validate_size(size_bytes)
             safe_name, mime = validate_identity(filename, content_type, header)
             duration, width, height, fps = probe_video(tmp_path)
             if duration > MAX_DURATION_SECONDS:
                 raise ReplayError(CODE_TOO_LONG)
+            working = compress_replay_video(
+                tmp_path,
+                size_bytes=size_bytes,
+                width=width,
+                height=height,
+                fps=fps,
+            )
+            if working != tmp_path:
+                temps.append(working)
+                duration, width, height, fps = probe_video(working)
+                size_bytes = working.stat().st_size
+                mime = "video/mp4"
             meta = ReplayMeta(
                 filename=safe_name,
                 mime_type=mime,
@@ -111,7 +125,7 @@ class ReplayAnalyzeService:
                 height=height,
                 fps=fps,
             )
-            detection = self._run_detection(tmp_path, duration, width, height) if detect else None
+            detection = self._run_detection(working, duration, width, height) if detect else None
             return meta, detection
         except ReplayError:
             raise
@@ -119,8 +133,8 @@ class ReplayAnalyzeService:
             logger.exception("replay %s failed", "analysis" if detect else "validation")
             raise ReplayError(CODE_INTERNAL) from None
         finally:
-            if tmp_path is not None:
-                _unlink_quiet(tmp_path)
+            for path in temps:
+                _unlink_quiet(path)
             self._busy = False
 
     def _run_detection(
