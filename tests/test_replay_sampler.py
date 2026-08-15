@@ -1,4 +1,4 @@
-"""Stage 3 FrameSampler: timestamps, downscale, cleanup, errors. No real video files."""
+"""Stage 3 FrameSampler: timestamps, downscale, cleanup, adjacent dedupe. No real video files."""
 
 from __future__ import annotations
 
@@ -8,10 +8,18 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from bot.services.ghosteek_ai.replay.models import sample_frame_count
+from bot.services.ghosteek_ai.replay.facts import ReplayFactsBuilder
+from bot.services.ghosteek_ai.replay.models import (
+    ReplayDetection,
+    sample_frame_count,
+)
 from bot.services.ghosteek_ai.replay.sampler import (
     FrameSampler,
+    hamming_distance,
+    is_adjacent_near_duplicate,
+    min_kept_frames_for_plan,
     scaled_dimensions,
+    timestamps_at_fps,
     timestamps_for_duration,
 )
 from bot.services.ghosteek_ai.replay.validator import (
@@ -126,7 +134,8 @@ def test_temp_frames_deleted_after_iteration(monkeypatch: pytest.MonkeyPatch, tm
     assert all(not path.exists() for path in created)
 
 
-def test_near_duplicates_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_identical_frames_collapse_is_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pathological collapse (all frames identical) must not silently succeed with 1 frame."""
     sampler = FrameSampler(count=16, timeout_seconds=20.0, dedupe=True)
 
     def same_extract(self, *, binary, video_path, timestamp, dest, width, height, timeout):
@@ -135,15 +144,168 @@ def test_near_duplicates_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(FrameSampler, "_extract_one", same_extract)
     monkeypatch.setattr("bot.services.ghosteek_ai.replay.sampler.find_ffmpeg", lambda: "ffmpeg")
+    with pytest.raises(ReplayError) as exc:
+        list(
+            sampler.iter_sampled_frames(
+                Path("x.mp4"),
+                duration=30.0,
+                src_width=1920,
+                src_height=1080,
+            )
+        )
+    assert exc.value.code == CODE_FRAME_EXTRACTION_FAILED
+
+
+def test_adjacent_only_dedupe_preserves_non_neighbors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    A, ~A, B, ~A:
+    - second may drop as adjacent dup of A
+    - fourth must NOT drop just because it resembles frame0
+    """
+    # Hamming(A,~A)=1 <= 6; Hamming(A,B) and (~A,B) >> 6; Hamming(B,~A)>>6
+    digests = [0x0000, 0x0001, 0x0FFF_FFFF_FFFF_FFFF, 0x0002]
+    assert is_adjacent_near_duplicate(digests[1], digests[0])
+    assert not is_adjacent_near_duplicate(digests[2], digests[0])
+    assert not is_adjacent_near_duplicate(digests[3], digests[2])
+    assert hamming_distance(digests[3], digests[0]) <= 6  # similar to A historically
+
+    call = {"i": 0}
+
+    def fake_extract(self, *, binary, video_path, timestamp, dest, width, height, timeout):
+        del self, binary, video_path, timestamp, timeout
+        Image.new("RGB", (width, height), (10, 10, 10)).save(dest, "JPEG")
+
+    def fake_hash(path: Path) -> int:
+        del path
+        idx = min(call["i"], len(digests) - 1)
+        call["i"] += 1
+        return digests[idx]
+
+    sampler = FrameSampler(count=4, timeout_seconds=20.0, dedupe=True, adaptive=False)
+    monkeypatch.setattr(FrameSampler, "_extract_one", fake_extract)
+    monkeypatch.setattr("bot.services.ghosteek_ai.replay.sampler.average_hash", fake_hash)
+    monkeypatch.setattr("bot.services.ghosteek_ai.replay.sampler.find_ffmpeg", lambda: "ffmpeg")
+    # count=4 → planned 4 → min_keep = max(1, 4//2)=2; we keep 3 (A,B,~A)
     frames = list(
         sampler.iter_sampled_frames(
             Path("x.mp4"),
-            duration=30.0,
-            src_width=1920,
-            src_height=1080,
+            duration=12.0,
+            src_width=640,
+            src_height=360,
         )
     )
-    assert len(frames) == 1
+    assert len(frames) == 3
+    stamps = [f.timestamp for f in frames]
+    assert stamps == sorted(stamps)
+
+
+def test_cr_like_replay_does_not_collapse_to_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Similar HUD chrome but changing arena content → adjacent hashes differ enough."""
+    call = {"i": 0}
+
+    def fake_extract(self, *, binary, video_path, timestamp, dest, width, height, timeout):
+        del self, binary, video_path, timeout
+        # Shared dark HUD chrome + shifting arena block (tone from timestamp).
+        im = Image.new("RGB", (width, height), (18, 24, 40))
+        draw = ImageDraw.Draw(im)
+        draw.rectangle([0, int(height * 0.82), width, height], fill=(30, 36, 52))  # card bar
+        draw.rectangle([0, 0, width, int(height * 0.08)], fill=(22, 28, 44))  # top HUD
+        tone = int(timestamp * 40) % 180
+        draw.rectangle(
+            [int(width * 0.15), int(height * 0.2), int(width * 0.85), int(height * 0.75)],
+            fill=(40 + tone // 2, 90 + (tone % 50), 50 + (tone % 70)),
+        )
+        im.save(dest, "JPEG", quality=85)
+
+    def fake_hash(path: Path) -> int:
+        # Deterministic adjacent-differing digests; may resemble older frames.
+        del path
+        i = call["i"]
+        call["i"] += 1
+        return (i * 0x1111_1111_1111_1111) & 0xFFFF_FFFF_FFFF_FFFF
+
+    sampler = FrameSampler(count=20, timeout_seconds=30.0, dedupe=True, adaptive=False)
+    monkeypatch.setattr(FrameSampler, "_extract_one", fake_extract)
+    monkeypatch.setattr("bot.services.ghosteek_ai.replay.sampler.average_hash", fake_hash)
+    monkeypatch.setattr("bot.services.ghosteek_ai.replay.sampler.find_ffmpeg", lambda: "ffmpeg")
+    frames = list(
+        sampler.iter_sampled_frames(
+            Path("cr.mp4"),
+            duration=45.0,
+            src_width=1080,
+            src_height=1920,
+        )
+    )
+    assert len(frames) >= 8
+    assert len(frames) <= 24
+    stamps = [f.timestamp for f in frames]
+    assert stamps == sorted(stamps)
+    assert stamps[0] == 0.0
+    assert stamps[-1] >= 45.0 * 0.9
+
+
+def test_adaptive_dedupe_45s_not_one_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    call = {"i": 0}
+
+    def fake_extract(self, *, binary, video_path, timestamp, dest, width, height, timeout):
+        del self, binary, video_path, timeout
+        _write_jpeg(Path(dest), width, height, int(timestamp * 23) + 11)
+
+    def fake_hash(path: Path) -> int:
+        name = Path(path).name
+        # Probe + final extract both need adjacent variety (Hamming >> 6).
+        if name.startswith("probe_"):
+            idx = int(name.split("_")[1].split(".")[0])
+        else:
+            idx = int(name.split("_")[1].split(".")[0])
+        call["i"] += 1
+        # Consecutive digests differ by many bits; patterns can still revisit older ones.
+        return (idx * 0x1111_1111_1111_1111) & 0xFFFF_FFFF_FFFF_FFFF
+
+    sampler = FrameSampler(
+        adaptive=True,
+        analysis_fps_value=3.0,
+        event_fps_value=8.0,
+        max_frames=96,
+        timeout_seconds=60.0,
+        dedupe=True,
+    )
+    monkeypatch.setattr(FrameSampler, "_extract_one", fake_extract)
+    monkeypatch.setattr("bot.services.ghosteek_ai.replay.sampler.average_hash", fake_hash)
+    monkeypatch.setattr("bot.services.ghosteek_ai.replay.sampler.find_ffmpeg", lambda: "ffmpeg")
+    frames = list(
+        sampler.iter_sampled_frames(
+            Path("adaptive.mp4"),
+            duration=45.0,
+            src_width=1080,
+            src_height=1920,
+        )
+    )
+    assert len(frames) != 1
+    assert len(frames) >= min_kept_frames_for_plan(
+        len(timestamps_at_fps(45.0, 3.0, max_frames=96))
+    )
+    assert len(frames) <= 96
+    stamps = [f.timestamp for f in frames]
+    assert stamps == sorted(stamps)
+    assert stamps[0] == 0.0
+    assert stamps[-1] >= 45.0 * 0.85
+
+
+def test_sorted_timestamps_cover_ends(monkeypatch: pytest.MonkeyPatch) -> None:
+    frames, _ = _run_sampler(monkeypatch, 45.0, 1920, 1080, 20)
+    stamps = [f.timestamp for f in frames]
+    assert stamps == sorted(stamps)
+    assert stamps[0] == 0.0
+    assert stamps[-1] >= 45.0 * 0.9
+
+
+def test_frames_analyzed_detection_and_facts_agree() -> None:
+    detection = ReplayDetection(status="cr_replay", confidence=0.83, frames_analyzed=20)
+    result = ReplayFactsBuilder().build(detection, [], duration_seconds=45.0)
+    assert result is not None
+    assert result.frames_analyzed == detection.frames_analyzed
+    assert result.to_dict()["frames_analyzed"] == detection.to_dict()["frames_analyzed"]
 
 
 def test_corrupted_video_clean_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,18 +347,12 @@ def test_ffmpeg_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_timeout_clean_error(monkeypatch: pytest.MonkeyPatch) -> None:
     sampler = FrameSampler(count=16, timeout_seconds=20.0)
 
-    def slow(self, **kwargs):
-        del self, kwargs
-        raise subprocess.TimeoutExpired("ffmpeg", 8)
-
-    monkeypatch.setattr(FrameSampler, "_extract_one", slow)
-    monkeypatch.setattr("bot.services.ghosteek_ai.replay.sampler.find_ffmpeg", lambda: "ffmpeg")
-    # _extract_one is what maps TimeoutExpired; simulate that mapping:
     def raise_timeout(self, **kwargs):
         del self, kwargs
         raise ReplayError(CODE_ANALYSIS_TIMEOUT)
 
     monkeypatch.setattr(FrameSampler, "_extract_one", raise_timeout)
+    monkeypatch.setattr("bot.services.ghosteek_ai.replay.sampler.find_ffmpeg", lambda: "ffmpeg")
     with pytest.raises(ReplayError) as exc:
         list(
             sampler.iter_sampled_frames(

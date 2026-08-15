@@ -16,6 +16,7 @@ from PIL import Image
 from bot.services.ghosteek_ai.replay.models import (
     CHANGE_HASH_HAMMING,
     NEAR_DUP_HAMMING,
+    SAMPLE_FRAMES_MIN,
     TARGET_SHORT_SIDE,
     SampledFrame,
     adaptive_sampling_enabled,
@@ -37,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 _PER_FRAME_TIMEOUT = 8.0
 _END_EPS = 0.04
+# Soft floor after adjacent dedupe for a normal sampling plan (~20/96 stamps).
+_MIN_KEPT_AFTER_DEDUPE = max(8, SAMPLE_FRAMES_MIN // 2)
 
 
 def timestamps_for_duration(duration: float, count: int) -> list[float]:
@@ -151,6 +154,28 @@ def hamming_distance(a: int, b: int) -> int:
     return (a ^ b).bit_count()
 
 
+def min_kept_frames_for_plan(planned: int) -> int:
+    """Minimum accepted frames after adjacent dedupe for a sampling plan."""
+    n = max(0, int(planned))
+    if n <= 1:
+        return 1
+    if n < _MIN_KEPT_AFTER_DEDUPE:
+        return max(1, n // 2)
+    return _MIN_KEPT_AFTER_DEDUPE
+
+
+def is_adjacent_near_duplicate(
+    digest: int,
+    previous_digest: int | None,
+    *,
+    threshold: int = NEAR_DUP_HAMMING,
+) -> bool:
+    """True only when digest is near-identical to the immediately previous accepted frame."""
+    if previous_digest is None:
+        return False
+    return hamming_distance(digest, previous_digest) <= threshold
+
+
 class FrameSampler:
     """
     Extract analysis frames at ~720p.
@@ -214,7 +239,7 @@ class FrameSampler:
             else:
                 stamps = timestamps_for_duration(duration, self.count)
 
-            seen_hashes: list[int] = []
+            last_hash: int | None = None
             for index, ts in enumerate(stamps):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -231,12 +256,11 @@ class FrameSampler:
                         timeout=min(_PER_FRAME_TIMEOUT, remaining),
                     )
                     digest = average_hash(dest)
-                    if self.dedupe and any(
-                        hamming_distance(digest, prev) <= NEAR_DUP_HAMMING for prev in seen_hashes
-                    ):
+                    # Adjacent-only: never compare against the full history (CR HUD collapse).
+                    if self.dedupe and is_adjacent_near_duplicate(digest, last_hash):
                         dest.unlink(missing_ok=True)
                         continue
-                    seen_hashes.append(digest)
+                    last_hash = digest
                     produced += 1
                     try:
                         yield SampledFrame(
@@ -257,6 +281,15 @@ class FrameSampler:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
         if produced == 0:
+            raise ReplayError(CODE_FRAME_EXTRACTION_FAILED)
+        min_keep = min_kept_frames_for_plan(len(stamps))
+        if produced < min_keep:
+            logger.warning(
+                "replay sampler collapse: kept %s of %s planned (min %s)",
+                produced,
+                len(stamps),
+                min_keep,
+            )
             raise ReplayError(CODE_FRAME_EXTRACTION_FAILED)
 
     def _plan_adaptive_stamps(

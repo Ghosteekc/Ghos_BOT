@@ -202,7 +202,7 @@ def test_candidates_not_in_confirmed_events() -> None:
     ]
     detector = ReplayEventDetector()
     raw = detector.detect(card_observations=observations)
-    events, confirmed = detector.partition(raw)
+    events, confirmed = detector.partition(raw)[:2]
     assert any(e.event_type == EVENT_CARD_PLAY_CANDIDATE for e in events)
     assert all(e.event_type != EVENT_CARD_PLAY_CANDIDATE for e in confirmed)
     assert all(e.confidence >= 0.90 for e in confirmed)

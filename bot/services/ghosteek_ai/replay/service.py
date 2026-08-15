@@ -139,7 +139,9 @@ class ReplayAnalyzeService:
                 confirmed_cards=list(analysis.confirmed_cards),
                 confirmed_events=list(analysis.confirmed_events),
                 events=list(analysis.events),
+                candidate_events=list(analysis.candidate_events),
                 limitations=list(analysis.limitations),
+                facts=list(analysis.facts),
             )
         except Exception:
             logger.exception("replay coach attach failed")
@@ -149,7 +151,9 @@ class ReplayAnalyzeService:
                 confirmed_cards=list(analysis.confirmed_cards),
                 confirmed_events=list(analysis.confirmed_events),
                 events=list(analysis.events),
+                candidate_events=list(analysis.candidate_events),
                 limitations=list(analysis.limitations),
+                facts=list(analysis.facts),
             )
             return replace(
                 analysis,
@@ -306,7 +310,7 @@ class ReplayAnalyzeService:
             timeline=timeline,
             ambiguous_present=bool(bundle.ambiguous_card_observations),
         )
-        events, confirmed_events = event_detector.partition(raw_events)
+        events, confirmed_events, candidate_events = event_detector.partition(raw_events)
         battle_builder = self._battle_timeline_builder or ReplayBattleTimelineBuilder()
         battle_timeline = battle_builder.build(
             duration_seconds=duration_seconds,
@@ -333,6 +337,7 @@ class ReplayAnalyzeService:
             ambiguous_cards=list(bundle.ambiguous_card_observations),
             events=events,
             confirmed_events=confirmed_events,
+            candidate_events=candidate_events,
             battle_timeline=battle_timeline,
             tactical_analysis=tactical,
             game_state_observations=game_states,

@@ -249,7 +249,7 @@ def test_cycle_from_confirmed_plays_only() -> None:
         _ev(8.0, EVENT_CARD_PLAY_CANDIDATE, card_id=WITCH, player=PLAYER_SELF, conf=0.88),
         _ev(12.0, EVENT_CARD_PLAY, card_id=CANNON, player=PLAYER_OPPONENT, conf=0.93),
     ]
-    _, confirmed = ReplayEventDetector().partition(events)
+    _, confirmed = ReplayEventDetector().partition(events)[:2]
     cycle = build_cycle_from_confirmed_plays(confirmed)
     assert cycle.player_cycle == [HOG]
     assert cycle.opponent_cycle == [CANNON]

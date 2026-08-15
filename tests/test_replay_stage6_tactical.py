@@ -256,7 +256,7 @@ def test_what_we_know_and_dont_know_present() -> None:
         confirmed_events=events,
     )
     assert analysis.limitations.what_we_know
-    assert "battle_started confirmed" in analysis.limitations.what_we_know
+    assert "battle_start confirmed" in analysis.limitations.what_we_know
     for key in ("exact elixir", "exact damage", "tower HP", "frame-level timing"):
         assert key in analysis.limitations.what_we_dont_know
 

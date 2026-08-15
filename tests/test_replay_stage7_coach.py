@@ -12,6 +12,7 @@ from bot.services.ghosteek_ai.replay.battle_timeline import ReplayBattleTimeline
 from bot.services.ghosteek_ai.replay.card_recognizer import ConfirmedCardFact
 from bot.services.ghosteek_ai.replay.coach_renderer import (
     REPLAY_COACH_SYSTEM_PROMPT,
+    REPLAY_RENDERER_SYSTEM_PROMPT,
     ReplayCoachPromptBuilder,
     ReplayCoachRenderer,
     apply_replay_coach_gate,
@@ -72,7 +73,7 @@ def _sample_bundle():
         recommendations=["Полные колоды пока не собрал — недостающие карты не угадываю."],
         confidence=0.72,
         limitations=AnalysisLimitations(
-            what_we_know=["battle_started confirmed"],
+            what_we_know=["battle_start confirmed"],
             what_we_dont_know=["exact elixir", "exact damage", "tower HP"],
         ),
     )
@@ -108,7 +109,12 @@ def test_facts_preserved_in_envelope() -> None:
     )
     facts = " ".join(env["data"]["facts"])
     assert "Hog Rider" in facts
-    assert "battle_started" in facts or "EVENT_BATTLE" in facts or "battle_started" in facts.lower() or "type=battle_started" in facts
+    assert (
+        "battle_start" in facts
+        or "battle_started" in facts
+        or "EVENT_BATTLE" in facts
+        or "type=battle_start" in facts
+    )
     assert "exact elixir" in facts
     assert 31.8 in env["data"]["allowed_timestamps"]
 
@@ -254,9 +260,11 @@ def test_prompt_contains_system_and_no_video_bytes() -> None:
     )
     messages = ReplayCoachPromptBuilder(env).build(SimpleNamespace(raw_message="Разбери реплей"))
     joined = "\n".join(m.content for m in messages)
-    assert "Ghosteek AI" in REPLAY_COACH_SYSTEM_PROMPT
-    assert "НИКОГДА не выдумываешь" in REPLAY_COACH_SYSTEM_PROMPT
+    assert "Ghosteek AI" in REPLAY_RENDERER_SYSTEM_PROMPT
+    assert "не являешься источником фактов" in REPLAY_RENDERER_SYSTEM_PROMPT.lower()
+    assert REPLAY_COACH_SYSTEM_PROMPT == REPLAY_RENDERER_SYSTEM_PROMPT
     assert "FACTS:" in joined
+    assert "ReplayFacts" in joined
     assert b"\x00\x00\x00\x18ftyp" not in joined.encode("utf-8", errors="ignore")
 
 

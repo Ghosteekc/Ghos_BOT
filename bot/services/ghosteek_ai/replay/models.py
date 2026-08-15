@@ -237,6 +237,7 @@ class ReplayAnalysisResult:
     ambiguous_cards: list = field(default_factory=list)
     events: list = field(default_factory=list)
     confirmed_events: list = field(default_factory=list)
+    candidate_events: list = field(default_factory=list)
     battle_timeline: object | None = None
     tactical_analysis: object | None = None
     coach_reply: str | None = None
@@ -273,6 +274,10 @@ class ReplayAnalysisResult:
             "confirmed_events": [
                 item.to_dict() if hasattr(item, "to_dict") else dict(item)
                 for item in self.confirmed_events
+            ],
+            "candidate_events": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.candidate_events
             ],
             "battle_timeline": (
                 self.battle_timeline.to_dict()

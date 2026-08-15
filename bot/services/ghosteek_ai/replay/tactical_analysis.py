@@ -268,7 +268,7 @@ class ReplayTacticalAnalyzer:
         if battle_timeline.duration_seconds > 0:
             know.append(f"replay duration ≈ {round(battle_timeline.duration_seconds, 1)}s")
         if any(e.event_type == EVENT_BATTLE_STARTED for e in confirmed):
-            know.append("battle_started confirmed")
+            know.append("battle_start confirmed")
         if any(e.event_type in {EVENT_RESULT_VISIBLE, EVENT_BATTLE_ENDED} for e in confirmed):
             know.append("result/ending markers confirmed")
         if any(e.event_type == EVENT_OVERTIME_STARTED for e in confirmed):

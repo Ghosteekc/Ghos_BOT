@@ -12,9 +12,21 @@ from bot.services.ghosteek_ai.replay.card_recognizer import (
 from bot.services.ghosteek_ai.replay.cycle import ReplayCycleState
 from bot.services.ghosteek_ai.replay.elixir import ElixirObservation
 from bot.services.ghosteek_ai.replay.events import (
+    EVENT_BATTLE_START,
     EVENT_CARD_PLAY,
     EVENT_CARD_PLAY_CANDIDATE,
+    EVENT_CARD_PLAY_CONFIRMED,
     ReplayEvent,
+)
+
+LIMITATION_CARD_PLAY_UNCONFIRMED = (
+    "Exact card-play events are not confirmed for most sampled frames."
+)
+LIMITATION_NO_CARD_IDENTITY = (
+    "Specific card identities are not confirmed from sampled frames."
+)
+LIMITATION_NO_EVIDENCE = (
+    "Grounded gameplay events require visual evidence from sampled frames."
 )
 from bot.services.ghosteek_ai.replay.game_state import GameStateObservation
 from bot.services.ghosteek_ai.replay.models import (
@@ -64,6 +76,7 @@ class ReplayFactsBuilder:
         ambiguous_cards: Sequence[AmbiguousCardObservation] | None = None,
         events: Sequence[ReplayEvent] | None = None,
         confirmed_events: Sequence[ReplayEvent] | None = None,
+        candidate_events: Sequence[ReplayEvent] | None = None,
         battle_timeline: ReplayBattleTimeline | None = None,
         tactical_analysis: ReplayTacticalAnalysis | None = None,
         coach_reply: str | None = None,
@@ -84,10 +97,17 @@ class ReplayFactsBuilder:
         ambiguous = list(ambiguous_cards or ())
         all_events = list(events or ())
         confirmed_only = list(confirmed_events or ())
+        candidates_only = list(candidate_events or ())
+        if not candidates_only:
+            candidates_only = [
+                e for e in all_events if e.event_type == EVENT_CARD_PLAY_CANDIDATE
+            ]
         game_states = list(game_state_observations or ())
         elixir = list(elixir_observations or ())
 
-        limitations = _limitations_for(all_events, confirmed_only, cards, elixir)
+        limitations = _limitations_for(
+            all_events, confirmed_only, candidates_only, cards, elixir
+        )
         confirmed_bits, uncertain_bits, unavailable_bits = _availability(
             confirmed_only=confirmed_only,
             all_events=all_events,
@@ -109,6 +129,7 @@ class ReplayFactsBuilder:
             ambiguous_cards=ambiguous,
             events=all_events,
             confirmed_events=confirmed_only,
+            candidate_events=candidates_only,
             battle_timeline=battle_timeline,
             tactical_analysis=tactical_analysis,
             coach_reply=coach_reply,
@@ -162,16 +183,36 @@ def _looks_invented(text: str) -> bool:
 def _limitations_for(
     events: Sequence[ReplayEvent],
     confirmed: Sequence[ReplayEvent],
+    candidates: Sequence[ReplayEvent],
     cards: Sequence[ConfirmedCardFact],
     elixir: Sequence[ElixirObservation],
 ) -> list[str]:
     out = list(DEFAULT_LIMITATIONS)
-    has_candidate = any(e.event_type == EVENT_CARD_PLAY_CANDIDATE for e in events)
-    has_play = any(e.event_type == EVENT_CARD_PLAY for e in confirmed)
+    has_candidate = any(e.event_type == EVENT_CARD_PLAY_CANDIDATE for e in candidates) or any(
+        e.event_type == EVENT_CARD_PLAY_CANDIDATE for e in events
+    )
+    has_play = any(
+        e.event_type in {EVENT_CARD_PLAY, EVENT_CARD_PLAY_CONFIRMED} for e in confirmed
+    )
     if has_play:
-        out = [x for x in out if x not in {"card_play_events_not_detected", "card_play_events_not_confirmed"}]
+        out = [
+            x
+            for x in out
+            if x not in {"card_play_events_not_detected", "card_play_events_not_confirmed"}
+        ]
     elif has_candidate:
         out = [x for x in out if x != "card_play_events_not_detected"]
+        if LIMITATION_CARD_PLAY_UNCONFIRMED not in out:
+            out.append(LIMITATION_CARD_PLAY_UNCONFIRMED)
+    else:
+        if LIMITATION_CARD_PLAY_UNCONFIRMED not in out:
+            out.append(LIMITATION_CARD_PLAY_UNCONFIRMED)
+    if not cards:
+        if LIMITATION_NO_CARD_IDENTITY not in out:
+            out.append(LIMITATION_NO_CARD_IDENTITY)
+    if not events and not confirmed and not candidates:
+        if LIMITATION_NO_EVIDENCE not in out:
+            out.append(LIMITATION_NO_EVIDENCE)
     if cards:
         if len(cards) < 8:
             # Keep deck_identity_not_confirmed — partial card set is not a deck.
@@ -203,12 +244,18 @@ def _availability(
 
     if cards:
         confirmed_bits.append(f"confirmed_cards:{len(cards)}")
-    if any(e.event_type == EVENT_CARD_PLAY for e in confirmed_only):
-        n = sum(1 for e in confirmed_only if e.event_type == EVENT_CARD_PLAY)
+    if any(
+        e.event_type in {EVENT_CARD_PLAY, EVENT_CARD_PLAY_CONFIRMED} for e in confirmed_only
+    ):
+        n = sum(
+            1
+            for e in confirmed_only
+            if e.event_type in {EVENT_CARD_PLAY, EVENT_CARD_PLAY_CONFIRMED}
+        )
         confirmed_bits.append(f"confirmed_card_play:{n}")
         unavailable_bits = [x for x in unavailable_bits if x != "confirmed card plays"]
-    if any(e.event_type == "battle_started" for e in confirmed_only):
-        confirmed_bits.append("battle_started")
+    if any(e.event_type == EVENT_BATTLE_START for e in confirmed_only):
+        confirmed_bits.append("battle_start")
 
     if any(e.event_type == EVENT_CARD_PLAY_CANDIDATE for e in all_events):
         uncertain_bits.append("card_play_candidate")

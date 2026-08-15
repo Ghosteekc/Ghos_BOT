@@ -918,10 +918,12 @@ class ReplayEventEvidenceResponse(BaseModel):
 class ReplayEventResponse(BaseModel):
     timestamp_seconds: float
     event_type: str
-    player: str
+    player: str = "unknown"
     card_id: str | None = None
     confidence: float
     source: str = "heuristic"
+    evidence_frame_indexes: list[int] = Field(default_factory=list)
+    details: dict = Field(default_factory=dict)
     evidence: ReplayEventEvidenceResponse = Field(default_factory=ReplayEventEvidenceResponse)
 
 
@@ -990,6 +992,7 @@ class ReplayFactsResponse(BaseModel):
     ambiguous_cards: list[ReplayAmbiguousCardResponse] = Field(default_factory=list)
     events: list[ReplayEventResponse] = Field(default_factory=list)
     confirmed_events: list[ReplayEventResponse] = Field(default_factory=list)
+    candidate_events: list[ReplayEventResponse] = Field(default_factory=list)
     battle_timeline: ReplayBattleTimelineResponse | None = None
     tactical_analysis: ReplayTacticalAnalysisResponse | None = None
     coach_reply: str | None = None

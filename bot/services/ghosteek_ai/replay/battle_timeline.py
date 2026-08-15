@@ -36,6 +36,11 @@ _EVENT_SORT_RANK = {
     EVENT_OVERTIME_STARTED: 4,
     EVENT_RESULT_VISIBLE: 5,
     EVENT_BATTLE_ENDED: 6,
+    "card_bar_visible": 7,
+    "battle_ui_visible": 8,
+    "arena_visible": 9,
+    "elixir_hud_visible": 10,
+    "unknown": 11,
 }
 
 _UNKNOWN_GAP_SECONDS = 2.0

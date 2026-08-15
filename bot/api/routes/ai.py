@@ -155,6 +155,11 @@ async def analyze_replay(
                 for item in (payload.get("confirmed_events") or [])
                 if isinstance(item, dict)
             ],
+            candidate_events=[
+                ReplayEventResponse(**item)
+                for item in (payload.get("candidate_events") or [])
+                if isinstance(item, dict)
+            ],
             battle_timeline=(
                 ReplayBattleTimelineResponse.model_validate(payload["battle_timeline"])
                 if isinstance(payload.get("battle_timeline"), dict)
