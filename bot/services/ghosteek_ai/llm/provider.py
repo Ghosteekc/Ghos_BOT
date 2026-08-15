@@ -63,7 +63,9 @@ class LLMProvider(ABC):
         ...
 
     def capabilities(self) -> LLMCapabilities:
-        return LLMCapabilities(tools=self.supports_tools(), stream=self.supports_stream())
+        from bot.services.ghosteek_ai.llm.runtime_capabilities import capabilities_from_config
+
+        return capabilities_from_config(self.config)
 
     def _normalize_request(
         self,
@@ -99,16 +101,27 @@ class LLMProvider(ABC):
 
 
 def ollama_config_from_settings() -> LLMConfig:
+    """Конфиг локального Ollama из OLLAMA_* (независим от LLM_* cloud)."""
     from bot.config import settings
 
+    # Defaults aligned with bot.config.Settings (do not raise for "quality").
+    num_predict = int(getattr(settings, "ollama_num_predict", 220) or 220)
+    num_ctx = int(getattr(settings, "ollama_num_ctx", 2048) or 2048)
+    think = bool(getattr(settings, "ollama_think", False))
     return LLMConfig(
         provider="ollama",
-        model=(settings.ollama_model or "llama3.2").strip(),
+        model=(settings.ollama_model or "qwen3:8b").strip(),
         base_url=(settings.ollama_url or "http://127.0.0.1:11434").rstrip("/"),
-        temperature=0.3,
-        max_tokens=1024,
-        timeout_seconds=float(settings.ollama_timeout or 60.0),
-        extra={"enable_tools": bool(getattr(settings, "ollama_enable_tools", True))},
+        temperature=float(getattr(settings, "ollama_temperature", 0.4) or 0.4),
+        max_tokens=num_predict,
+        timeout_seconds=float(settings.ollama_timeout or 120.0),
+        extra={
+            "enable_tools": bool(getattr(settings, "ollama_enable_tools", False)),
+            "num_ctx": num_ctx,
+            "num_predict": num_predict,
+            # Top-level /api/chat field (NOT options.think — ignored by Ollama).
+            "think": think,
+        },
     )
 
 
@@ -127,7 +140,7 @@ def qwen_config_from_settings() -> LLMConfig:
         model=(settings.llm_model or "qwen3-235b-a22b-thinking-2507").strip(),
         base_url=base_url,
         api_key=(settings.llm_api_key or "").strip(),
-        temperature=0.3,
+        temperature=float(getattr(settings, "llm_temperature", 0.3) or 0.3),
         max_tokens=int(getattr(settings, "llm_max_tokens", 512) or 512),
         timeout_seconds=float(getattr(settings, "llm_timeout", 90.0) or 90.0),
         extra={
@@ -211,7 +224,12 @@ def _messages_for_ollama(messages: list[ChatMessage]) -> list[dict[str, Any]]:
 
 
 class OllamaProvider(LLMProvider):
-    """Ollama REST POST /api/chat (aiohttp), с optional tool calling."""
+    """Ollama REST POST /api/chat (aiohttp), с optional tool calling.
+
+    Session lifecycle: одна ``aiohttp.ClientSession`` на экземпляр провайдера
+    (reuse между generate/stream в одном agent/planner вызове). Не глобальная.
+    Закрывается через ``await provider.close()``.
+    """
 
     name = "ollama"
 
@@ -219,13 +237,22 @@ class OllamaProvider(LLMProvider):
         cfg = config or ollama_config_from_settings()
         super().__init__(cfg)
         self._parser = ResponseParser()
+        self._session: aiohttp.ClientSession | None = None
+        # Emit conflict warning early when ENABLE_TOOLS clashes with renderer-first profile.
+        _ = self.capabilities()
 
     def _client_timeout(self) -> aiohttp.ClientTimeout:
-        return aiohttp.ClientTimeout(total=float(self.config.timeout_seconds or 60.0))
+        return aiohttp.ClientTimeout(total=float(self.config.timeout_seconds or 120.0))
 
     def _chat_url(self) -> str:
         base = (self.config.base_url or "http://127.0.0.1:11434").rstrip("/")
         return f"{base}/api/chat"
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Lazy shared session for this provider instance."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(timeout=self._client_timeout())
+        return self._session
 
     def _payload(
         self,
@@ -233,7 +260,7 @@ class OllamaProvider(LLMProvider):
         *,
         stream: bool,
     ) -> dict[str, Any]:
-        model = (req.model or self.config.model or "llama3.2").strip()
+        model = (req.model or self.config.model or "qwen3:8b").strip()
         body: dict[str, Any] = {
             "model": model,
             "messages": _messages_for_ollama(list(req.messages)),
@@ -241,13 +268,35 @@ class OllamaProvider(LLMProvider):
         }
         if req.tools and self.supports_tools():
             body["tools"] = list(req.tools)
+
+        # Generation options — только из config / request (не хардкод в нескольких местах).
+        temperature = req.temperature if req.temperature is not None else self.config.temperature
+        num_predict = req.max_tokens if req.max_tokens is not None else self.config.max_tokens
+        num_ctx = None
+        if isinstance(req.extra, dict) and req.extra.get("num_ctx") is not None:
+            num_ctx = int(req.extra["num_ctx"])
+        elif self.config.extra.get("num_ctx") is not None:
+            num_ctx = int(self.config.extra["num_ctx"])
+
         options: dict[str, Any] = {}
-        if req.temperature is not None:
-            options["temperature"] = float(req.temperature)
-        if req.max_tokens is not None:
-            options["num_predict"] = int(req.max_tokens)
+        if temperature is not None:
+            options["temperature"] = float(temperature)
+        if num_predict is not None:
+            options["num_predict"] = int(num_predict)
+        if num_ctx is not None:
+            options["num_ctx"] = int(num_ctx)
         if options:
             body["options"] = options
+
+        # Qwen3 thinking: top-level "think" (NOT options.think — Ollama ignores that).
+        think = None
+        if isinstance(req.extra, dict) and "think" in req.extra:
+            think = req.extra.get("think")
+        elif "think" in self.config.extra:
+            think = self.config.extra.get("think")
+        if think is not None:
+            body["think"] = bool(think)
+
         return body
 
     async def generate(
@@ -259,34 +308,68 @@ class OllamaProvider(LLMProvider):
     ) -> LLMGenerateResult:
         req = self._normalize_request(messages, tools=tools, **kwargs)
         url = self._chat_url()
-        payload = self._payload(req, stream=False)
-
         try:
-            async with aiohttp.ClientSession(timeout=self._client_timeout()) as session:
-                async with session.post(url, json=payload) as resp:
-                    raw_text = await resp.text()
-                    if resp.status >= 400:
-                        raise ProviderError(
-                            f"Ollama HTTP {resp.status} at {url}: {raw_text[:300]}",
-                            code="OLLAMA_HTTP_ERROR",
-                            details={"status": resp.status, "body": raw_text[:2000]},
-                        )
-                    try:
-                        data = json.loads(raw_text) if raw_text else {}
-                    except json.JSONDecodeError as exc:
-                        raise ProviderError(
-                            f"Ollama returned non-JSON response: {raw_text[:200]}",
-                            code="OLLAMA_NON_JSON",
-                        ) from exc
+            payload = self._payload(req, stream=False)
+        except Exception as exc:
+            raise ProviderError(
+                f"Failed to build Ollama request: {exc}",
+                code="OLLAMA_REQUEST_BUILD_ERROR",
+                details={"error": str(exc)[:400]},
+            ) from exc
+
+        raw_text = ""
+        status = 0
+        try:
+            session = await self._get_session()
+            async with session.post(url, json=payload) as resp:
+                status = int(resp.status)
+                raw_text = await resp.text()
+                if status >= 400:
+                    raise ProviderError(
+                        f"Ollama HTTP {status} at {url}: {(raw_text or '')[:300]}",
+                        code="OLLAMA_HTTP_ERROR",
+                        details={"status": status, "url": url, "body": (raw_text or "")[:2000]},
+                    )
+                try:
+                    data = json.loads(raw_text) if raw_text else {}
+                except json.JSONDecodeError as exc:
+                    raise ProviderError(
+                        f"Ollama returned non-JSON response: {(raw_text or '')[:200]}",
+                        code="OLLAMA_NON_JSON",
+                        details={"status": status, "body": (raw_text or "")[:2000]},
+                    ) from exc
         except ProviderError:
             raise
-        except aiohttp.ClientError as exc:
+        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             raise ProviderError(
                 f"Ollama connection error: {exc}",
                 code="OLLAMA_CONNECTION_ERROR",
+                details={"url": url, "error": str(exc)[:400]},
+            ) from exc
+        except Exception as exc:
+            raise ProviderError(
+                f"Ollama request failed: {exc}",
+                code="OLLAMA_REQUEST_ERROR",
+                details={"url": url, "error": str(exc)[:400]},
             ) from exc
 
-        parsed = self._parser.parse(data if isinstance(data, dict) else {})
+        if not isinstance(data, dict):
+            raise ProviderError(
+                "Ollama returned unexpected payload type",
+                code="OLLAMA_BAD_PAYLOAD",
+                details={"type": type(data).__name__},
+            )
+
+        if data.get("error"):
+            err = data["error"]
+            msg = err if isinstance(err, str) else str(err)
+            raise ProviderError(
+                f"Ollama API error: {msg}",
+                code="OLLAMA_API_ERROR",
+                details={"error": err},
+            )
+
+        parsed = self._parser.parse(data)
         # reasoning ≠ ответ игроку; usable = content | tools | reasoning (для retry)
         if not (
             parsed.has_tool_calls
@@ -296,6 +379,10 @@ class OllamaProvider(LLMProvider):
             raise ProviderError(
                 "Ollama returned empty message content",
                 code="OLLAMA_EMPTY_CONTENT",
+                details={
+                    "model": parsed.model or payload.get("model"),
+                    "think": payload.get("think"),
+                },
             )
         parsed.model = parsed.model or payload.get("model")
         return parsed
@@ -313,48 +400,65 @@ class OllamaProvider(LLMProvider):
         payload.pop("tools", None)
 
         try:
-            async with aiohttp.ClientSession(timeout=self._client_timeout()) as session:
-                async with session.post(url, json=payload) as resp:
-                    if resp.status >= 400:
-                        body = await resp.text()
-                        raise ProviderError(
-                            f"Ollama HTTP {resp.status} at {url}: {body[:300]}",
-                            code="OLLAMA_HTTP_ERROR",
-                        )
-                    async for raw_line in resp.content:
-                        line = raw_line.decode("utf-8", errors="ignore").strip()
-                        if not line:
-                            continue
-                        try:
-                            chunk = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        if not isinstance(chunk, dict):
-                            continue
-                        message = chunk.get("message")
-                        if isinstance(message, dict):
-                            piece = message.get("content")
-                            if isinstance(piece, str) and piece:
-                                yield piece
-                        alt = chunk.get("response")
-                        if isinstance(alt, str) and alt and not isinstance(message, dict):
-                            yield alt
+            session = await self._get_session()
+            async with session.post(url, json=payload) as resp:
+                if resp.status >= 400:
+                    body = await resp.text()
+                    raise ProviderError(
+                        f"Ollama HTTP {resp.status} at {url}: {body[:300]}",
+                        code="OLLAMA_HTTP_ERROR",
+                        details={"status": int(resp.status), "body": body[:2000]},
+                    )
+                async for raw_line in resp.content:
+                    line = raw_line.decode("utf-8", errors="ignore").strip()
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(chunk, dict):
+                        continue
+                    message = chunk.get("message")
+                    if isinstance(message, dict):
+                        piece = message.get("content")
+                        if isinstance(piece, str) and piece:
+                            yield piece
+                    alt = chunk.get("response")
+                    if isinstance(alt, str) and alt and not isinstance(message, dict):
+                        yield alt
         except ProviderError:
             raise
-        except aiohttp.ClientError as exc:
+        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             raise ProviderError(
                 f"Ollama stream connection error: {exc}",
                 code="OLLAMA_CONNECTION_ERROR",
+                details={"url": url, "error": str(exc)[:400]},
             ) from exc
 
     def supports_tools(self) -> bool:
-        return bool(self.config.extra.get("enable_tools", True))
+        # Renderer-first local profiles force False even if enable_tools=true.
+        return bool(self.capabilities().tools)
 
     def supports_stream(self) -> bool:
         return True
 
+    def capabilities(self) -> LLMCapabilities:
+        from bot.services.ghosteek_ai.llm.runtime_capabilities import (
+            resolve_local_ollama_capabilities,
+        )
+
+        return resolve_local_ollama_capabilities(
+            self.config.model,
+            enable_tools_config=bool(self.config.extra.get("enable_tools", False)),
+            extra=dict(self.config.extra or {}),
+        )
+
     async def close(self) -> None:
-        return None
+        session = self._session
+        self._session = None
+        if session is not None and not session.closed:
+            await session.close()
 
 
 class QwenLLMProvider(LLMProvider):
@@ -614,10 +718,17 @@ class QwenLLMProvider(LLMProvider):
             yield ""
 
     def supports_tools(self) -> bool:
-        return bool(self.config.extra.get("enable_tools", True))
+        return bool(self.capabilities().tools)
 
     def supports_stream(self) -> bool:
         return False
+
+    def capabilities(self) -> LLMCapabilities:
+        from bot.services.ghosteek_ai.llm.runtime_capabilities import resolve_cloud_capabilities
+
+        return resolve_cloud_capabilities(
+            enable_tools=bool(self.config.extra.get("enable_tools", True)),
+        )
 
     async def close(self) -> None:
         # Per-request sessions — нечего закрывать; метод для контракта LLMProvider.

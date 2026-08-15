@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from bot.api.routes import ai as ai_routes
 from bot.api.schemas import GhosteekAiAskRequest
 from bot.services.ghosteek_ai.models import GhosteekAiResponse
-from bot.services.ghosteek_ai.replay.models import ReplayDetection
+from bot.services.ghosteek_ai.replay.models import DetectionBundle, ReplayDetection
 from bot.services.ghosteek_ai.replay.service import ReplayAnalyzeService
 from bot.services.ghosteek_ai.replay.validator import CODE_INVALID_FORMAT
 
@@ -48,7 +48,7 @@ def _call_analyze(monkeypatch, detection: ReplayDetection, filename: str = "batt
     monkeypatch.setattr(
         ReplayAnalyzeService,
         "_run_detection",
-        lambda self, *args, **kwargs: detection,
+        lambda self, *args, **kwargs: DetectionBundle(detection=detection, frames=()),
     )
     monkeypatch.setattr(ai_routes, "get_replay_service", lambda: service)
 

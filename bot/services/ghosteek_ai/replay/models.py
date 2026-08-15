@@ -102,6 +102,145 @@ class ReplayDetection:
         }
 
 
+# --- Stage 4: timeline + facts (no LLM, no card/event invention) ---
+
+OBS_GAMEPLAY_SCREEN = "gameplay_screen"
+OBS_ARENA_VISIBLE = "arena_visible"
+OBS_CARD_BAR_VISIBLE = "card_bar_visible"
+OBS_ELIXIR_HUD_VISIBLE = "elixir_hud_visible"
+OBS_BATTLE_UI_VISIBLE = "battle_ui_visible"
+OBS_RESULT_SCREEN = "result_screen"
+OBS_UNKNOWN = "unknown"
+
+OBSERVATION_TYPES = frozenset(
+    {
+        OBS_GAMEPLAY_SCREEN,
+        OBS_ARENA_VISIBLE,
+        OBS_CARD_BAR_VISIBLE,
+        OBS_ELIXIR_HUD_VISIBLE,
+        OBS_BATTLE_UI_VISIBLE,
+        OBS_RESULT_SCREEN,
+        OBS_UNKNOWN,
+    }
+)
+
+SIGNAL_TO_OBSERVATION = {
+    "gameplay_region": OBS_GAMEPLAY_SCREEN,
+    "arena_layout": OBS_ARENA_VISIBLE,
+    "card_bar": OBS_CARD_BAR_VISIBLE,
+    "elixir_hud": OBS_ELIXIR_HUD_VISIBLE,
+    "mobile_aspect": OBS_BATTLE_UI_VISIBLE,
+}
+
+DEFAULT_LIMITATIONS = (
+    "card_play_events_not_detected",
+    "card_play_events_not_confirmed",
+    "exact_card_timing_unavailable",
+    "elixir_values_not_extracted",
+    "damage_events_not_detected",
+    "deck_identity_not_confirmed",
+)
+
+SOURCE_HEURISTIC = "heuristic"
+
+
+@dataclass(frozen=True)
+class FrameSignalSnapshot:
+    frame_index: int
+    timestamp: float
+    score: float
+    signals: tuple[HeuristicSignal, ...] = ()
+
+
+@dataclass(frozen=True)
+class DetectionBundle:
+    detection: ReplayDetection
+    frames: tuple[FrameSignalSnapshot, ...] = ()
+    confirmed_card_observations: tuple = ()
+    ambiguous_card_observations: tuple = ()
+
+
+@dataclass(frozen=True)
+class TimelineObservation:
+    timestamp_seconds: float
+    frame_index: int
+    observation_type: str
+    confidence: float
+    source: str = SOURCE_HEURISTIC
+
+    def __post_init__(self) -> None:
+        if self.observation_type not in OBSERVATION_TYPES:
+            raise ValueError(f"unknown observation_type: {self.observation_type}")
+
+    def to_dict(self) -> dict:
+        return {
+            "timestamp_seconds": round(float(self.timestamp_seconds), 3),
+            "frame_index": int(self.frame_index),
+            "observation_type": self.observation_type,
+            "confidence": round(float(self.confidence), 4),
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True)
+class ReplayAnalysisResult:
+    status: str
+    confidence: float
+    duration_seconds: float
+    frames_analyzed: int
+    timeline: list[TimelineObservation] = field(default_factory=list)
+    facts: list[str] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
+    confirmed_cards: list = field(default_factory=list)
+    ambiguous_cards: list = field(default_factory=list)
+    events: list = field(default_factory=list)
+    confirmed_events: list = field(default_factory=list)
+    battle_timeline: object | None = None
+    tactical_analysis: object | None = None
+    coach_reply: str | None = None
+    coach_source: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "source": "replay_analysis",
+            "replay_status": self.status,
+            "confidence": round(float(self.confidence), 4),
+            "duration_seconds": round(float(self.duration_seconds), 3),
+            "frames_analyzed": int(self.frames_analyzed),
+            "timeline": [item.to_dict() for item in self.timeline],
+            "facts": list(self.facts),
+            "limitations": list(self.limitations),
+            "confirmed_cards": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.confirmed_cards
+            ],
+            "ambiguous_cards": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.ambiguous_cards
+            ],
+            "events": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.events
+            ],
+            "confirmed_events": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.confirmed_events
+            ],
+            "battle_timeline": (
+                self.battle_timeline.to_dict()
+                if self.battle_timeline is not None and hasattr(self.battle_timeline, "to_dict")
+                else None
+            ),
+            "tactical_analysis": (
+                self.tactical_analysis.to_dict()
+                if self.tactical_analysis is not None and hasattr(self.tactical_analysis, "to_dict")
+                else None
+            ),
+            "coach_reply": self.coach_reply,
+            "coach_source": self.coach_source,
+        }
+
+
 @dataclass(frozen=True)
 class ReplayAnalyzeOutcome:
     filename: str
@@ -112,3 +251,4 @@ class ReplayAnalyzeOutcome:
     height: int
     fps: float | None
     detection: ReplayDetection
+    analysis: ReplayAnalysisResult | None = None

@@ -27,6 +27,11 @@ from bot.services.deck_builder.constants import (
     ROLE_SMALL_SPELL,
     ROLE_SPLASH,
 )
+from bot.services.deck_builder.constraint_messages import (
+    GOOD_DECK_MIN_TOTAL,
+    HARD_MESSAGES,
+    SOFT_MESSAGES,
+)
 from bot.services.deck_builder.loader import DeckDatabase, get_database
 from bot.services.deck_builder.win_plan_check import evaluate_win_plan
 from bot.services.deck_evaluator.models import (
@@ -39,29 +44,6 @@ from bot.services.deck_game_plan import build_game_plan
 from bot.services.deck_intent import DeckIntentEngine
 from bot.services.deck_synergy import evaluate_deck_synergy
 from bot.services.elixir_efficiency import analyze_elixir_efficiency
-
-_HARD_MESSAGES: dict[str, str] = {
-    "deck_size": "Колода должна содержать ровно 8 карт",
-    "duplicate_cards": "В колоде есть одинаковые карты",
-    "missing_core": "В колоде нет всех выбранных ключевых карт",
-    "win_condition": "Нет понятной главной угрозы для башни",
-    "too_many_wins": (
-        "В колоде несколько главных угроз башне — атаки размываются. "
-        "Оставьте одну основную win condition"
-    ),
-    "too_many_spells": "Слишком много заклинаний — мало юнитов для защиты и пуша",
-}
-
-_SOFT_MESSAGES: dict[str, str] = {
-    "big_spell": "Нет большого заклинания для добивания / защиты",
-    "small_spell": "Нет малого заклинания для цикла и контроля спама",
-    "air_defense": "Недостаточно ответов на воздух (Balloon / Lava)",
-    "anti_tank": "Слабый ответ на тяжёлые танки",
-    "anti_swarm": "Слабая защита от спама",
-    "building": "Нет здания при осадном / контрольном плане",
-    "cycle": "Мало дешёвых карт цикла — сложнее возвращать ключевые карты",
-    "elixir": "Средний эликсир вне комфортного диапазона для этого стиля",
-}
 
 _WIN_PLAN_LABELS: dict[str, str] = {
     "primary_win": "Нет явной главной угрозы для башни",
@@ -99,10 +81,10 @@ def _constraint_score(issues: list[str], *, hard: bool) -> ConstraintScore:
     n = len(issues)
     if hard:
         score = 100.0 if n == 0 else max(0.0, 100.0 - n * 28.0)
-        table = _HARD_MESSAGES
+        table = HARD_MESSAGES
     else:
         score = 100.0 if n == 0 else max(0.0, 100.0 - n * 14.0)
-        table = _SOFT_MESSAGES
+        table = SOFT_MESSAGES
     return ConstraintScore(
         passed=n == 0,
         score=_clamp(score),
@@ -199,7 +181,7 @@ def _cycle_quality_axis(
         score += 8.0
     notes: list[str] = []
     if "cycle" in soft_issues:
-        notes.append(_SOFT_MESSAGES["cycle"])
+        notes.append(SOFT_MESSAGES["cycle"])
     elif cycle_n + cheap >= 3:
         notes.append("Достаточно карт для быстрого цикла")
     return AxisScore(
@@ -383,8 +365,8 @@ def _compose_total(
         total = min(total, 68.0)
         total -= 4.0 * len(soft_hard)
     # Пригодная колода (есть primary/secondary план) не должна выглядеть как 34/100.
-    if not structural and total < 52.0 and win_plan.score >= 45.0:
-        total = max(total, 52.0)
+    if not structural and total < GOOD_DECK_MIN_TOTAL and win_plan.score >= 45.0:
+        total = max(total, GOOD_DECK_MIN_TOTAL)
     return round(_clamp(total), 1)
 
 
@@ -431,7 +413,7 @@ def _strengths_weaknesses(
         raw_weak.extend(n for n in matchup_coverage.notes if n)
 
     structural = bool(set(hard.issues) & _STRUCTURAL_HARD)
-    deck_playable = (not structural) and total_score >= 52.0
+    deck_playable = (not structural) and total_score >= GOOD_DECK_MIN_TOTAL
     remarks = build_player_remarks(
         strengths=strengths,
         improvements=raw_weak,
@@ -497,8 +479,8 @@ class DeckEvaluator:
             },
             notes=tuple(
                 m for key, m in (
-                    ("big_spell", _SOFT_MESSAGES["big_spell"]),
-                    ("small_spell", _SOFT_MESSAGES["small_spell"]),
+                    ("big_spell", SOFT_MESSAGES["big_spell"]),
+                    ("small_spell", SOFT_MESSAGES["small_spell"]),
                 )
                 if key in soft.issues
             ),

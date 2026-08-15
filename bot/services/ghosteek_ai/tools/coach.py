@@ -61,7 +61,10 @@ class GameCoachTool(BaseTool):
                     data={"archetype": arch_name, "opponent_deck": opp_deck},
                     actions=[{"type": "navigate", "path": "/decks/compare"}],
                 )
-            evaluation = evaluate_matchup(user_deck[:8], opp_deck)
+            from bot.services.deck_builder.quality import evaluate_deck
+
+            matchup = evaluate_matchup(user_deck[:8], opp_deck)
+            deck_report = evaluate_deck(user_deck[:8], opponent=opp_deck)
             return ToolResult(
                 tool=self.name,
                 ok=True,
@@ -70,11 +73,12 @@ class GameCoachTool(BaseTool):
                     "archetype": arch_name,
                     "user_deck": user_deck[:8],
                     "opponent_deck": opp_deck,
-                    "score": evaluation.score,
-                    "rating": evaluation.rating,
-                    "reasons": evaluation.reasons,
-                    "advantages": evaluation.advantages,
-                    "disadvantages": evaluation.disadvantages,
+                    "score": matchup.score,
+                    "rating": matchup.rating,
+                    "reasons": matchup.reasons,
+                    "advantages": matchup.advantages,
+                    "disadvantages": matchup.disadvantages,
+                    "evaluation_report": deck_report.to_dict(),
                     "tips": [
                         "Оценка — по эталонной колоде этого архетипа.",
                         "Свой последний бой с таким соперником разберём отдельно.",

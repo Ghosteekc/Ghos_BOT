@@ -41,17 +41,26 @@ class Settings(BaseSettings):
     meta_top_players_scan: int = 20
     meta_seed_tags: str = ""
 
-    # Ghosteek AI response backend: qwen | ollama | template
+    # Ghosteek AI response backend: qwen | groq | ollama | template
     # LLM errors fall back to TemplateGenerator automatically.
     ghosteek_ai_backend: str = "qwen"
     # auto = agent if provider.supports_tools() else planner
     # agent = LLM Tool Calling (Planner = recommendation only)
-    # planner = legacy INTENT_TOOL_MAP → ToolCaller → LLM/template text
+    # planner = INTENT_TOOL_MAP → ToolCaller → LLM/template text
     ghosteek_ai_mode: str = "auto"
+
+    # Local Ollama backend (native /api/chat). Independent from LLM_* cloud settings.
     ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "llama3.2"
-    ollama_timeout: float = 60.0
-    ollama_enable_tools: bool = True
+    ollama_model: str = "qwen3:8b"
+    ollama_timeout: float = 120.0
+    # Local renderer: чуть живее голос; grounding держит FACTS + validator.
+    ollama_temperature: float = 0.4
+    ollama_num_predict: int = 220
+    ollama_num_ctx: int = 2048
+    # Top-level /api/chat "think" (Qwen3). False = prevent thinking generation.
+    ollama_think: bool = False
+    # Tool calling via Ollama — off by default for qwen3:8b (use planner path).
+    ollama_enable_tools: bool = False
 
     # OpenAI-compatible LLM (Qwen / DashScope compatible-mode, etc.)
     llm_api_key: str = ""
@@ -60,6 +69,7 @@ class Settings(BaseSettings):
     llm_timeout: float = 90.0
     # Лимит completion tokens — компактные ответы тренера
     llm_max_tokens: int = 512
+    llm_temperature: float = 0.3
 
 
 settings = Settings()
@@ -82,6 +92,19 @@ if not settings.bot_token or settings.bot_token == "your_telegram_bot_token":
 
 if not settings.clash_royale_api_key or settings.clash_royale_api_key == "your_clash_royale_api_key":
     logger.warning("CLASH_ROYALE_API_KEY is not set or uses default value. API calls will fail.")
+
+# Ghosteek AI — backend/mode only (no API keys / prompts / user data).
+logger.info(
+    "Ghosteek AI config backend=%s mode=%s ollama_model=%s ollama_think=%s "
+    "ollama_num_predict=%s ollama_num_ctx=%s ollama_enable_tools=%s",
+    (settings.ghosteek_ai_backend or "qwen").strip().lower(),
+    (settings.ghosteek_ai_mode or "auto").strip().lower(),
+    (settings.ollama_model or "").strip() or "-",
+    bool(settings.ollama_think),
+    int(settings.ollama_num_predict),
+    int(settings.ollama_num_ctx),
+    bool(settings.ollama_enable_tools),
+)
 
 logger.debug(f"Clash Royale API base: {settings.clash_royale_api_base}")
 logger.debug(f"Database URL: {settings.database_url}")

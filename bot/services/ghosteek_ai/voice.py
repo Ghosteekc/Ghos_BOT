@@ -11,38 +11,37 @@ from __future__ import annotations
 
 import re
 
-from bot.services.ghosteek_ai.coach_tips import pick_tip
 from bot.services.ghosteek_ai.glossary import apply_glossary
 
 # Краткая метка для API / sources
 PERSONA_NAME = "coach"
 
 PERSONA = (
-    "Ghosteek — профессиональный тренер Clash Royale. "
-    "Говорит коротко и уверенно. Без воды и без очевидных фраз. "
+    "Ghosteek — живой тренер Clash Royale. "
+    "Говорит по-человечески, коротко и по делу. Без воды и без очевидных фраз. "
     "Не дублирует то, что уже показывает UI. "
-    "Советы берёт из готовых coach tips, не выдумывает пустые."
+    "Советы только из проверенных фактов текущего запроса, не выдумывает."
 )
 
 SYSTEM_PROMPT = """Ты Ghosteek AI — опытный тренер Clash Royale.
 
 Правила:
-- Отвечай только на русском.
+- Отвечай только на русском, живо и по-человечески, на «ты».
 - Не показывай размышления, tool calls, planner, JSON, reasoning.
 - Английский — только в официальных названиях карт, если нет привычного русского.
 - Пиши: Гигант, П.Е.К.К.А, Тёмный принц, вин-кондишн, контрпуш, цикл, оверкоммит.
 - Не пиши Dark Prince / Beatdown / Prince, если есть русский аналог.
 
-Формат ответа (строго):
+Формат ответа:
 1) короткий вывод — 1 предложение
 2) короткое объяснение — 1–2 предложения
 3) один практический совет — 1 предложение
-Максимум 4 предложения. Без простыней.
+Максимум 4 предложения. Без простыней и без канцелярита.
 
 Запрещено:
 «Колода показана ниже», «Я собрал», «Я нашёл», «Попробуй другое ядро»,
 «Используй эту колоду», «Ниже», «Вот список карт», «Как видно»,
-«Как можно заметить», «Рекомендую», «Следует», «Стоит».
+«Как можно заметить».
 
 Карточки UI:
 - Если есть deck_card — не перечисляй карты и не пиши про «ниже».
@@ -62,6 +61,7 @@ WORD_LIMITS: dict[str, int] = {
     "game_coach": 90,
     "explain_mechanic": 80,
     "clarify": 70,
+    "chat": 55,
     "unsupported": 60,
     "default": 90,
 }
@@ -97,10 +97,6 @@ BANNED_PHRASES: tuple[tuple[str, str], ...] = (
     ("вот список карт", ""),
     ("как видно", ""),
     ("как можно заметить", ""),
-    ("рекомендую сыграть", ""),
-    ("рекомендую", ""),
-    ("следует", ""),
-    ("стоит ", ""),
 )
 
 _FLATTERY_RE = re.compile(
@@ -189,13 +185,14 @@ def coach_reply(
     """Короткий ответ тренера: вывод → объяснение → совет.
 
     `action` складывается в объяснение (совместимость), отдельным блоком не печатается.
-    Совет — из аргумента или готового coach_tips.json.
+    Совет — только явный `tip` из ToolResult/шаблона; coach_tips.json не подмешиваем.
     """
+    del archetype  # больше не источник tip (избегаем неподтверждённых фактов)
     v = (verdict or "").strip()
     explanation = " ".join(
         p.strip() for p in (why, action) if p and str(p).strip()
     ).strip()
-    tip_text = (tip or "").strip() or pick_tip(archetype, seed=v or explanation)
+    tip_text = (tip or "").strip()
 
     blocks: list[str] = []
     if v:
@@ -273,12 +270,13 @@ def assert_coach_voice(text: str) -> str:
 
 
 def ensure_coach_ending(text: str, *, tip: str = "", archetype: str | None = None) -> str:
-    """Если ответа нет — короткий fallback. Не дописываем воду к готовым ответам."""
+    """Если ответа нет — короткий fallback. Не дописываем coach_tips.json."""
+    del archetype
     raw = assert_coach_voice(text)
     if not raw:
         return coach_reply(
             "Нужен чуть более конкретный вопрос.",
-            tip=tip or pick_tip(archetype),
+            tip=tip or "",
             intent="clarify",
         )
     # Уже короткий ответ тренера — не раздуваем

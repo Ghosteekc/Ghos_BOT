@@ -1,4 +1,4 @@
-"""Replay validation + Stage 3 HUD detection. Single-flight lock, temp cleanup."""
+"""Replay validation + Stage 3–7 detection/timeline/facts/cards/coach. Single-flight lock."""
 
 from __future__ import annotations
 
@@ -6,12 +6,33 @@ import logging
 import os
 import tempfile
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path
 
+from bot.services.ghosteek_ai.replay.battle_timeline import ReplayBattleTimelineBuilder
+from bot.services.ghosteek_ai.replay.card_recognizer import (
+    AmbiguousCardObservation,
+    ConfirmedCardObservation,
+    HeuristicCardRecognizer,
+    ReplayCardRecognizer,
+    group_confirmed_cards,
+)
+from bot.services.ghosteek_ai.replay.coach_renderer import ReplayCoachRenderer
 from bot.services.ghosteek_ai.replay.compressor import compress_replay_video
+from bot.services.ghosteek_ai.replay.events import ReplayEventDetector
+from bot.services.ghosteek_ai.replay.facts import ReplayFactsBuilder
 from bot.services.ghosteek_ai.replay.hud_analyzer import HeuristicHudAnalyzer
-from bot.services.ghosteek_ai.replay.models import ReplayAnalyzeOutcome, ReplayDetection
+from bot.services.ghosteek_ai.replay.models import (
+    STATUS_CR,
+    DetectionBundle,
+    FrameSignalSnapshot,
+    ReplayAnalyzeOutcome,
+    ReplayAnalysisResult,
+    ReplayDetection,
+)
 from bot.services.ghosteek_ai.replay.sampler import FrameSampler
+from bot.services.ghosteek_ai.replay.tactical_analysis import ReplayTacticalAnalyzer
+from bot.services.ghosteek_ai.replay.timeline import ReplayTimelineBuilder
 from bot.services.ghosteek_ai.replay.validator import (
     CODE_BUSY,
     CODE_FRAME_ANALYSIS_FAILED,
@@ -39,10 +60,24 @@ class ReplayAnalyzeService:
         *,
         sampler: FrameSampler | None = None,
         analyzer: HeuristicHudAnalyzer | None = None,
+        timeline_builder: ReplayTimelineBuilder | None = None,
+        facts_builder: ReplayFactsBuilder | None = None,
+        card_recognizer: ReplayCardRecognizer | None = None,
+        event_detector: ReplayEventDetector | None = None,
+        battle_timeline_builder: ReplayBattleTimelineBuilder | None = None,
+        tactical_analyzer: ReplayTacticalAnalyzer | None = None,
+        coach_renderer: ReplayCoachRenderer | None = None,
     ) -> None:
         self._busy = False
         self._sampler = sampler
         self._analyzer = analyzer
+        self._timeline_builder = timeline_builder
+        self._facts_builder = facts_builder
+        self._card_recognizer = card_recognizer
+        self._event_detector = event_detector
+        self._battle_timeline_builder = battle_timeline_builder
+        self._tactical_analyzer = tactical_analyzer
+        self._coach_renderer = coach_renderer
 
     async def validate_upload(
         self,
@@ -51,7 +86,7 @@ class ReplayAnalyzeService:
         content_type: str | None,
         read: ReadChunk,
     ) -> ReplayMeta:
-        meta, _detection = await self._run_pipeline(
+        meta, _detection, _analysis = await self._run_pipeline(
             filename=filename,
             content_type=content_type,
             read=read,
@@ -66,13 +101,15 @@ class ReplayAnalyzeService:
         content_type: str | None,
         read: ReadChunk,
     ) -> ReplayAnalyzeOutcome:
-        meta, detection = await self._run_pipeline(
+        meta, detection, analysis = await self._run_pipeline(
             filename=filename,
             content_type=content_type,
             read=read,
             detect=True,
         )
         assert detection is not None
+        if analysis is not None and detection.status == STATUS_CR:
+            analysis = await self._attach_coach(analysis)
         return ReplayAnalyzeOutcome(
             filename=meta.filename,
             mime_type=meta.mime_type,
@@ -82,6 +119,39 @@ class ReplayAnalyzeService:
             height=meta.height,
             fps=meta.fps,
             detection=detection,
+            analysis=analysis,
+        )
+
+    async def _attach_coach(self, analysis: ReplayAnalysisResult) -> ReplayAnalysisResult:
+        renderer = self._coach_renderer or ReplayCoachRenderer()
+        try:
+            result = await renderer.arender(
+                tactical=analysis.tactical_analysis,  # type: ignore[arg-type]
+                battle_timeline=analysis.battle_timeline,  # type: ignore[arg-type]
+                confirmed_cards=list(analysis.confirmed_cards),
+                confirmed_events=list(analysis.confirmed_events),
+                events=list(analysis.events),
+                limitations=list(analysis.limitations),
+            )
+        except Exception:
+            logger.exception("replay coach attach failed")
+            fallback = renderer.render_template(
+                tactical=analysis.tactical_analysis,  # type: ignore[arg-type]
+                battle_timeline=analysis.battle_timeline,  # type: ignore[arg-type]
+                confirmed_cards=list(analysis.confirmed_cards),
+                confirmed_events=list(analysis.confirmed_events),
+                events=list(analysis.events),
+                limitations=list(analysis.limitations),
+            )
+            return replace(
+                analysis,
+                coach_reply=fallback.text,
+                coach_source=fallback.source,
+            )
+        return replace(
+            analysis,
+            coach_reply=result.text,
+            coach_source=result.source,
         )
 
     async def _run_pipeline(
@@ -91,7 +161,7 @@ class ReplayAnalyzeService:
         content_type: str | None,
         read: ReadChunk,
         detect: bool,
-    ) -> tuple[ReplayMeta, ReplayDetection | None]:
+    ) -> tuple[ReplayMeta, ReplayDetection | None, ReplayAnalysisResult | None]:
         if self._busy:
             raise ReplayError(CODE_BUSY)
         self._busy = True
@@ -125,8 +195,11 @@ class ReplayAnalyzeService:
                 height=height,
                 fps=fps,
             )
-            detection = self._run_detection(working, duration, width, height) if detect else None
-            return meta, detection
+            if not detect:
+                return meta, None, None
+            bundle = self._run_detection(working, duration, width, height)
+            analysis = self._build_stage4(bundle, duration_seconds=meta.duration_seconds)
+            return meta, bundle.detection, analysis
         except ReplayError:
             raise
         except Exception:
@@ -143,36 +216,110 @@ class ReplayAnalyzeService:
         duration: float,
         width: int,
         height: int,
-    ) -> ReplayDetection:
+    ) -> DetectionBundle:
         sampler = self._sampler or FrameSampler()
         analyzer = self._analyzer or HeuristicHudAnalyzer()
+        recognizer = self._card_recognizer or HeuristicCardRecognizer()
         scores: list[float] = []
         observations: list[str] = []
         hits: dict[str, int] = {}
+        frames: list[FrameSignalSnapshot] = []
+        confirmed_cards: list[ConfirmedCardObservation] = []
+        ambiguous_cards: list[AmbiguousCardObservation] = []
         try:
-            for frame in sampler.iter_sampled_frames(
-                video_path,
-                duration=duration,
-                src_width=width,
-                src_height=height,
+            for index, frame in enumerate(
+                sampler.iter_sampled_frames(
+                    video_path,
+                    duration=duration,
+                    src_width=width,
+                    src_height=height,
+                )
             ):
                 scored = analyzer.analyze_frame(frame.path)
                 scores.append(scored.score)
+                frames.append(
+                    FrameSignalSnapshot(
+                        frame_index=index,
+                        timestamp=float(frame.timestamp),
+                        score=float(scored.score),
+                        signals=tuple(scored.signals),
+                    )
+                )
                 for sig in scored.signals:
                     if sig.score >= 0.55 and sig.observation:
                         hits[sig.signal] = hits.get(sig.signal, 0) + 1
                         if sig.observation not in observations:
                             observations.append(sig.observation)
+                # Recognize while frame file still exists (sampler cleans after yield).
+                confirmed, ambiguous = recognizer.recognize_frame(
+                    frame.path,
+                    frame_index=index,
+                    timestamp_seconds=float(frame.timestamp),
+                )
+                confirmed_cards.extend(confirmed)
+                ambiguous_cards.extend(ambiguous)
         except ReplayError:
             raise
         except Exception:
             logger.exception("replay frame analysis failed")
             raise ReplayError(CODE_FRAME_ANALYSIS_FAILED) from None
-        return analyzer.classify(
+        detection = analyzer.classify(
             scores,
             observations,
             frames_analyzed=len(scores),
             signal_hits=hits,
+        )
+        return DetectionBundle(
+            detection=detection,
+            frames=tuple(frames),
+            confirmed_card_observations=tuple(confirmed_cards),
+            ambiguous_card_observations=tuple(ambiguous_cards),
+        )
+
+    def _build_stage4(
+        self,
+        bundle: DetectionBundle,
+        *,
+        duration_seconds: float,
+    ) -> ReplayAnalysisResult | None:
+        if bundle.detection.status != STATUS_CR:
+            return None
+        timeline_builder = self._timeline_builder or ReplayTimelineBuilder()
+        facts_builder = self._facts_builder or ReplayFactsBuilder()
+        event_detector = self._event_detector or ReplayEventDetector()
+        timeline = timeline_builder.build(bundle.frames)
+        confirmed = group_confirmed_cards(bundle.confirmed_card_observations)
+        raw_events = event_detector.detect(
+            card_observations=list(bundle.confirmed_card_observations),
+            timeline=timeline,
+            ambiguous_present=bool(bundle.ambiguous_card_observations),
+        )
+        events, confirmed_events = event_detector.partition(raw_events)
+        battle_builder = self._battle_timeline_builder or ReplayBattleTimelineBuilder()
+        battle_timeline = battle_builder.build(
+            duration_seconds=duration_seconds,
+            events=events,
+            confirmed_events=confirmed_events,
+            confirmed_cards=confirmed,
+            confidence=float(bundle.detection.confidence),
+        )
+        tactical_analyzer = self._tactical_analyzer or ReplayTacticalAnalyzer()
+        tactical = tactical_analyzer.analyze(
+            battle_timeline=battle_timeline,
+            confirmed_cards=confirmed,
+            confirmed_events=confirmed_events,
+            events=events,
+        )
+        return facts_builder.build(
+            bundle.detection,
+            timeline,
+            duration_seconds=duration_seconds,
+            confirmed_cards=confirmed,
+            ambiguous_cards=list(bundle.ambiguous_card_observations),
+            events=events,
+            confirmed_events=confirmed_events,
+            battle_timeline=battle_timeline,
+            tactical_analysis=tactical,
         )
 
 

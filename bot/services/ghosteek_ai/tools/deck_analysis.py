@@ -6,7 +6,6 @@ from bot.services.ghosteek_ai.context.ai_context import AIContext
 from bot.services.ghosteek_ai.models import ToolResult
 from bot.services.ghosteek_ai.tools.base import BaseTool
 from bot.services.ghosteek_ai.tools.deps import (
-    call_calculate_deck_synergy,
     call_recommendation_analyze,
     call_resolve_player_deck,
 )
@@ -32,8 +31,11 @@ class DeckAnalysisTool(BaseTool):
                 actions=[{"type": "navigate", "path": "/decks"}],
             )
         rec = call_recommendation_analyze(deck, apply_swaps=False)
-        synergy_score, synergy_notes = call_calculate_deck_synergy(deck)
         evaluation = getattr(rec, "evaluation_report", None)
+        synergy_score = (
+            float(evaluation.synergy.score) if evaluation is not None else 0.0
+        )
+        synergy_notes = list(evaluation.synergy.notes) if evaluation is not None else []
         return ToolResult(
             tool=self.name,
             ok=True,
@@ -41,7 +43,7 @@ class DeckAnalysisTool(BaseTool):
                 "deck": deck,
                 "recommendation": rec.to_public_dict(),
                 "evaluation_report": evaluation.to_dict() if evaluation is not None else None,
-                # Deprecated: отдельные synergy_* — используйте evaluation_report.synergy
+                # Compat: synergy из EvaluationReport (Builder SoT), не отдельный калькулятор
                 "synergy_score": synergy_score,
                 "synergy_notes": synergy_notes,
             },

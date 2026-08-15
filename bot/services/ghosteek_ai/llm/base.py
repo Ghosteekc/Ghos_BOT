@@ -8,11 +8,31 @@ from typing import Any
 
 @dataclass
 class LLMCapabilities:
-    """Что умеет конкретный провайдер."""
+    """Что умеет конкретный провайдер / runtime profile.
+
+    tools          — можно передавать tool schemas в LLM (Agent tool calling)
+    agent_loop     — разрешён полный Agent Mode (LLM выбирает tools, multi-round)
+    renderer       — модель используется как voice/renderer после ToolResult
+    """
 
     tools: bool = False
     stream: bool = False
     json_mode: bool = False
+    agent_loop: bool = False
+    renderer: bool = False
+
+    # Aliases for call-sites / docs
+    @property
+    def supports_tools(self) -> bool:
+        return self.tools
+
+    @property
+    def supports_agent_loop(self) -> bool:
+        return self.agent_loop
+
+    @property
+    def supports_renderer(self) -> bool:
+        return self.renderer
 
 
 @dataclass

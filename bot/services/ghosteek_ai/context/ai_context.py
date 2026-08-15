@@ -465,6 +465,8 @@ class AIContext:
     data: dict[str, Any] = field(default_factory=dict)
     # Structured UI cards (optional; text answer stays separate)
     deck_card: dict[str, Any] | None = None
+    # Local renderer only: compact facts envelope (не ToolResult / не API contract)
+    render_facts: dict[str, Any] | None = None
 
     # Внутренняя ссылка на User для доменных сервисов (не для Generator / LLM)
     _user: Any = field(default=None, repr=False, compare=False)

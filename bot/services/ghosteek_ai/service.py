@@ -544,18 +544,23 @@ async def ask_ghosteek_ai(
 
     replay_meta = resolve_replay_meta(session.last_replay, req_ctx)
     if replay_meta and is_replay_coaching_request(message):
-        answer = reply_replay_pending_analysis(replay_meta)
-        ConversationManager.add_assistant_message(session, answer, intent="replay_pending")
+        # Prefer full session payload (coach_reply) over normalized-only meta.
+        answer_meta = dict(session.last_replay or {})
+        answer_meta.update(replay_meta)
+        answer = reply_replay_pending_analysis(answer_meta)
+        intent = "replay_coach" if answer_meta.get("coach_reply") else "replay_pending"
+        ConversationManager.add_assistant_message(session, answer, intent=intent)
         session.last_answer_brief = answer[:180]
         session.active_topic = "replay"
         ConversationManager.save(user.telegram_id, session)
         return GhosteekAiResponse(
-            intent="replay_pending",
+            intent=intent,
             answer=answer,
             sources={
-                "intent": "replay_pending",
+                "intent": intent,
                 "replay": replay_meta,
-                "stage": "detection_only",
+                "stage": "coach" if intent == "replay_coach" else "detection_only",
+                "coach_source": answer_meta.get("coach_source"),
             },
         )
 

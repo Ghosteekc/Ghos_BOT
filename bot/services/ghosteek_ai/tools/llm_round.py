@@ -1,10 +1,14 @@
 """Multi-step LLM ↔ ToolCaller цикл.
 
 Используется Agent Mode через ``run_llm_agent`` → ``execute_llm_round``.
+
+Правило Agent Mode: финальный текст только поверх успешного ToolResult.
+Без tool / tool ok=False → ответ блокируется.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +27,16 @@ logger = logging.getLogger(__name__)
 
 MAX_LLM_ROUND_ITERATIONS = 5
 _ROUND_TOOL_NAME = "execute_llm_round"
+
+# Фиксированный отказ — LLM не имеет права отвечать без успешного tool.
+NO_DATA_USER_MESSAGE = "Не удалось получить данные."
+FORCE_TOOL_USER_PROMPT = (
+    "Сначала вызови нужный tool. "
+    "Нельзя давать финальный ответ игроку без успешного результата tool."
+)
+
+# Stubs / служебные — не считаются источником фактов для ответа.
+_NON_FACT_TOOLS = frozenset({_ROUND_TOOL_NAME})
 
 
 @dataclass
@@ -56,6 +70,18 @@ class LLMRoundResult:
         )
 
 
+def successful_tool_results(results: list[ToolResult]) -> list[ToolResult]:
+    """ToolResult, на которых разрешено писать финальный ответ."""
+    return [
+        r for r in results
+        if r.ok and r.tool not in _NON_FACT_TOOLS
+    ]
+
+
+def has_successful_tool_result(results: list[ToolResult]) -> bool:
+    return bool(successful_tool_results(results))
+
+
 def _error_result(
     code: str,
     *,
@@ -69,6 +95,47 @@ def _error_result(
         error_params=dict(params or {}),
         data=dict(data or {}),
     ).normalized()
+
+
+def _blocked_no_tool(
+    *,
+    code: str,
+    working: list[ChatMessage],
+    all_results: list[ToolResult],
+    iterations: int,
+    used_tools: bool,
+    detail: str = "",
+) -> LLMRoundResult:
+    """Блок финального ответа: нет успешного ToolResult."""
+    params: dict[str, Any] = {"user_message": NO_DATA_USER_MESSAGE}
+    if detail:
+        params["detail"] = detail[:400]
+    err = _error_result(
+        code,
+        params=params,
+        data={
+            "iterations": iterations,
+            "used_tools": used_tools,
+            "tool_names": [r.tool for r in all_results],
+            "successful_tools": [r.tool for r in successful_tool_results(all_results)],
+        },
+    )
+    logger.info(
+        "execute_llm_round blocked code=%s iterations=%s used_tools=%s tools=%s",
+        code,
+        iterations,
+        used_tools,
+        [r.tool for r in all_results],
+    )
+    return LLMRoundResult(
+        ok=False,
+        text="",
+        messages=working,
+        tool_results=all_results,
+        iterations=iterations,
+        used_tools=used_tools,
+        error=err,
+    )
 
 
 def _append_assistant_tool_calls(messages: list[ChatMessage], result) -> None:
@@ -105,6 +172,31 @@ def _append_tool_messages(
         )
 
 
+def _facts_blob(results: list[ToolResult]) -> str:
+    """Сериализованные факты успешных tools для мягкой сверки ответа."""
+    parts: list[str] = []
+    for r in successful_tool_results(results):
+        try:
+            parts.append(json.dumps(r.to_dict(), ensure_ascii=False))
+        except Exception:
+            parts.append(str(r.data))
+    return "\n".join(parts).lower()
+
+
+def _answer_grounded_in_tools(text: str, results: list[ToolResult]) -> bool:
+    """Грубая проверка: ответ не пустой и есть успешный ToolResult.
+
+    Полный semantic fact-lock не делаем (без изменения API); без успешного
+    tool финал уже запрещён. Здесь отсекаем пустые/служебные ответы.
+    """
+    if not has_successful_tool_result(results):
+        return False
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return False
+    return bool(_facts_blob(results).strip())
+
+
 async def execute_llm_round(
     messages: list[ChatMessage],
     ctx: AIContext,
@@ -117,11 +209,12 @@ async def execute_llm_round(
     """Цикл: LLM → tool_calls → ToolCaller → ToolResult → messages → LLM …
 
     - Максимум ``max_iterations`` (потолок 5) вызовов модели.
-    - Нет tool_calls → цикл завершается, текст ответа модели = финал.
-    - Любая ошибка → ``LLMRoundResult(ok=False, error=ToolResult(...))``, без raise.
+    - Финальный текст разрешён только если есть успешный ToolResult.
+    - Нет tool / tool failed → ``ok=False``, код LLM_ROUND_NO_SUCCESSFUL_TOOL.
     """
     from bot.services.ghosteek_ai.tools.base import ToolCaller
 
+    # ctx обновляется внутри ToolCaller при execute_qwen_tool_calls.
     if not isinstance(caller, ToolCaller):
         err = _error_result("LLM_ROUND_INVALID_CALLER")
         return LLMRoundResult(ok=False, messages=list(messages), error=err)
@@ -171,60 +264,105 @@ async def execute_llm_round(
                     reasoning=getattr(llm_result, "reasoning", None),
                     filter=DEFAULT_REASONING_FILTER,
                 )
-                if final:
-                    return LLMRoundResult(
-                        ok=True,
-                        text=final,
-                        messages=working,
-                        tool_results=all_results,
+
+                # --- Gate: без успешного ToolResult финал запрещён ---
+                if not has_successful_tool_result(all_results):
+                    if used_tools:
+                        # Tools вызывались, но все упали — не даём модели «додумать».
+                        return _blocked_no_tool(
+                            code="LLM_ROUND_TOOL_FAILED",
+                            working=working,
+                            all_results=all_results,
+                            iterations=iterations,
+                            used_tools=used_tools,
+                            detail="all tool calls failed",
+                        )
+                    # Ещё не было tools — просим вызвать tool (если есть слоты).
+                    logger.info(
+                        "execute_llm_round: block final without tools iteration=%s",
+                        iterations,
+                    )
+                    working.append(
+                        ChatMessage(
+                            role=MessageRole.ASSISTANT,
+                            content=(llm_result.text or "").strip(),
+                            reasoning=(getattr(llm_result, "reasoning", None) or "").strip()
+                            or None,
+                        )
+                    )
+                    working.append(
+                        ChatMessage(role=MessageRole.USER, content=FORCE_TOOL_USER_PROMPT)
+                    )
+                    if round_idx >= limit - 1:
+                        return _blocked_no_tool(
+                            code="LLM_ROUND_NO_SUCCESSFUL_TOOL",
+                            working=working,
+                            all_results=all_results,
+                            iterations=iterations,
+                            used_tools=used_tools,
+                            detail="model finalized without calling tools",
+                        )
+                    continue
+
+                if not final:
+                    logger.info(
+                        "execute_llm_round: blocked non-final LLM text iteration=%s",
+                        iterations,
+                    )
+                    working.append(
+                        ChatMessage(
+                            role=MessageRole.ASSISTANT,
+                            content=(llm_result.text or "").strip(),
+                            reasoning=(getattr(llm_result, "reasoning", None) or "").strip()
+                            or None,
+                        )
+                    )
+                    working.append(
+                        ChatMessage(
+                            role=MessageRole.USER,
+                            content=FINAL_ANSWER_RETRY_PROMPT,
+                        )
+                    )
+                    if round_idx >= limit - 1:
+                        err = _error_result(
+                            "LLM_ROUND_REASONING_BLOCKED",
+                            params={
+                                "reason": "model returned internal reasoning instead of final answer",
+                                "user_message": NO_DATA_USER_MESSAGE,
+                            },
+                            data={
+                                "iterations": iterations,
+                                "used_tools": used_tools,
+                            },
+                        )
+                        return LLMRoundResult(
+                            ok=False,
+                            messages=working,
+                            tool_results=all_results,
+                            iterations=iterations,
+                            used_tools=used_tools,
+                            error=err,
+                        )
+                    continue
+
+                if not _answer_grounded_in_tools(final, all_results):
+                    return _blocked_no_tool(
+                        code="LLM_ROUND_UNGROUNDED",
+                        working=working,
+                        all_results=all_results,
                         iterations=iterations,
                         used_tools=used_tools,
+                        detail="answer not grounded in ToolResult",
                     )
 
-                # Reasoning / CoT / пустой content — не отдаём пользователю.
-                # Просим финальный ответ и продолжаем цикл (если есть слоты).
-                logger.info(
-                    "execute_llm_round: blocked non-final LLM text iteration=%s "
-                    "has_reasoning=%s text_preview=%r",
-                    iterations,
-                    bool((getattr(llm_result, "reasoning", None) or "").strip()),
-                    ((llm_result.text or "")[:120]),
+                return LLMRoundResult(
+                    ok=True,
+                    text=final,
+                    messages=working,
+                    tool_results=all_results,
+                    iterations=iterations,
+                    used_tools=used_tools,
                 )
-                working.append(
-                    ChatMessage(
-                        role=MessageRole.ASSISTANT,
-                        content=(llm_result.text or "").strip(),
-                        reasoning=(getattr(llm_result, "reasoning", None) or "").strip()
-                        or None,
-                    )
-                )
-                working.append(
-                    ChatMessage(
-                        role=MessageRole.USER,
-                        content=FINAL_ANSWER_RETRY_PROMPT,
-                    )
-                )
-                if round_idx >= limit - 1:
-                    err = _error_result(
-                        "LLM_ROUND_REASONING_BLOCKED",
-                        params={
-                            "reason": "model returned internal reasoning instead of final answer",
-                        },
-                        data={
-                            "iterations": iterations,
-                            "used_tools": used_tools,
-                            "text_preview": (llm_result.text or "")[:200],
-                        },
-                    )
-                    return LLMRoundResult(
-                        ok=False,
-                        messages=working,
-                        tool_results=all_results,
-                        iterations=iterations,
-                        used_tools=used_tools,
-                        error=err,
-                    )
-                continue
 
             used_tools = True
             _append_assistant_tool_calls(working, llm_result)
@@ -236,7 +374,10 @@ async def execute_llm_round(
                 logger.exception("execute_llm_round: tool execution failed")
                 err = _error_result(
                     "LLM_ROUND_TOOL_ERROR",
-                    params={"error": str(exc)[:400]},
+                    params={
+                        "error": str(exc)[:400],
+                        "user_message": NO_DATA_USER_MESSAGE,
+                    },
                     data={"iterations": iterations, "used_tools": used_tools},
                 )
                 return LLMRoundResult(
@@ -255,15 +396,28 @@ async def execute_llm_round(
                 results=round_results,
             )
             logger.info(
-                "execute_llm_round iteration=%s tools=%s",
+                "execute_llm_round iteration=%s tools=%s ok=%s",
                 iterations,
-                [r.tool for r in round_results],
+                [(r.tool, r.ok) for r in round_results],
+                has_successful_tool_result(all_results),
             )
 
-        # Исчерпан лимит, модель всё ещё запрашивала tools.
+        # Исчерпан лимит.
+        if not has_successful_tool_result(all_results):
+            return _blocked_no_tool(
+                code="LLM_ROUND_NO_SUCCESSFUL_TOOL",
+                working=working,
+                all_results=all_results,
+                iterations=iterations,
+                used_tools=used_tools,
+                detail="max iterations without successful tool",
+            )
         err = _error_result(
             "LLM_ROUND_MAX_ITERATIONS",
-            params={"max_iterations": limit},
+            params={
+                "max_iterations": limit,
+                "user_message": NO_DATA_USER_MESSAGE,
+            },
             data={
                 "iterations": iterations,
                 "used_tools": used_tools,
@@ -282,7 +436,7 @@ async def execute_llm_round(
         logger.exception("execute_llm_round: unexpected failure")
         err = _error_result(
             "LLM_ROUND_ERROR",
-            params={"error": str(exc)[:400]},
+            params={"error": str(exc)[:400], "user_message": NO_DATA_USER_MESSAGE},
             data={"iterations": iterations, "used_tools": used_tools},
         )
         return LLMRoundResult(

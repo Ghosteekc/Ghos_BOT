@@ -121,11 +121,10 @@ def build_mine_deck_stats(battles: list[dict], player_tag: str, cards: list[str]
 
     rec = RecommendationEngine.analyze(cards, apply_swaps=False)
     improvements = rec.improvements_ui()
-    balanced = (
-        len(improvements) == 0
-        and not rec.balance_issues.hard
-        and not rec.balance_issues.soft
-    )
+    # balanced — только Builder SoT (EvaluationReport), не локальный score.
+    from bot.services.deck_builder.quality import is_good_deck
+
+    balanced = is_good_deck(report=rec.evaluation_report) and len(improvements) == 0
 
     sample_note = ""
     if total == 0:

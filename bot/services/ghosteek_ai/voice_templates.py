@@ -6,7 +6,7 @@ from typing import Any
 
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deck_sanity_validator import sanity_payload_from_data
-from bot.services.ghosteek_ai.coach_tips import pick_tip
+from bot.services.ghosteek_ai.deck_card import extract_deck_names
 from bot.services.ghosteek_ai.glossary import archetype_label
 from bot.services.ghosteek_ai.intents import (
     INTENT_ANALYZE_DECK,
@@ -67,20 +67,20 @@ def _arch_from_data(data: dict[str, Any]) -> str | None:
 
 
 def _template_sanity_fail(sanity: dict[str, Any], *, intent: str, arch: str | None) -> str:
-    """Честный вердикт тренера — без оправдания Builder и без плана игры."""
+    """Честный вердикт по колоде игрока — без канцелярита и без «доделай сам»."""
     msgs = [str(m) for m in (sanity.get("critical_messages") or []) if m]
     verdict = str(sanity.get("coach_verdict") or "").strip()
     if not verdict:
-        verdict = msgs[0] if msgs else "Эта сборка выглядит нестабильной. Я бы пересобрал её."
+        verdict = msgs[0] if msgs else "В этой колоде пока не хватает устойчивого плана."
     why = str(sanity.get("coach_why") or "").strip()
     if not why and len(msgs) >= 2:
         why = msgs[1]
     if not why:
-        why = "Builder мог ошибиться — не буду оправдывать слабую сборку."
+        why = "По составу видно дыру — давай закроем её заменой, а не оправданиями."
     return coach_reply(
         verdict,
         why=why,
-        tip="Сначала закрой критические дыры, потом разберём, как ей играть.",
+        tip="Могу сразу предложить, что поменять.",
         intent=intent,
         archetype=arch,
     )
@@ -93,7 +93,7 @@ def template_build_deck(data: dict[str, Any]) -> str:
     stage = data.get("stage") or mode
     arch = _arch_from_data(data)
     label = archetype_label(arch)
-    tip = pick_tip(arch, seed=str(arch or core))
+    tip = ""
     primary = core[0] if core else None
     primary_ru = card_name_ru(primary, short=True) if primary else ""
 
@@ -108,10 +108,12 @@ def template_build_deck(data: dict[str, Any]) -> str:
         )
 
     sanity = sanity_payload_from_data(data)
-    if sanity is not None and not sanity.get("passed", True):
+    first = decks[0] if isinstance(decks[0], dict) else {}
+    complete = len(extract_deck_names(first)) >= 8
+    # Готовая 8-карта — это уже предложение игроку, а не черновик «доделай сам».
+    if sanity is not None and not sanity.get("passed", True) and not complete:
         return _template_sanity_fail(sanity, intent=INTENT_BUILD_DECK, arch=arch)
 
-    first = decks[0] if isinstance(decks[0], dict) else {}
     title = first.get("name") or arch or label
     alt = ""
     if len(decks) > 1 and isinstance(decks[1], dict):
@@ -121,8 +123,8 @@ def template_build_deck(data: dict[str, Any]) -> str:
 
     if mode == "meta_templates" or stage == "meta_templates":
         return coach_reply(
-            f"Собрал {title}." if title else f"Собрал {label}.",
-            why=f"Стиль держится на {primary_ru}." if primary_ru else f"Стиль — {label}.",
+            f"Собрал {title} — можно сразу ставить." if title else f"Собрал {label}.",
+            why=f"Играется через {primary_ru}, цикл держит темп." if primary_ru else f"Стиль — {label}.",
             tip=alt or tip,
             intent=INTENT_BUILD_DECK,
             archetype=arch,
@@ -135,10 +137,10 @@ def template_build_deck(data: dict[str, Any]) -> str:
         style = label or "контроль"
         if primary_ru:
             verdict = f"Собрал {style.lower()} вокруг {primary_ru}."
-            why = f"Добавил поддержку, спеллы и цикл под {primary_ru}."
+            why = f"Под неё закрыл поддержку, спеллы и цикл — колода уже полная."
         else:
             verdict = f"Собрал рабочий {style.lower()}."
-            why = "Закрыл роли под выбранный стиль."
+            why = "Роли закрыты, можно пробовать на лестнице."
         return coach_reply(
             verdict,
             why=why,
@@ -149,14 +151,10 @@ def template_build_deck(data: dict[str, Any]) -> str:
 
     core_txt = _ru_list(core, limit=4) if core else ""
     verdict = f"Собрал {title}." if title else f"Собрал {label}."
-    why = (
-        f"Ядро {core_txt} закрыто ролями."
-        if core_txt
-        else f"Сборка держится на ролях под {label}."
-    )
-    # Не используем слово «ядро» в пользовательском why — перефразируем.
     if core_txt:
-        why = f"Опора {core_txt} закрыта ролями."
+        why = f"Опора {core_txt} уже в составе — это готовый вариант, не черновик."
+    else:
+        why = f"Сборка держится на ролях под {label}."
     return coach_reply(
         verdict,
         why=why,
@@ -193,20 +191,21 @@ def template_analyze_deck(data: dict[str, Any], *, improve: bool = False) -> str
         (rec.get("balance_issues") or {}).get("messages"),
     )
     how = gp.get("how_to_win") or ""
-    tip = pick_tip(arch if isinstance(arch, str) else None, seed=strength or weakness)
+    # Tip только из ToolResult; не дублируем why и не тянем coach_tips.json.
+    tip = ""
 
     if improve:
         if plan.get("needed"):
             step = _first(plan.get("steps"))
             return coach_reply(
-                "Нужна точечная замена, не пересборка.",
+                "Есть точечная замена — полную пересборку не трогаем.",
                 why=step or weakness or "Есть дыра в ролях или связках.",
                 tip=tip,
                 intent=intent,
                 archetype=arch if isinstance(arch, str) else None,
             )
         return coach_reply(
-            "Критических замен нет.",
+            "Критических замен не вижу.",
             why=strength or how or "Состав уже держится.",
             tip=tip,
             intent=intent,
@@ -238,9 +237,7 @@ def template_matchup(data: dict[str, Any]) -> str:
     if isinstance(adv, list) and adv and isinstance(adv[0], str) and adv[0].strip():
         tip = adv[0].strip()
     if not tip:
-        tip = pick_tip(
-            data.get("archetype") if isinstance(data.get("archetype"), str) else None
-        )
+        tip = reason or ""
 
     hard = rating.lower() in {"сложный", "hard", "плохой", "невыгодный"}
     easy = rating.lower() in {"лёгкий", "легкий", "easy", "хороший", "выгодный"}
@@ -302,12 +299,12 @@ def template_battle(data: dict[str, Any]) -> str:
     tip_raw = avoid[0] if avoid and isinstance(avoid[0], str) else ""
     tip = tip_raw.strip() if tip_raw else window
     if not tip or tip.lower().startswith("в похожем"):
-        tip = pick_tip(None, seed=str(won))
+        tip = ""
     # Не дублируем why тем же текстом, что уже в verdict
     if why and won is False and "рано" in why.lower() and "атак" in why.lower():
         why = "До двойного эликсира играй спокойнее."
         if tip.lower() in why.lower() or "рано" in tip.lower():
-            tip = window or pick_tip(None, seed="loss")
+            tip = window or ""
 
     if won:
         verdict = "Ключ победы — контроль темпа."
@@ -331,7 +328,7 @@ def template_game_coach(data: dict[str, Any]) -> str:
         return coach_reply(
             "Кубки растут от стабильных решений.",
             why=tips[0] if tips else "Одна колода лучше постоянной смены.",
-            tip=tips[1] if len(tips) > 1 else pick_tip("Meta"),
+            tip=tips[1] if len(tips) > 1 else "",
             intent=INTENT_GAME_COACH,
             archetype="Meta",
         )
@@ -342,7 +339,7 @@ def template_game_coach(data: dict[str, Any]) -> str:
     return coach_reply(
         f"Против «{archetype_label(str(arch))}» матчап {rating}.",
         why=reason or "Не отдавай эликсир у моста и держи ответ на их вин-кондишн.",
-        tip=pick_tip(str(arch), seed=str(arch)),
+        tip=_first(data.get("advantages"), data.get("reasons")) or "",
         intent=INTENT_GAME_COACH,
         archetype=str(arch),
     )
@@ -355,7 +352,7 @@ def template_mechanic(data: dict[str, Any]) -> str:
         return assert_coach_voice(ready.strip())
     title = str(data.get("title") or "Термин")
     summary = str(data.get("summary") or "")
-    tip = str(data.get("tip") or "") or pick_tip(None, seed=title)
+    tip = str(data.get("tip") or "")
     return coach_reply(
         f"{title} — {summary}" if summary else f"{title}.",
         why=str(data.get("example") or "").strip(),

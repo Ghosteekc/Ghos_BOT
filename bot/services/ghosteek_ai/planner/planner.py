@@ -10,6 +10,7 @@ from bot.services.ghosteek_ai.intents import (
     INTENT_ANALYZE_DECK,
     INTENT_BUILD_DECK,
     INTENT_CARD_INFO,
+    INTENT_CHAT,
     INTENT_CLARIFY,
     INTENT_EXPLAIN_MECHANIC,
     INTENT_GAME_COACH,
@@ -26,9 +27,11 @@ from bot.services.ghosteek_ai.models import Plan, ToolSpec
 from bot.services.ghosteek_ai.tools.base import ToolRegistry, get_default_registry
 
 # Intent → tool name(s). Только имена из каталога Registry.
+# INTENT_CHAT → [] (conversational, без игровых tools).
 INTENT_TOOL_MAP: dict[str, list[str]] = {
     INTENT_UNSUPPORTED: ["unsupported"],
     INTENT_CLARIFY: ["clarify"],
+    INTENT_CHAT: [],
     INTENT_LAST_BATTLE: ["battle_analysis"],
     INTENT_EXPLAIN_MECHANIC: ["knowledge"],
     INTENT_GAME_COACH: ["game_coach"],
@@ -37,8 +40,9 @@ INTENT_TOOL_MAP: dict[str, list[str]] = {
     INTENT_ANALYZE_DECK: ["deck_analysis"],
     INTENT_IMPROVE_DECK: ["recommendation"],
     INTENT_MATCHUP: ["matchup"],
-    INTENT_META: ["meta"],
-    INTENT_STATS: ["stats"],
+    # Meta/Stats stubs убраны — вне этапа 1 → clarify.
+    INTENT_META: ["clarify"],
+    INTENT_STATS: ["clarify"],
 }
 
 
@@ -62,6 +66,9 @@ class Planner:
     def build(self, detected: DetectedIntent) -> Plan:
         intent = detected.intent
         service = detected.service or SERVICE_BY_INTENT.get(intent, "Clarify")
+        # Conversational: явно без tools (не подставлять clarify).
+        if intent == INTENT_CHAT:
+            return Plan(intent=intent, service=service, tools=[])
         names = self.select_tool_names(intent)
         args = self.args_from_detected(detected)
         tools = self.specs_for_names(names, args)
@@ -79,6 +86,8 @@ class Planner:
         return Plan(intent=intent or "qwen", service=service or "Qwen", tools=tools)
 
     def select_tool_names(self, intent: str) -> list[str]:
+        if intent == INTENT_CHAT:
+            return []
         return list(INTENT_TOOL_MAP.get(intent) or ["clarify"])
 
     def specs_for_names(self, names: list[str], args: dict) -> list[ToolSpec]:

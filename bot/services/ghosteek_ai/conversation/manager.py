@@ -187,8 +187,24 @@ class ConversationManager:
         from bot.services.ghosteek_ai.replay_followup import normalize_replay_meta
 
         normalized = normalize_replay_meta(meta)
-        session.last_replay = dict(normalized) if normalized else {}
-        if normalized and normalized.get("accepted"):
+        if normalized is None:
+            session.last_replay = {}
+            session.touch()
+            return
+        # Preserve Stage 6–7 coaching payload (normalize keeps detection fields only).
+        for key in (
+            "coach_reply",
+            "coach_source",
+            "has_analysis",
+            "tactical_analysis",
+            "confirmed_cards",
+            "confirmed_events",
+            "battle_timeline_summary",
+        ):
+            if key in meta:
+                normalized[key] = meta[key]
+        session.last_replay = dict(normalized)
+        if normalized.get("accepted"):
             session.active_topic = "replay"
         session.touch()
 

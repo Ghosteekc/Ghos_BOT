@@ -1,7 +1,8 @@
-"""Многостадийная сборка колоды: шаблоны → freeform → архетип.
+"""Многостадийная сборка колоды: meta → freeform → archetype.
 
-Пользователь никогда не должен видеть внутренние отказы конструктора.
-Если карта существует — обязан вернуться готовый вариант из 8 карт.
+Каждый кандидат проходит ``_validate_variant`` (Builder Validation).
+Успешный ответ только если есть хотя бы одна stable-колода.
+Иначе: status=NO_VALID_BUILD (ok=False) — без best-effort / last-resort.
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ from bot.services.deck_builder.builder import (
     _candidate_pool,
     _core_primary_win,
     _detect_archetype,
-    _pair_synergy,
     _result_rank,
     _validate_variant,
     build_multiple_decks,
@@ -33,7 +33,6 @@ from bot.services.deck_builder.constants import (
     SYNERGY_STRONG,
 )
 from bot.services.deck_builder.loader import get_database
-from bot.services.deck_evaluator.evaluator import DeckEvaluator
 from bot.services.meta_decks import META_DECKS
 
 logger = logging.getLogger(__name__)
@@ -41,6 +40,9 @@ logger = logging.getLogger(__name__)
 STAGE_META = "meta_templates"
 STAGE_FREEFORM = "freeform_anchor"
 STAGE_ARCHETYPE = "archetype_fallback"
+
+STATUS_NO_VALID_BUILD = "NO_VALID_BUILD"
+ERROR_NO_VALID_BUILD = "NO_VALID_BUILD"
 
 # Ближайшие рабочие архетипы, если карта не в curated meta.
 _CARD_ARCHETYPE_HINTS: dict[str, tuple[str, ...]] = {
@@ -83,7 +85,7 @@ def _synergy_score(db, a: str, b: str) -> int:
 
 def _expand_seed_core(seed: list[str], pool: set[str], db) -> list[str]:
     """Вырастить 1–2 карты до ядра 3–4 для существующего builder API."""
-    core = list(dict.fromkeys(seed))  # unique, keep order
+    core = list(dict.fromkeys(seed))
     if not any(is_attack_win(c) or c in WIN_CONDITIONS for c in core):
         wins = [
             c for c in pool
@@ -99,7 +101,6 @@ def _expand_seed_core(seed: list[str], pool: set[str], db) -> list[str]:
         if wins:
             core.append(wins[0])
 
-    # Добавим дешёвую поддержку / cycle, чтобы Intent увереннее угадал стиль.
     while len(core) < 3:
         candidates = [
             c for c in pool
@@ -119,18 +120,67 @@ def _expand_seed_core(seed: list[str], pool: set[str], db) -> list[str]:
     return core[:4]
 
 
-def _best_effort_from_core(
+def _core_present_in_deck(deck: list[str], seed: list[str]) -> list[str]:
+    present = [c for c in seed if c in deck]
+    return present or list(seed[:1])
+
+
+def _validate_trial(
+    trial: list[str],
+    core: list[str],
+    pool: set[str],
+    *,
+    archetype: str | None = None,
+    confidence: float = 30.0,
+    source_deck_id: int | None = None,
+) -> BuildResult | None:
+    """Прогнать кандидата через Builder Validation. None если FAILED."""
+    if len(trial) != 8 or len(set(trial)) != 8:
+        return None
+    # Запрошенные карты ядра обязательны — иначе meta отдаёт «похожий» Hog 2.6
+    # без Tornado / Electro Spirit и т.п.
+    if core and not all(c in trial for c in core):
+        return None
+    db = get_database()
+    core_in_deck = list(core) if core else _core_present_in_deck(trial, core)
+    decision = prepare_constructor_decision(core_in_deck, detect_archetype=_detect_archetype)
+    final_archetype = archetype or _candidate_archetype(trial, decision.archetype)
+    primary_anchor = _core_primary_win(core_in_deck) or (core_in_deck[0] if core_in_deck else None)
+    validation = _validate_variant(
+        trial,
+        core_in_deck,
+        db,
+        decision,
+        archetype=final_archetype,
+        primary_anchor=primary_anchor,
+    )
+    if not validation.stable:
+        return None
+    return BuildResult(
+        deck=trial,
+        archetype=final_archetype,
+        average_elixir=_avg_elixir(trial, db),
+        confidence=round(confidence, 1),
+        source_deck_id=source_deck_id,
+        balanced=True,
+        validation=validation,
+        evaluation=validation.evaluation,
+    )
+
+
+def _validated_builds_from_core(
     core: list[str],
     pool: set[str],
     *,
     limit: int = 3,
 ) -> list[BuildResult]:
-    """Собрать варианты; если stable нет — взять лучшие по evaluation."""
+    """Только stable-варианты (Validation PASSED)."""
     if len(core) in (3, 4):
         try:
             stable = build_multiple_decks(core, pool, limit=limit)
             if stable:
-                return stable
+                # build_multiple_decks уже отфильтровал unstable
+                return [r for r in stable if r.balanced and r.validation and r.validation.stable][:limit]
         except ValueError:
             pass
 
@@ -138,53 +188,29 @@ def _best_effort_from_core(
     pool = set(pool) | set(core)
     decision = prepare_constructor_decision(core, detect_archetype=_detect_archetype)
     primary_anchor = _core_primary_win(core) or core[0]
-    # Для якоря вне WIN_CONDITIONS всё равно держим его как primary.
-    if primary_anchor not in core:
-        primary_anchor = core[0]
 
     candidates = _candidate_pool(core, db, pool, decision, primary_anchor)
-    scored: list[BuildResult] = []
+    accepted: list[BuildResult] = []
     for trial, source, _reason in candidates:
-        if len(trial) != 8:
-            continue
-        final_archetype = _candidate_archetype(trial, decision.archetype)
-        validation = _validate_variant(
+        result = _validate_trial(
             trial,
             core,
-            db,
-            decision,
-            archetype=final_archetype,
-            primary_anchor=primary_anchor,
-        )
-        evaluation = validation.evaluation
-        if evaluation is None:
-            evaluation = DeckEvaluator.evaluate(
-                trial, core=core, archetype=final_archetype, db=db,
-            )
-        scored.append(BuildResult(
-            deck=trial,
-            archetype=final_archetype,
-            average_elixir=_avg_elixir(trial, db),
-            confidence=round(source.confidence if source else 28.0, 1),
+            pool,
+            archetype=_candidate_archetype(trial, decision.archetype),
+            confidence=source.confidence if source else 28.0,
             source_deck_id=source.record.id if source else None,
-            balanced=validation.stable,
-            validation=validation,
-            evaluation=evaluation,
-        ))
+        )
+        if result is None:
+            continue
+        accepted.append(result)
 
-    if not scored:
+    if not accepted:
         return []
 
-    scored.sort(
-        key=lambda r: (
-            0 if r.balanced else 1,
-            -_result_rank(r, decision) if r.validation else -(r.evaluation.total_score if r.evaluation else 0),
-        ),
-    )
-    # Diversify lightly
+    accepted.sort(key=lambda r: -_result_rank(r, decision))
     out: list[BuildResult] = []
     seen: set[str] = set()
-    for item in scored:
+    for item in accepted:
         key = "|".join(sorted(item.deck))
         if key in seen:
             continue
@@ -202,11 +228,9 @@ def _archetype_candidates_for(seed: list[str]) -> list[str]:
     detected = _detect_archetype(seed)
     if detected and detected != "Meta":
         hints.insert(0, detected)
-    # Якоря архетипов, где seed пересекается с известными картами
     for arch, anchors in ARCHETYPE_ANCHORS.items():
         if set(seed) & anchors:
             hints.append(arch)
-    # Уникальные с сохранением порядка
     out: list[str] = []
     for h in hints:
         if h not in out:
@@ -221,7 +245,6 @@ def _inject_seed_into_template(template_cards: list[str], seed: list[str]) -> li
     for card in seed:
         if card in deck:
             continue
-        # Вытесняем не-win filler с конца
         replace_idx = None
         for i in range(len(deck) - 1, -1, -1):
             if deck[i] not in seed and deck[i] not in WIN_CONDITIONS:
@@ -230,7 +253,6 @@ def _inject_seed_into_template(template_cards: list[str], seed: list[str]) -> li
         if replace_idx is None:
             replace_idx = len(deck) - 1
         deck[replace_idx] = card
-    # unique preserve order, pad if needed
     uniq: list[str] = []
     for c in deck:
         if c not in uniq:
@@ -238,12 +260,13 @@ def _inject_seed_into_template(template_cards: list[str], seed: list[str]) -> li
     return uniq[:8]
 
 
-def _build_archetype_fallback(
+def _validated_archetype_builds(
     seed: list[str],
     pool: set[str],
     *,
     limit: int = 3,
 ) -> list[BuildResult]:
+    """Архетипные кандидаты — только после Validation PASSED."""
     db = get_database()
     pool = set(pool) | set(seed)
     results: list[BuildResult] = []
@@ -259,7 +282,6 @@ def _build_archetype_fallback(
             injected = _inject_seed_into_template(list(rec.cards), seed)
             if len(injected) != 8:
                 continue
-            # Finalize around seed as core
             from bot.services.deck_builder.builder import _finalize_deck
 
             trial = _finalize_deck(injected, seed, db, pool, archetype)
@@ -269,19 +291,17 @@ def _build_archetype_fallback(
             if key in seen:
                 continue
             seen.add(key)
-            evaluation = DeckEvaluator.evaluate(
-                trial, core=seed, archetype=archetype, db=db,
-            )
-            results.append(BuildResult(
-                deck=trial,
-                archetype=_candidate_archetype(trial, archetype),
-                average_elixir=_avg_elixir(trial, db),
+            result = _validate_trial(
+                trial,
+                seed,
+                pool,
+                archetype=archetype,
                 confidence=30.0,
                 source_deck_id=rec.id,
-                balanced=evaluation.hard_constraints.passed,
-                validation=None,
-                evaluation=evaluation,
-            ))
+            )
+            if result is None:
+                continue
+            results.append(result)
             if len(results) >= limit:
                 return results
 
@@ -291,7 +311,7 @@ def _build_archetype_fallback(
     return results[:limit]
 
 
-def _meta_entries(seed: list[str], *, limit: int) -> list[dict[str, Any]]:
+def _meta_candidates(seed: list[str], *, limit: int) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for card in seed:
@@ -309,9 +329,63 @@ def _meta_entries(seed: list[str], *, limit: int) -> list[dict[str, Any]]:
                 "category": d.category,
                 "description": d.description,
             })
-            if len(out) >= limit:
+            if len(out) >= limit * 4:
                 return out
     return out
+
+
+def _validated_meta_entries(
+    seed: list[str],
+    pool: set[str],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Curated meta — только если Validation PASSED и все seed-карты в колоде."""
+    accepted: list[dict[str, Any]] = []
+    for entry in _meta_candidates(seed, limit=max(limit * 4, 8)):
+        cards = list(entry["cards"])
+        if seed and not all(c in cards for c in seed):
+            continue
+        result = _validate_trial(cards, seed, pool, confidence=55.0)
+        if result is None:
+            continue
+        accepted.append(entry)
+        if len(accepted) >= limit:
+            break
+    return accepted
+
+
+def _no_valid_build(known: list[str], *, last_issues: list[str] | None = None) -> dict[str, Any]:
+    card = known[0] if known else ""
+    card_ru = card_name_ru(card, short=True) if card else ""
+    issue_hint = ", ".join(last_issues[:3]) if last_issues else ""
+    reason = (
+        f"Не удалось собрать стабильную колоду вокруг «{card_ru}»: "
+        "ни один кандидат не прошёл проверку качества."
+    )
+    if issue_hint:
+        reason = f"{reason} Типичные дыры: {issue_hint}."
+    suggestion = (
+        "Добавьте ещё 1–2 ключевые карты ядра (спелл / поддержку) "
+        "или выберите другую главную угрозу."
+    )
+    return {
+        "ok": False,
+        "status": STATUS_NO_VALID_BUILD,
+        "error_code": ERROR_NO_VALID_BUILD,
+        "reason": reason,
+        "suggestion": suggestion,
+        "error_params": {
+            "card_ru": card_ru,
+            "reason": reason,
+            "suggestion": suggestion,
+        },
+        "core": known,
+        "decks": [],
+        "stage": None,
+        "mode": None,
+        "build_results": None,
+    }
 
 
 def build_decks_staged(
@@ -321,7 +395,10 @@ def build_decks_staged(
     trophies: int | None = None,
     limit: int = 3,
 ) -> dict[str, Any]:
-    """Stage 1 meta → Stage 2 freeform → Stage 3 archetype. Всегда decks при валидных картах."""
+    """Stage 1 meta → Stage 2 freeform → Stage 3 archetype.
+
+    Успех только при Validation PASSED. Иначе NO_VALID_BUILD.
+    """
     raw = [c.strip() for c in seed_cards if isinstance(c, str) and c.strip()]
     known = [c for c in raw if _card_known(c)]
     unknown = [c for c in raw if c not in known]
@@ -344,8 +421,8 @@ def build_decks_staged(
     db = get_database()
     pool.update(db.cards.keys())
 
-    # --- Stage 1: curated meta templates ---
-    meta = _meta_entries(known, limit=limit)
+    # --- Stage 1: curated meta (только после Validation) ---
+    meta = _validated_meta_entries(known, pool, limit=limit)
     if meta:
         return {
             "ok": True,
@@ -358,7 +435,7 @@ def build_decks_staged(
 
     # --- Stage 2: freeform around primary card ---
     expanded = _expand_seed_core(known, pool, db)
-    freeform = _best_effort_from_core(expanded, pool, limit=limit)
+    freeform = _validated_builds_from_core(expanded, pool, limit=limit)
     if freeform:
         return {
             "ok": True,
@@ -371,7 +448,7 @@ def build_decks_staged(
         }
 
     # --- Stage 3: nearest archetype injection ---
-    arch = _build_archetype_fallback(known, pool, limit=limit)
+    arch = _validated_archetype_builds(known, pool, limit=limit)
     if arch:
         return {
             "ok": True,
@@ -383,49 +460,5 @@ def build_decks_staged(
             "expanded_core": known,
         }
 
-    # Не должно случаться при known cards — последний отчаянный seed-only finalize
-    from bot.services.deck_builder.builder import _finalize_deck, _required_role_seed
-    from bot.services.deck_builder.constructor_decision import prepare_constructor_decision
-
-    decision = prepare_constructor_decision(known[:4] or known, detect_archetype=_detect_archetype)
-    seed8 = _finalize_deck(
-        _required_role_seed(known[:4] or known, pool, db, decision),
-        known[:4] or known,
-        db,
-        pool,
-        decision.archetype,
-    )
-    if len(seed8) == 8:
-        evaluation = DeckEvaluator.evaluate(
-            seed8, core=known, archetype=decision.archetype, db=db,
-        )
-        last = BuildResult(
-            deck=seed8,
-            archetype=decision.archetype,
-            average_elixir=_avg_elixir(seed8, db),
-            confidence=20.0,
-            source_deck_id=None,
-            balanced=False,
-            validation=None,
-            evaluation=evaluation,
-        )
-        return {
-            "ok": True,
-            "core": known,
-            "decks": [],
-            "stage": STAGE_FREEFORM,
-            "mode": STAGE_FREEFORM,
-            "build_results": [last],
-            "expanded_core": known,
-        }
-
-    logger.error("staged_build exhausted for seed=%s", known)
-    return {
-        "ok": False,
-        "error_code": "BUILD_IMPOSSIBLE",
-        "error_params": {"card_ru": card_name_ru(known[0])},
-        "core": known,
-        "decks": [],
-        "stage": None,
-        "mode": None,
-    }
+    logger.info("staged_build NO_VALID_BUILD for seed=%s", known)
+    return _no_valid_build(known)

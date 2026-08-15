@@ -2,6 +2,9 @@
 
 PromptBuilder → LLM → tool_calls → ToolCaller → role=tool → LLM → …
 Максимум 5 итераций (execute_llm_round).
+
+Финальный ответ только поверх успешного ToolResult.
+Без tool / tool failed → «Не удалось получить данные.» (не RuntimeError → не Planner invent).
 """
 
 from __future__ import annotations
@@ -20,12 +23,26 @@ from bot.services.ghosteek_ai.models import Plan
 from bot.services.ghosteek_ai.tools.base import ToolCaller, ToolRegistry
 from bot.services.ghosteek_ai.tools.llm_round import (
     MAX_LLM_ROUND_ITERATIONS,
+    NO_DATA_USER_MESSAGE,
     execute_llm_round,
+    has_successful_tool_result,
 )
 
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = MAX_LLM_ROUND_ITERATIONS  # 5
+
+# Коды, при которых агент отдаёт фиксированный отказ вместо fallback Planner.
+_GROUNDED_BLOCK_CODES = frozenset(
+    {
+        "LLM_ROUND_NO_SUCCESSFUL_TOOL",
+        "LLM_ROUND_TOOL_FAILED",
+        "LLM_ROUND_UNGROUNDED",
+        "LLM_ROUND_TOOL_ERROR",
+        "LLM_ROUND_REASONING_BLOCKED",
+        "LLM_ROUND_MAX_ITERATIONS",
+    }
+)
 
 
 @dataclass
@@ -34,6 +51,15 @@ class AgentRunResult:
     tool_names: list[str] = field(default_factory=list)
     rounds: int = 0
     used_tool_calling: bool = False
+
+
+def _no_data_result(round_result) -> AgentRunResult:
+    return AgentRunResult(
+        text=NO_DATA_USER_MESSAGE,
+        tool_names=[r.tool for r in round_result.tool_results],
+        rounds=round_result.iterations,
+        used_tool_calling=round_result.used_tools,
+    )
 
 
 async def run_llm_agent(
@@ -54,6 +80,8 @@ async def run_llm_agent(
 
     ``planner_plan`` больше не влияет на выбор tools (оставлен в сигнатуре
     для совместимости; подсказка в prompt не передаётся).
+
+    Без успешного ToolResult финальный ответ модели запрещён.
     """
     del planner_plan  # LLM выбирает tools сам
 
@@ -83,6 +111,16 @@ async def run_llm_agent(
     if not round_result.ok:
         err = round_result.error
         code = err.error_code if err is not None else "LLM_ROUND_ERROR"
+        # Gate: нет / failed ToolResult → фиксированный отказ, без Planner invent.
+        if code in _GROUNDED_BLOCK_CODES or not has_successful_tool_result(
+            round_result.tool_results
+        ):
+            logger.info(
+                "ghosteek_ai agent_loop blocked code=%s tools=%s → no_data",
+                code,
+                [r.tool for r in round_result.tool_results],
+            )
+            return _no_data_result(round_result)
         detail = ""
         if err is not None and isinstance(err.error_params, dict):
             detail = str(err.error_params.get("error") or "")
@@ -91,14 +129,18 @@ async def run_llm_agent(
             msg = f"{msg}: {detail}"
         raise RuntimeError(msg)
 
+    # Gate: даже при ok=True ответ только поверх успешного tool.
+    if not has_successful_tool_result(round_result.tool_results):
+        logger.info("ghosteek_ai agent_loop blocked: ok but no successful ToolResult")
+        return _no_data_result(round_result)
+
     text = finalize_user_facing_text(
         content=round_result.text,
         filter=DEFAULT_REASONING_FILTER,
     )
     if not text:
-        raise RuntimeError(
-            "Agent mode: LLM returned internal reasoning instead of a final answer"
-        )
+        logger.info("ghosteek_ai agent_loop blocked: empty finalized text")
+        return _no_data_result(round_result)
 
     tool_names = [r.tool for r in round_result.tool_results]
     logger.info(

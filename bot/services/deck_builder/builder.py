@@ -234,27 +234,6 @@ def _rank_similar_decks(
     return scored[:limit]
 
 
-def _result_balanced(deck: list[str], core: list[str], db: DeckDatabase, archetype: str) -> bool:
-    """Проверка играбельности через EvaluationReport (единый источник)."""
-    from bot.services.deck_builder.win_plan_check import evaluate_win_plan
-    from bot.services.deck_evaluator import DeckEvaluator
-
-    if not evaluate_win_plan(deck, db, archetype).complete:
-        return False
-    report = DeckEvaluator.evaluate(deck, core=core, archetype=archetype, db=db)
-    if not report.hard_constraints.passed:
-        return False
-    core_avg = sum(
-        _pair_synergy(db, c, d)
-        for c in core
-        for d in deck
-        if c != d
-    ) / max(len(core) * max(len(deck) - 1, 1), 1)
-    if core_avg < 62.0:
-        return False
-    return report.total_score >= 58.0
-
-
 def _validate_variant(
     deck: list[str],
     core: list[str],
@@ -770,9 +749,10 @@ def _count_spells(deck: list[str], db: DeckDatabase) -> int:
 
 
 def _count_wins(deck: list[str], db: DeckDatabase) -> int:
-    # Совпадает с finalize / hard MAX_WINS (только attack-wins).
-    return sum(1 for c in deck if is_attack_win(c))
+    """Независимые WC — тот же SoT, что finalize / hard MAX_WINS."""
+    from bot.services.deck_builder.quality import count_wins
 
+    return count_wins(deck, db)
 
 def _is_spell(db: DeckDatabase, name: str) -> bool:
     return is_spell(db, name)

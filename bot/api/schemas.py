@@ -879,6 +879,122 @@ class ReplayDetectionResponse(BaseModel):
     observations: list[str] = Field(default_factory=list)
 
 
+class ReplayTimelineItemResponse(BaseModel):
+    timestamp_seconds: float
+    frame_index: int
+    observation_type: str
+    confidence: float
+    source: str = "heuristic"
+
+
+class ReplayConfirmedCardResponse(BaseModel):
+    card_id: str
+    card_name: str
+    confidence: float
+    first_seen: float
+    last_seen: float
+
+
+class ReplayAmbiguousCardCandidateResponse(BaseModel):
+    card_id: str
+    card_name: str
+    confidence: float
+
+
+class ReplayAmbiguousCardResponse(BaseModel):
+    candidates: list[ReplayAmbiguousCardCandidateResponse] = Field(default_factory=list)
+    frame_index: int
+    timestamp_seconds: float
+    location: str = "unknown"
+    source: str = "heuristic"
+
+
+class ReplayEventEvidenceResponse(BaseModel):
+    frame_indices: list[int] = Field(default_factory=list)
+    observation_ids: list[str] = Field(default_factory=list)
+    timestamps: list[float] = Field(default_factory=list)
+
+
+class ReplayEventResponse(BaseModel):
+    timestamp_seconds: float
+    event_type: str
+    player: str
+    card_id: str | None = None
+    confidence: float
+    source: str = "heuristic"
+    evidence: ReplayEventEvidenceResponse = Field(default_factory=ReplayEventEvidenceResponse)
+
+
+class ReplayUnknownIntervalResponse(BaseModel):
+    from_: float = Field(alias="from")
+    to: float
+    status: str = "unknown"
+
+    model_config = {"populate_by_name": True}
+
+
+class ReplayBattlePhaseResponse(BaseModel):
+    phase: str
+    timestamp_seconds: float
+    confidence: float
+
+
+class ReplayBattleTimelineSummaryResponse(BaseModel):
+    confirmed_event_count: int = 0
+    confirmed_card_count: int = 0
+    first_event: float | None = None
+    last_event: float | None = None
+    known_duration: float = 0.0
+    unknown_intervals_count: int = 0
+
+
+class ReplayBattleTimelineResponse(BaseModel):
+    duration_seconds: float
+    events: list[ReplayEventResponse] = Field(default_factory=list)
+    confirmed_events: list[ReplayEventResponse] = Field(default_factory=list)
+    unknown_intervals: list[ReplayUnknownIntervalResponse] = Field(default_factory=list)
+    confidence: float = 0.0
+    phases: list[ReplayBattlePhaseResponse] = Field(default_factory=list)
+    summary: ReplayBattleTimelineSummaryResponse | None = None
+
+
+class ReplayTacticalLimitationsResponse(BaseModel):
+    what_we_know: list[str] = Field(default_factory=list)
+    what_we_dont_know: list[str] = Field(default_factory=list)
+
+
+class ReplayTacticalAnalysisResponse(BaseModel):
+    summary: str = ""
+    positive_actions: list[str] = Field(default_factory=list)
+    possible_mistakes: list[str] = Field(default_factory=list)
+    matchup_observations: list[str] = Field(default_factory=list)
+    deck_observations: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    limitations: ReplayTacticalLimitationsResponse = Field(
+        default_factory=ReplayTacticalLimitationsResponse
+    )
+
+
+class ReplayFactsResponse(BaseModel):
+    source: str = "replay_analysis"
+    replay_status: str
+    confidence: float
+    duration_seconds: float
+    frames_analyzed: int
+    timeline: list[ReplayTimelineItemResponse] = Field(default_factory=list)
+    facts: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    confirmed_cards: list[ReplayConfirmedCardResponse] = Field(default_factory=list)
+    ambiguous_cards: list[ReplayAmbiguousCardResponse] = Field(default_factory=list)
+    events: list[ReplayEventResponse] = Field(default_factory=list)
+    confirmed_events: list[ReplayEventResponse] = Field(default_factory=list)
+    battle_timeline: ReplayBattleTimelineResponse | None = None
+    tactical_analysis: ReplayTacticalAnalysisResponse | None = None
+    coach_reply: str | None = None
+    coach_source: str | None = None
+
+
 class ReplayAnalyzeSuccess(BaseModel):
     ok: bool = True
     status: str
@@ -890,6 +1006,7 @@ class ReplayAnalyzeSuccess(BaseModel):
     height: int
     fps: float | None = None
     replay_detection: ReplayDetectionResponse | None = None
+    replay_facts: ReplayFactsResponse | None = None
 
 
 class ReplayAnalyzeError(BaseModel):

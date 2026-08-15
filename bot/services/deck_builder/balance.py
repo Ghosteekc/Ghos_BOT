@@ -65,16 +65,7 @@ SOFT_ROLE_BONUS: dict[str, float] = {
     ROLE_CYCLE: 5.0,
 }
 
-SCORE_WEIGHTS: dict[str, float] = {
-    "synergy": 0.25,
-    "offense": 0.12,
-    "defense": 0.12,
-    "anti_air": 0.12,
-    "anti_swarm": 0.10,
-    "spell_balance": 0.10,
-    "elixir": 0.10,
-    "archetype_fit": 0.09,
-}
+# Оси ScoreBreakdown больше не взвешиваются здесь — итог только EvaluationReport.
 
 
 @dataclass
@@ -82,7 +73,7 @@ class ScoreBreakdown:
     """Внутренние оси качества (вход для DeckEvaluator).
 
     Не источник ранжирования Builder. Публичная оценка — EvaluationReport.
-    ``total`` оставлен для обратной совместимости импортов / is_playable_balanced.
+    ``total`` всегда 0: итог только EvaluationReport.total_score.
     """
 
     synergy: float = 0.0
@@ -386,7 +377,6 @@ def compute_score_breakdown(
         "elixir": _axis_elixir(deck, db, archetype),
         "archetype_fit": _axis_archetype_fit(deck, db, archetype),
     }
-    total = sum(axes[k] * SCORE_WEIGHTS[k] for k in axes)
 
     return ScoreBreakdown(
         synergy=axes["synergy"],
@@ -397,25 +387,11 @@ def compute_score_breakdown(
         spell_balance=axes["spell_balance"],
         elixir=axes["elixir"],
         archetype_fit=axes["archetype_fit"],
-        total=total,
+        # total не SoT: публичный итог только EvaluationReport.total_score
+        total=0.0,
         hard_issues=hard,
         soft_issues=soft,
     )
-
-
-def is_playable_balanced(
-    breakdown: ScoreBreakdown,
-    *,
-    core_synergy_avg: float,
-    min_core_synergy: float = 62.0,
-    min_total: float = 58.0,
-) -> bool:
-    """Legacy helper. Builder использует EvaluationReport через validation.py."""
-    if breakdown.hard_issues:
-        return False
-    if core_synergy_avg < min_core_synergy:
-        return False
-    return breakdown.total >= min_total
 
 
 def _missing_soft_roles(deck: list[str], db: DeckDatabase, archetype: str) -> set[str]:

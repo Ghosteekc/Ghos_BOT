@@ -140,7 +140,12 @@ class DeckBuilderTool(BaseTool):
                 return ToolResult(
                     tool=self.name,
                     ok=False,
-                    error_code="BUILD_IMPOSSIBLE",
+                    error_code="NO_VALID_BUILD",
+                    error_params={
+                        "card_ru": card_name_ru(core[0]),
+                        "reason": "Не удалось собрать стабильную колоду из выбранного ядра.",
+                        "suggestion": "Добавьте спелл или поддержку в ядро и попробуйте снова.",
+                    },
                     data={"core": core[:4]},
                     actions=[{"type": "navigate", "path": "/decks"}],
                 )
@@ -173,15 +178,20 @@ class DeckBuilderTool(BaseTool):
                 limit=3,
             )
             if not staged.get("ok"):
-                code = staged.get("error_code") or "BUILD_UNKNOWN_CARD"
+                code = staged.get("error_code") or staged.get("status") or "BUILD_UNKNOWN_CARD"
+                params = dict(staged.get("error_params") or {})
+                if staged.get("reason"):
+                    params.setdefault("reason", staged["reason"])
+                if staged.get("suggestion"):
+                    params.setdefault("suggestion", staged["suggestion"])
+                if "card_ru" not in params:
+                    params["card_ru"] = card_name_ru(core[0])
                 return ToolResult(
                     tool=self.name,
                     ok=False,
                     error_code=code,
-                    error_params=staged.get("error_params") or {
-                        "card_ru": card_name_ru(core[0]),
-                    },
-                    data={"core": core},
+                    error_params=params,
+                    data={"core": core, "status": staged.get("status") or code},
                     actions=[{"type": "navigate", "path": "/decks"}],
                 )
 
@@ -202,9 +212,15 @@ class DeckBuilderTool(BaseTool):
                 return ToolResult(
                     tool=self.name,
                     ok=False,
-                    error_code="BUILD_IMPOSSIBLE",
-                    error_params={"card_ru": card_name_ru(core[0])},
-                    data={"core": core},
+                    error_code="NO_VALID_BUILD",
+                    error_params={
+                        "card_ru": card_name_ru(core[0]),
+                        "reason": staged.get("reason")
+                        or "Не удалось собрать стабильную колоду.",
+                        "suggestion": staged.get("suggestion")
+                        or "Добавьте ещё карты в ядро или смените главную угрозу.",
+                    },
+                    data={"core": core, "status": "NO_VALID_BUILD"},
                     actions=[{"type": "navigate", "path": "/decks"}],
                 )
 

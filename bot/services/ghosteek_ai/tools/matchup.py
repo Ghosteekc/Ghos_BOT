@@ -47,18 +47,22 @@ class MatchupTool(BaseTool):
                 actions=[{"type": "navigate", "path": "/battles"}],
             )
 
-        evaluation = evaluate_matchup(user_deck[:8], opp[:8])
+        from bot.services.deck_builder.quality import evaluate_deck
+
+        matchup = evaluate_matchup(user_deck[:8], opp[:8])
+        deck_report = evaluate_deck(user_deck[:8], opponent=opp[:8])
         return ToolResult(
             tool=self.name,
             ok=True,
             data={
                 "user_deck": user_deck[:8],
                 "opponent_deck": opp[:8],
-                "score": evaluation.score,
-                "rating": evaluation.rating,
-                "reasons": evaluation.reasons,
-                "advantages": evaluation.advantages,
-                "disadvantages": evaluation.disadvantages,
+                "score": matchup.score,
+                "rating": matchup.rating,
+                "reasons": matchup.reasons,
+                "advantages": matchup.advantages,
+                "disadvantages": matchup.disadvantages,
+                "evaluation_report": deck_report.to_dict(),
             },
             actions=[{"type": "navigate", "path": "/decks/compare"}],
         )

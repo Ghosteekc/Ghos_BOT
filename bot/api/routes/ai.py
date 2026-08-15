@@ -11,8 +11,15 @@ from bot.api.schemas import (
     GhosteekAiAskRequest,
     GhosteekAiAskResponse,
     DeckCardResponse,
+    ReplayAmbiguousCardResponse,
     ReplayAnalyzeSuccess,
+    ReplayBattleTimelineResponse,
+    ReplayConfirmedCardResponse,
     ReplayDetectionResponse,
+    ReplayEventResponse,
+    ReplayFactsResponse,
+    ReplayTacticalAnalysisResponse,
+    ReplayTimelineItemResponse,
 )
 from bot.models.database import User
 from bot.services.ghosteek_ai import ask_ghosteek_ai
@@ -100,9 +107,75 @@ async def analyze_replay(
                 "width": outcome.width,
                 "height": outcome.height,
                 "confidence": detection.confidence,
+                **(
+                    {
+                        "has_analysis": True,
+                        "coach_reply": outcome.analysis.coach_reply,
+                        "coach_source": outcome.analysis.coach_source,
+                    }
+                    if outcome.analysis is not None and detection.status == "cr_replay"
+                    else {}
+                ),
             },
         )
         ConversationManager.save(user.telegram_id, session)
+    replay_facts = None
+    if outcome.analysis is not None and detection.status == "cr_replay":
+        payload = outcome.analysis.to_dict()
+        replay_facts = ReplayFactsResponse(
+            source=str(payload.get("source") or "replay_analysis"),
+            replay_status=str(payload.get("replay_status") or detection.status),
+            confidence=float(payload.get("confidence") or detection.confidence),
+            duration_seconds=float(payload.get("duration_seconds") or outcome.duration_seconds),
+            frames_analyzed=int(payload.get("frames_analyzed") or detection.frames_analyzed),
+            timeline=[
+                ReplayTimelineItemResponse(**item)
+                for item in (payload.get("timeline") or [])
+                if isinstance(item, dict)
+            ],
+            facts=[str(x) for x in (payload.get("facts") or [])],
+            limitations=[str(x) for x in (payload.get("limitations") or [])],
+            confirmed_cards=[
+                ReplayConfirmedCardResponse(**item)
+                for item in (payload.get("confirmed_cards") or [])
+                if isinstance(item, dict)
+            ],
+            ambiguous_cards=[
+                ReplayAmbiguousCardResponse(**item)
+                for item in (payload.get("ambiguous_cards") or [])
+                if isinstance(item, dict)
+            ],
+            events=[
+                ReplayEventResponse(**item)
+                for item in (payload.get("events") or [])
+                if isinstance(item, dict)
+            ],
+            confirmed_events=[
+                ReplayEventResponse(**item)
+                for item in (payload.get("confirmed_events") or [])
+                if isinstance(item, dict)
+            ],
+            battle_timeline=(
+                ReplayBattleTimelineResponse.model_validate(payload["battle_timeline"])
+                if isinstance(payload.get("battle_timeline"), dict)
+                else None
+            ),
+            tactical_analysis=(
+                ReplayTacticalAnalysisResponse.model_validate(payload["tactical_analysis"])
+                if isinstance(payload.get("tactical_analysis"), dict)
+                else None
+            ),
+            coach_reply=(
+                str(payload["coach_reply"])
+                if payload.get("coach_reply") is not None
+                else None
+            ),
+            coach_source=(
+                str(payload["coach_source"])
+                if payload.get("coach_source") is not None
+                else None
+            ),
+        )
     return ReplayAnalyzeSuccess(
         status=detection.status,
         filename=outcome.filename,
@@ -118,6 +191,7 @@ async def analyze_replay(
             frames_analyzed=detection.frames_analyzed,
             observations=list(detection.observations),
         ),
+        replay_facts=replay_facts,
     )
 
 

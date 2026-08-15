@@ -27,6 +27,7 @@ from bot.services.deck_builder.constants import (
     ROLE_TANK,
     ROLE_WIN,
 )
+from bot.services.deck_builder.constraint_messages import GOOD_DECK_MIN_TOTAL
 from bot.services.deck_builder.loader import DeckDatabase, get_database
 from bot.services.deck_builder.win_plan_check import evaluate_win_plan
 from bot.services.deck_evaluator import EvaluationReport
@@ -88,7 +89,7 @@ class DeckSanityReport:
         if len(msgs) >= 2:
             return msgs[1]
         if self.critical_issues:
-            return "Builder мог ошибиться — не буду оправдывать слабую сборку."
+            return "Сначала стоит закрыть дыры в составе — иначе план игры будет гаданием."
         return ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -266,9 +267,10 @@ def _check_structure(
 
 
 def _check_intent(deck: list[str], intent: DeckIntent) -> tuple[bool, SanityIssue | None]:
-    missing: list[str] = []
+    missing_critical: list[str] = []
+    missing_warn: list[str] = []
     if intent.primary_win and intent.primary_win not in deck:
-        missing.append(f"нет главной угрозы «{intent.primary_win}»")
+        missing_critical.append(f"нет главной угрозы «{intent.primary_win}»")
 
     role_map = {
         "win_condition": ROLE_WIN,
@@ -280,29 +282,49 @@ def _check_intent(deck: list[str], intent: DeckIntent) -> tuple[bool, SanityIssu
         "dps": ROLE_DPS,
         "tank": ROLE_TANK,
     }
+    role_miss_ru = {
+        "dps": "мало стабильного урона",
+        "tank": "нет танка",
+        "anti_air": "слабо против воздуха",
+        "air_defense": "слабо против воздуха",
+        "anti_tank": "слабо против танков",
+        "big_spell": "нет большого заклинания",
+        "small_spell": "нет маленького заклинания",
+    }
     for role_id in intent.required_role_ids:
         role = role_map.get(role_id, role_id)
         if role_id == "splash":
             if not any(card_has_role(c, "splash") or card_has_role(c, "anti_swarm") for c in deck):
-                missing.append("нет splash / anti-swarm")
+                missing_warn.append("мало splash / anti-swarm")
             continue
         if role and not any(card_has_role(c, role) for c in deck):
             # win_condition уже покрыт отдельным check — не дублируем как critical intent
             if role_id == "win_condition":
                 continue
-            missing.append(f"нет роли {role_id}")
+            label = role_miss_ru.get(role_id, f"не хватает роли «{role_id}»")
+            # Siege/cycle часто без отдельного DPS-тега (Лучницы = support) — не валим сборку.
+            if role_id == "dps":
+                missing_warn.append(label)
+            else:
+                missing_critical.append(label)
 
     if intent.min_cycle_cards > 0:
         cycle_n = sum(
             1 for c in deck if card_has_role(c, "cycle") or get_card_elixir(c) <= 2
         )
         if cycle_n < intent.min_cycle_cards:
-            missing.append("недостаточно cycle-карт под Intent")
+            missing_critical.append("недостаточно cycle-карт под Intent")
 
-    if missing:
+    if missing_critical:
         return False, _issue(
             "intent_mismatch",
-            "Сборка не соответствует заявленному стилю игры: " + "; ".join(missing[:3]) + ".",
+            "Сборка слабо стыкуется со стилем: " + "; ".join(missing_critical[:3]) + ".",
+        )
+    if missing_warn:
+        return True, _issue(
+            "intent_mismatch",
+            "Стиль в целом держится, но " + missing_warn[0] + ".",
+            critical=False,
         )
     return True, None
 
@@ -345,7 +367,7 @@ def _check_evaluation(evaluation: EvaluationReport) -> tuple[bool, list[SanityIs
             "evaluation_fail",
             f"Состав пока нестабилен: {detail}",
         ))
-    if evaluation.total_score < 48.0:
+    if evaluation.total_score < GOOD_DECK_MIN_TOTAL:
         ok = False
         issues.append(_issue(
             "evaluation_fail",

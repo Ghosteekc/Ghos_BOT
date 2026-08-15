@@ -242,11 +242,10 @@ def build_default_registry() -> ToolRegistry:
     from bot.services.ghosteek_ai.tools.deck_builder import DeckBuilderTool
     from bot.services.ghosteek_ai.tools.knowledge import KnowledgeTool, MechanicsTool
     from bot.services.ghosteek_ai.tools.matchup import MatchupTool
-    from bot.services.ghosteek_ai.tools.meta import MetaTool
     from bot.services.ghosteek_ai.tools.recommendation import RecommendationTool
-    from bot.services.ghosteek_ai.tools.stats import StatsTool
     from bot.services.ghosteek_ai.tools.unsupported import UnsupportedTool
 
+    # MetaTool / StatsTool stubs не регистрируем (Planner → clarify).
     registry = ToolRegistry()
     for tool in (
         UnsupportedTool(),
@@ -260,8 +259,6 @@ def build_default_registry() -> ToolRegistry:
         DeckAnalysisTool(),
         RecommendationTool(),
         MatchupTool(),
-        MetaTool(),
-        StatsTool(),
     ):
         registry.register(tool)
     return registry

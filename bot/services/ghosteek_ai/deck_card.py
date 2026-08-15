@@ -183,8 +183,29 @@ def deck_card_from_build_data(
 
 
 def format_arena_label(arena_id: int | None, trophies: int | None = None) -> str | None:
-    if arena_id is None and trophies is None:
+    """Человекочитаемая метка для UI. Сырой API id (54xxxxxx / 64xxxxxx) не светим."""
+    if trophies is not None and int(trophies) > 0:
+        return f"{int(trophies)} 🏆"
+    if arena_id is None:
         return None
-    if arena_id is not None:
-        return f"Арена {arena_id}"
+    # Старые локальные id 0–20; API Clash Royale отдаёт огромные id без имени здесь.
+    if 0 <= int(arena_id) <= 20:
+        names = {
+            0: "Тренировочный лагерь",
+            1: "Гоблинская арена",
+            2: "Арена песков",
+            3: "Драконья арена",
+            4: "Нижняя пик",
+            5: "Арена рабочих",
+            6: "Сахарная фотография",
+            7: "Скальная арена",
+            8: "Арена изобилия",
+            9: "Высший пик",
+            10: "Арена электричества",
+            11: "Электро-арена",
+            12: "Механическая арена",
+            13: "Запретная арена",
+            14: "Трофейная арена",
+        }
+        return names.get(int(arena_id))
     return None

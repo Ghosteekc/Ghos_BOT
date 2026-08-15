@@ -92,6 +92,11 @@ def reply_replay_pending_analysis(meta: dict[str, Any]) -> str:
             intent="replay_pending",
         )
 
+    # Stage 7+: grounded coach text already available
+    stored = str(meta.get("coach_reply") or "").strip()
+    if stored and status == "cr_replay":
+        return stored
+
     duration = format_duration(float(meta.get("duration_seconds") or 0))
     w = int(meta.get("width") or 0)
     h = int(meta.get("height") or 0)

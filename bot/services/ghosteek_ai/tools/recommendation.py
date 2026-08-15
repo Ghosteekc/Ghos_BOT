@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from bot.services.ghosteek_ai.context.ai_context import AIContext
 from bot.services.ghosteek_ai.models import ToolResult
 from bot.services.ghosteek_ai.tools.base import BaseTool
@@ -31,6 +33,30 @@ class RecommendationTool(BaseTool):
                 actions=[{"type": "navigate", "path": "/decks"}],
             )
         rec = call_recommendation_analyze(deck, apply_swaps=True)
+        plan = rec.improvement_plan
+        original_set = set(deck)
+        valid_steps = [
+            step
+            for step in plan.steps
+            if not (
+                getattr(step, "pick", None)
+                and step.pick in original_set
+                and step.pick != getattr(step, "drop", None)
+            )
+        ]
+        if valid_steps != list(plan.steps):
+            needed = any(
+                getattr(s, "drop", None) and getattr(s, "pick", None) for s in valid_steps
+            )
+            rec = replace(
+                rec,
+                improvement_plan=replace(
+                    plan,
+                    steps=valid_steps,
+                    needed=needed,
+                    improved_deck=list(deck) if not needed else list(plan.improved_deck),
+                ),
+            )
         evaluation = getattr(rec, "evaluation_report", None)
         improved = list(rec.improvement_plan.improved_deck)
         synergy_score = (

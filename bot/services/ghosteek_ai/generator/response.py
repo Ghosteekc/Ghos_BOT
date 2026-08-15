@@ -10,10 +10,12 @@ from typing import Any
 
 from bot.services.ghosteek_ai.constraints import refuse_unsupported
 from bot.services.ghosteek_ai.intents import (
+    CHAT_FALLBACK_PROMPTS,
     CLARIFY_PROMPT,
     INTENT_ANALYZE_DECK,
     INTENT_BUILD_DECK,
     INTENT_CARD_INFO,
+    INTENT_CHAT,
     INTENT_EXPLAIN_MECHANIC,
     INTENT_GAME_COACH,
     INTENT_IMPROVE_DECK,
@@ -80,9 +82,9 @@ class TemplateResponseGenerator:
                 if last_q and last_q.strip():
                     why = f"Ранее: «{_truncate_q(last_q)}»."
             return coach_reply(
-                "Уточни одну цель.",
-                why=why or "Без конкретики совет будет общим.",
-                tip="Колода, матчап, бой, карта или термин — выбери одно.",
+                "Давай уточним задачу.",
+                why=why or "Без конкретики совет получится слишком общим.",
+                tip="Могу колоду, матчап, бой, карту или термин — что сейчас нужно?",
                 intent="clarify",
             )
         return assert_coach_voice(CLARIFY_PROMPT)
@@ -91,7 +93,11 @@ class TemplateResponseGenerator:
         intent = ctx.intent.request
         data = ctx.primary_tool_data()
 
-        if intent == INTENT_CARD_INFO:
+        if intent == INTENT_CHAT:
+            seed = (ctx.raw_message or "") + "chat"
+            idx = abs(hash(seed)) % len(CHAT_FALLBACK_PROMPTS)
+            text = assert_coach_voice(CHAT_FALLBACK_PROMPTS[idx])
+        elif intent == INTENT_CARD_INFO:
             text = template_card_info(ctx.knowledge.card or data)
         elif intent == INTENT_EXPLAIN_MECHANIC:
             text = template_mechanic(ctx.knowledge.mechanic or data)
@@ -116,8 +122,8 @@ class TemplateResponseGenerator:
             text = template_matchup(merged)
         else:
             text = coach_reply(
-                "Уточни задачу.",
-                tip="Колода, матчап, бой или термин — выбери одно.",
+                "Не совсем понял задачу.",
+                tip="Напиши своими словами: колода, матчап, бой или термин.",
                 intent="clarify",
             )
 

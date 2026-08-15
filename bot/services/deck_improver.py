@@ -22,12 +22,12 @@ from bot.services.deck_builder.builder import (
     _card_has_role,
     _card_roles,
     _count_spells,
-    _count_wins,
     _detect_archetype,
     _is_spell,
     _is_win,
     _pair_synergy,
 )
+from bot.services.deck_builder.quality import count_wins as _count_wins
 from bot.services.deck_builder.constants import (
     ARCHETYPE_ANCHORS,
     ARCHETYPE_ELIXIR,

@@ -25,6 +25,7 @@ def test_sanity_fails_without_win_condition():
 
 
 def test_template_build_honest_on_sanity_fail():
+    # Нет полной колоды — честный отказ, без «как играть».
     text = template_build_deck({
         "core": ["Knight", "Archers", "Cannon", "Fireball"],
         "decks": [{
@@ -35,13 +36,49 @@ def test_template_build_honest_on_sanity_fail():
                 "checks": {"anti_air": False},
                 "critical_messages": ["Колода слишком слабо защищается от воздуха."],
                 "coach_verdict": "Колода слишком слабо защищается от воздуха.",
-                "coach_why": "Builder мог ошибиться — не буду оправдывать слабую сборку.",
+                "coach_why": "По составу видно дыру.",
             },
         }],
         "mode": "constructor",
     })
     assert "воздух" in text.lower() or "воздуха" in text.lower()
     assert "стабильн" not in text.lower() or "нестабильн" in text.lower()
+
+
+def test_template_build_presents_complete_deck():
+    mortar = [
+        "Mortar",
+        "Knight",
+        "Archers",
+        "Ice Spirit",
+        "Skeletons",
+        "Rocket",
+        "The Log",
+        "Tornado",
+    ]
+    text = template_build_deck({
+        "core": ["Mortar"],
+        "decks": [{
+            "name": "Мортира цикл",
+            "archetype": "Cycle",
+            "cards": mortar,
+            "sanity_report": {
+                "passed": False,
+                "critical_messages": [
+                    "Сборка не соответствует заявленному стилю игры: нет роли dps."
+                ],
+                "coach_verdict": "Сборка не соответствует заявленному стилю игры: нет роли dps.",
+                "coach_why": "Builder мог ошибиться — не буду оправдывать слабую сборку.",
+            },
+        }],
+        "mode": "meta_templates",
+    })
+    low = text.lower()
+    assert "собрал" in low
+    assert "оправдывать" not in low
+    assert "критическ" not in low
+    assert "dps" not in low
+    assert "закрой" not in low
 
 
 def test_template_analyze_blocks_play_plan_on_fail():

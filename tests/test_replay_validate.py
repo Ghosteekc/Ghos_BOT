@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from bot.api.routes import ai as ai_routes
 from bot.api.schemas import GhosteekAiAskRequest
 from bot.services.ghosteek_ai.models import GhosteekAiResponse
-from bot.services.ghosteek_ai.replay.models import ReplayDetection
+from bot.services.ghosteek_ai.replay.models import DetectionBundle, ReplayDetection
 from bot.services.ghosteek_ai.replay.service import ReplayAnalyzeService
 from bot.services.ghosteek_ai.replay.validator import (
     CODE_BUSY,
@@ -348,11 +348,14 @@ def test_api_success_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ReplayAnalyzeService,
         "_run_detection",
-        lambda self, *args, **kwargs: ReplayDetection(
-            status="cr_replay",
-            confidence=0.91,
-            frames_analyzed=20,
-            observations=["card bar detected"],
+        lambda self, *args, **kwargs: DetectionBundle(
+            detection=ReplayDetection(
+                status="cr_replay",
+                confidence=0.91,
+                frames_analyzed=20,
+                observations=["card bar detected"],
+            ),
+            frames=(),
         ),
     )
     monkeypatch.setattr(ai_routes, "get_replay_service", lambda: service)
