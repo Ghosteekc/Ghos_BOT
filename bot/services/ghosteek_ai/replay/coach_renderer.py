@@ -313,6 +313,33 @@ def format_facts_block(envelope: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_TECHNICAL_PLAYER_LINE_RE = re.compile(
+    r"("
+    r"grounded\s+replay|"
+    r"confirmed\s+event|"
+    r"card\s+interval|"
+    r"unknown\s+gaps|"
+    r"confidence\s*[≥>=]|"
+    r"card_play|"
+    r"card-level|"
+    r"database[- ]counter|"
+    r"timeline\s+remain|"
+    r"\bplays\b|"
+    r"\bffmpeg\b|"
+    r"\bqwen\b|"
+    r"\bollama\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _player_safe_line(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw or _TECHNICAL_PLAYER_LINE_RE.search(raw):
+        return ""
+    return raw
+
+
 def render_replay_coach_fallback(envelope: dict[str, Any]) -> str:
     """Deterministic coach text when Qwen fails or violates facts."""
     data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
@@ -321,10 +348,13 @@ def render_replay_coach_fallback(envelope: dict[str, Any]) -> str:
     # Prefer EN names (skip RU duplicates roughly)
     en_cards = [c for c in cards if re.search(r"[A-Za-z]", c)][:6]
 
-    positives = [f[10:] for f in facts if f.startswith("positive: ")][:2]
-    cautions = [f[9:] for f in facts if f.startswith("caution: ")][:2]
-    tips = [f[5:] for f in facts if f.startswith("tip: ")][:2]
-    summary = next((f[9:] for f in facts if f.startswith("summary: ")), "")
+    positives = [_player_safe_line(f[10:]) for f in facts if f.startswith("positive: ")]
+    positives = [p for p in positives if p][:2]
+    cautions = [_player_safe_line(f[9:]) for f in facts if f.startswith("caution: ")]
+    cautions = [c for c in cautions if c][:2]
+    tips = [_player_safe_line(f[5:]) for f in facts if f.startswith("tip: ")]
+    tips = [t for t in tips if t][:2]
+    summary = _player_safe_line(next((f[9:] for f in facts if f.startswith("summary: ")), ""))
 
     parts: list[str] = []
     if en_cards:
@@ -334,9 +364,13 @@ def render_replay_coach_fallback(envelope: dict[str, Any]) -> str:
             + "."
         )
     elif summary:
-        parts.append(summary.split(".")[0].strip() + ".")
+        first = summary.split(".")[0].strip()
+        parts.append((first + ".") if first else summary)
     else:
-        parts.append("По этому реплею пока мало подтверждённых фактов для уверенного разбора.")
+        parts.append(
+            "Похоже на реплей Clash Royale, но по этой записи пока мало уверенных деталей "
+            "для полного разбора."
+        )
 
     if positives:
         parts.append("Что видно уверенно: " + positives[0])
@@ -345,13 +379,14 @@ def render_replay_coach_fallback(envelope: dict[str, Any]) -> str:
     else:
         parts.append(
             "Этот момент я пока не могу подтвердить по видео — "
-            "тайминги plays, эликсир и урон не извлечены."
+            "тайминги розыгрышей, эликсир и урон не извлечены."
         )
     if tips:
         parts.append("Дальше: " + tips[0])
     else:
         parts.append(
-            "Пришли уточнение ключевого момента текстом — разберём на том, что уже подтверждено."
+            "Пришли запись целиком и покрупнее или уточни ключевой момент текстом — "
+            "разберём на том, что уже видно."
         )
     return " ".join(p.strip() for p in parts if p.strip())
 

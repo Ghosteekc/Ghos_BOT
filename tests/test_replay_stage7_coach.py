@@ -64,12 +64,12 @@ def _sample_bundle():
         confidence=0.91,
     )
     tactical = ReplayTacticalAnalysis(
-        summary="Grounded replay analysis: 2 confirmed event(s), 1 confirmed card interval(s).",
-        positive_actions=["Подтверждено начало боя в timeline."],
+        summary="Уверенно вижу на записи 1 карт(ы). Собрал 2 подтверждённых момента(ов) по бою.",
+        positive_actions=["Подтверждено начало боя."],
         possible_mistakes=["По доступным данным я не могу подтвердить причину этого момента."],
         matchup_observations=[],
         deck_observations=["Hog Rider: elixir 4; type troop"],
-        recommendations=["Полные колоды не восстановлены — не реконструирую недостающие карты."],
+        recommendations=["Полные колоды пока не собрал — недостающие карты не угадываю."],
         confidence=0.72,
         limitations=AnalysisLimitations(
             what_we_know=["battle_started confirmed"],

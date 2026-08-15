@@ -167,7 +167,7 @@ def test_candidate_event_not_authoritative() -> None:
         events=confirmed + candidates,
     )
     blob = " ".join(analysis.possible_mistakes + analysis.recommendations).lower()
-    assert "candidate" in blob
+    assert "предполож" in blob
     assert "рано поставил" not in blob
     assert "card_play_candidate events are not confirmed plays" in (
         analysis.limitations.what_we_dont_know
@@ -214,7 +214,10 @@ def test_matchup_only_when_both_sides_confirmed() -> None:
     # Cannon vs Hog often has counter relation in database
     assert isinstance(a2.matchup_observations, list)
     # Must not reconstruct full decks
-    assert any("не восстановлены" in r.lower() or "не реконструирую" in r.lower() for r in a2.recommendations)
+    assert any(
+        "не собрал" in r.lower() or "не угадываю" in r.lower() or "не реконструирую" in r.lower()
+        for r in a2.recommendations
+    )
 
 
 def test_no_full_deck_invention() -> None:

@@ -165,7 +165,7 @@ class ReplayTacticalAnalyzer:
             matchup_observations=[],
             deck_observations=[],
             recommendations=[
-                "Нужны подтверждённые события и карты реплея для обоснованных выводов."
+                "Пришли запись боя целиком и покрупнее — так проще подтвердить карты и ключевые моменты."
             ],
             confidence=confidence,
             limitations=AnalysisLimitations(
@@ -357,8 +357,8 @@ class ReplayTacticalAnalyzer:
             return [_INSUFFICIENT_MOMENT]
         if has_candidates:
             return [
-                "Есть card_play_candidate, но это не подтверждённый card_play — "
-                "ошибки по таймингу/эликсиру не утверждаются."
+                "Есть только предположения по постановкам карт — "
+                "ошибки по таймингу и эликсиру пока не подтверждаю."
             ]
         return [_INSUFFICIENT_MOMENT]
 
@@ -373,20 +373,24 @@ class ReplayTacticalAnalyzer:
     ) -> list[str]:
         out: list[str] = []
         if not cards:
-            out.append("Дождитесь подтверждённых карт (confidence ≥ 0.90) для card-level разбора.")
+            out.append(
+                "Нужно чётче видеть карты на экране — тогда разберу конкретные розыгрыши."
+            )
         if has_candidates:
-            out.append("Не опирайтесь на candidate plays как на факт постановки карты.")
+            out.append(
+                "Похожие постановки пока только предположения — на них как на факт не опирайся."
+            )
         if player_names and not opponent_names:
-            out.append("Карты оппонента не подтверждены — полный матчап недоступен.")
+            out.append("Карты соперника пока не подтвердил — полный матчап не собираю.")
         if opponent_names and not player_names:
-            out.append("Карты игрока не подтверждены по стороне — полный матчап недоступен.")
+            out.append("Твои карты по стороне пока не подтвердил — полный матчап не собираю.")
         if player_names and opponent_names and not matchup_obs:
-            out.append("Обе стороны частично видны, но database-counter связей не найдено.")
+            out.append("Обе стороны частично видны, но устойчивых контр по базе пока нет.")
         if len(player_names) < 8 or len(opponent_names) < 8:
-            out.append("Полные колоды не восстановлены — не реконструирую недостающие карты.")
+            out.append("Полные колоды пока не собрал — недостающие карты не угадываю.")
         if not out:
             out.append(
-                "Опирайтесь только на confirmed events/cards; пробелы timeline остаются unknown."
+                "Опирайся только на то, что уже видно уверенно; пустые участки боя не заполняю догадками."
             )
         return out[:8]
 
@@ -398,23 +402,25 @@ class ReplayTacticalAnalyzer:
         confirmed: Sequence[ReplayEvent],
         matchup_obs: Sequence[str],
     ) -> str:
-        parts: list[str] = []
         n_cards = len(cards)
         n_ev = len(confirmed)
-        parts.append(
-            f"Grounded replay analysis: {n_ev} confirmed event(s), {n_cards} confirmed card interval(s)."
-        )
+        if n_cards == 0 and n_ev == 0:
+            return (
+                "Похоже на реплей Clash Royale, но по этой записи пока мало уверенных деталей "
+                "для полного разбора."
+            )
+        parts: list[str] = []
+        if n_cards:
+            parts.append(f"Уверенно вижу на записи {n_cards} карт(ы).")
+        if n_ev:
+            parts.append(f"Собрал {n_ev} подтверждённых момента(ов) по бою.")
         if battle_timeline.summary and battle_timeline.summary.unknown_intervals_count:
-            parts.append(
-                f"Unknown gaps: {battle_timeline.summary.unknown_intervals_count}."
-            )
+            parts.append("Часть боя пока без уверенных сигналов.")
         if matchup_obs:
-            parts.append(
-                "Есть database matchup observations по подтверждённым картам обеих сторон."
-            )
+            parts.append("По подтверждённым картам обеих сторон есть наблюдения по матчапу.")
         else:
             parts.append(
-                "Тайминг plays, эликсир и причина поражения не подтверждены достаточными данными."
+                "Тайминги розыгрышей, эликсир и причину поражения пока не подтверждаю."
             )
         return " ".join(parts)
 
