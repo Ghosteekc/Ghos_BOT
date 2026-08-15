@@ -9,6 +9,7 @@ from bot.services.ghosteek_ai.replay.card_recognizer import (
 from bot.services.ghosteek_ai.replay.coach_renderer import ReplayCoachRenderer
 from bot.services.ghosteek_ai.replay.events import ReplayEventDetector
 from bot.services.ghosteek_ai.replay.facts import ReplayFactsBuilder
+from bot.services.ghosteek_ai.replay.game_state import GameStateBuilder
 from bot.services.ghosteek_ai.replay.hud_analyzer import HeuristicHudAnalyzer
 from bot.services.ghosteek_ai.replay.models import (
     ReplayAnalyzeOutcome,
@@ -28,6 +29,7 @@ from bot.services.ghosteek_ai.replay.validator import (
 
 __all__ = [
     "FrameSampler",
+    "GameStateBuilder",
     "HeuristicCardRecognizer",
     "HeuristicHudAnalyzer",
     "MAX_DURATION_SECONDS",

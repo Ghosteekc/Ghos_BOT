@@ -16,10 +16,23 @@ SAMPLE_FRAMES_DEFAULT = 20
 SAMPLE_FRAMES_MIN = 16
 SAMPLE_FRAMES_MAX = 24
 
+# Adaptive event sampling (Stage 5 full recognition)
+ANALYSIS_FPS_DEFAULT = 3.0
+ANALYSIS_FPS_MIN = 2.0
+ANALYSIS_FPS_MAX = 4.0
+EVENT_FPS_DEFAULT = 8.0
+EVENT_FPS_MIN = 6.0
+EVENT_FPS_MAX = 10.0
+MAX_FRAMES_DEFAULT = 96
+MAX_FRAMES_MIN = 24
+MAX_FRAMES_MAX = 180
+MAX_CONCURRENT_JOBS_DEFAULT = 1
+CHANGE_HASH_HAMMING = 10
+
 CR_THRESHOLD_DEFAULT = 0.75
 NOT_CR_THRESHOLD_DEFAULT = 0.30
 
-FRAME_TIMEOUT_DEFAULT = 60.0
+FRAME_TIMEOUT_DEFAULT = 120.0
 TARGET_SHORT_SIDE = 720
 NEAR_DUP_HAMMING = 6
 
@@ -53,7 +66,28 @@ def sample_frame_count() -> int:
 
 
 def frame_timeout_seconds() -> float:
-    return _env_float("REPLAY_FRAME_TIMEOUT_SECONDS", FRAME_TIMEOUT_DEFAULT, 20.0, 120.0)
+    return _env_float("REPLAY_FRAME_TIMEOUT_SECONDS", FRAME_TIMEOUT_DEFAULT, 20.0, 300.0)
+
+
+def analysis_fps() -> float:
+    return _env_float("REPLAY_ANALYSIS_FPS", ANALYSIS_FPS_DEFAULT, ANALYSIS_FPS_MIN, ANALYSIS_FPS_MAX)
+
+
+def event_fps() -> float:
+    return _env_float("REPLAY_EVENT_FPS", EVENT_FPS_DEFAULT, EVENT_FPS_MIN, EVENT_FPS_MAX)
+
+
+def max_analysis_frames() -> int:
+    return _env_int("REPLAY_MAX_FRAMES", MAX_FRAMES_DEFAULT, MAX_FRAMES_MIN, MAX_FRAMES_MAX)
+
+
+def max_concurrent_jobs() -> int:
+    return _env_int("REPLAY_MAX_CONCURRENT_JOBS", MAX_CONCURRENT_JOBS_DEFAULT, 1, 1)
+
+
+def adaptive_sampling_enabled() -> bool:
+    raw = os.environ.get("REPLAY_ADAPTIVE_SAMPLING", "1")
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
 
 
 def detection_thresholds() -> tuple[float, float]:
@@ -141,6 +175,13 @@ DEFAULT_LIMITATIONS = (
     "deck_identity_not_confirmed",
 )
 
+DEFAULT_UNAVAILABLE = (
+    "exact elixir",
+    "tower HP",
+    "damage events",
+    "winner from video alone",
+)
+
 SOURCE_HEURISTIC = "heuristic"
 
 
@@ -158,6 +199,7 @@ class DetectionBundle:
     frames: tuple[FrameSignalSnapshot, ...] = ()
     confirmed_card_observations: tuple = ()
     ambiguous_card_observations: tuple = ()
+    game_state_observations: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -199,6 +241,12 @@ class ReplayAnalysisResult:
     tactical_analysis: object | None = None
     coach_reply: str | None = None
     coach_source: str | None = None
+    game_state_observations: list = field(default_factory=list)
+    elixir_observations: list = field(default_factory=list)
+    cycle: object | None = None
+    what_is_confirmed: list[str] = field(default_factory=list)
+    what_is_uncertain: list[str] = field(default_factory=list)
+    what_is_unavailable: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -238,6 +286,22 @@ class ReplayAnalysisResult:
             ),
             "coach_reply": self.coach_reply,
             "coach_source": self.coach_source,
+            "game_state_observations": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.game_state_observations
+            ],
+            "elixir_observations": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.elixir_observations
+            ],
+            "cycle": (
+                self.cycle.to_dict()
+                if self.cycle is not None and hasattr(self.cycle, "to_dict")
+                else self.cycle
+            ),
+            "what_is_confirmed": list(self.what_is_confirmed),
+            "what_is_uncertain": list(self.what_is_uncertain),
+            "what_is_unavailable": list(self.what_is_unavailable),
         }
 
 

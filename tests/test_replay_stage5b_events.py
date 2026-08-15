@@ -16,6 +16,7 @@ from bot.services.ghosteek_ai.replay.card_recognizer import (
 from bot.services.ghosteek_ai.replay.events import (
     EVENT_BATTLE_ENDED,
     EVENT_BATTLE_STARTED,
+    EVENT_CARD_PLAY,
     EVENT_CARD_PLAY_CANDIDATE,
     EVENT_CARD_VISIBLE,
     EVENT_OVERTIME_STARTED,
@@ -64,14 +65,17 @@ def test_hand_to_arena_transition_creates_play_candidate() -> None:
         _obs(HOG, "Hog Rider", 0.92, 3, 11.2, LOC_PLAYED_AREA),
     ]
     events = ReplayEventDetector().detect(card_observations=observations)
-    plays = [e for e in events if e.event_type == EVENT_CARD_PLAY_CANDIDATE]
+    # Stage 5 full: four independent HIGH signals promote to confirmed card_play.
+    plays = [e for e in events if e.event_type == EVENT_CARD_PLAY]
     assert len(plays) == 1
     assert plays[0].card_id == HOG
     assert plays[0].player == PLAYER_SELF
-    assert 0.75 <= plays[0].confidence < 0.90
+    assert plays[0].confidence >= 0.90
     assert plays[0].evidence.frame_indices
     assert plays[0].evidence.observation_ids
     assert plays[0].evidence.timestamps
+    # Candidate suppressed once confirmed for same card/player.
+    assert not any(e.event_type == EVENT_CARD_PLAY_CANDIDATE and e.card_id == HOG for e in events)
 
 
 def test_card_visible_without_play() -> None:

@@ -22,6 +22,7 @@ from bot.services.ghosteek_ai.replay.models import (
 
 EVENT_CARD_VISIBLE = "card_visible"
 EVENT_CARD_PLAY_CANDIDATE = "card_play_candidate"
+EVENT_CARD_PLAY = "card_play"
 EVENT_BATTLE_STARTED = "battle_started"
 EVENT_BATTLE_ENDED = "battle_ended"
 EVENT_OVERTIME_STARTED = "overtime_started"
@@ -31,6 +32,7 @@ ALLOWED_EVENT_TYPES = frozenset(
     {
         EVENT_CARD_VISIBLE,
         EVENT_CARD_PLAY_CANDIDATE,
+        EVENT_CARD_PLAY,
         EVENT_BATTLE_STARTED,
         EVENT_BATTLE_ENDED,
         EVENT_OVERTIME_STARTED,
@@ -126,7 +128,14 @@ class ReplayEventDetector:
         del ambiguous_present  # ambiguous never become events; flag reserved for callers
         events: list[ReplayEvent] = []
         events.extend(self._card_visible_events(card_observations))
-        events.extend(self._card_play_candidates(card_observations))
+        candidates = self._card_play_candidates(card_observations)
+        confirmed_plays = self._confirmed_card_plays(card_observations)
+        # Drop candidates that were promoted to confirmed for the same card/player.
+        confirmed_keys = {(e.card_id, e.player) for e in confirmed_plays}
+        events.extend(confirmed_plays)
+        events.extend(
+            c for c in candidates if (c.card_id, c.player) not in confirmed_keys
+        )
         events.extend(self._battle_lifecycle_events(timeline))
         # overtime_started: no Stage 3/5A overtime signal — never invent
         events = [e for e in events if float(e.confidence) >= CONF_AUTHORITATIVE]
@@ -246,6 +255,83 @@ class ReplayEventDetector:
                         )
                     )
         return _dedupe_play_candidates(out)
+
+    def _confirmed_card_plays(
+        self, observations: Sequence[ConfirmedCardObservation]
+    ) -> list[ReplayEvent]:
+        """
+        Confirmed card_play requires independent evidence:
+
+        1) card available in hand (HIGH);
+        2) hand changes / disappears (gap);
+        3) matching object in played area (HIGH);
+        4) timestamps aligned.
+
+        Missing any critical signal → not confirmed (candidate path may still fire).
+        Never: card_visible alone → card_play.
+        """
+        if not observations:
+            return []
+        by_card: dict[str, list[ConfirmedCardObservation]] = {}
+        for obs in observations:
+            by_card.setdefault(obs.card_id, []).append(obs)
+
+        out: list[ReplayEvent] = []
+        for card_id, items in by_card.items():
+            items = sorted(items, key=lambda o: (o.timestamp_seconds, o.frame_index))
+            for hand_loc, player in (
+                (LOC_PLAYER_HAND, PLAYER_SELF),
+                (LOC_OPPONENT_HAND, PLAYER_OPPONENT),
+            ):
+                hand = [
+                    o
+                    for o in items
+                    if o.location == hand_loc and float(o.confidence) >= CONF_CONFIRMED
+                ]
+                arena = [
+                    o
+                    for o in items
+                    if o.location == LOC_PLAYED_AREA and float(o.confidence) >= CONF_CONFIRMED
+                ]
+                if len(hand) < 2 or not arena:
+                    continue
+                streaks = _streaks(hand)
+                for streak in streaks:
+                    if len(streak) < 2:
+                        continue
+                    last_hand = streak[-1]
+                    if not _has_gap_after_hand(items, last_hand, hand_loc):
+                        continue
+                    arena_hit = _first_arena_after(arena, last_hand.timestamp_seconds)
+                    if arena_hit is None:
+                        continue
+                    gap = arena_hit.timestamp_seconds - last_hand.timestamp_seconds
+                    if gap < _PLAY_MIN_GAP or gap > _PLAY_MAX_GAP:
+                        continue
+                    # All four signals present → allow confirmed confidence.
+                    conf = min(
+                        float(last_hand.confidence),
+                        float(arena_hit.confidence),
+                        float(streak[0].confidence),
+                        0.96,
+                    )
+                    if gap > 3.0:
+                        conf = min(conf, 0.91)
+                    if conf < CONF_CONFIRMED:
+                        continue
+                    used = list(streak) + [arena_hit]
+                    out.append(
+                        ReplayEvent(
+                            timestamp_seconds=float(arena_hit.timestamp_seconds),
+                            event_type=EVENT_CARD_PLAY,
+                            player=player,
+                            card_id=card_id,
+                            confidence=conf,
+                            source=SOURCE_HEURISTIC,
+                            evidence=_evidence_from(used),
+                        )
+                    )
+        return _dedupe_play_events(out, event_type=EVENT_CARD_PLAY)
 
     def _battle_lifecycle_events(
         self, timeline: Sequence[TimelineObservation]
@@ -379,8 +465,14 @@ def _first_arena_after(
 
 
 def _dedupe_play_candidates(events: list[ReplayEvent]) -> list[ReplayEvent]:
+    return _dedupe_play_events(events, event_type=EVENT_CARD_PLAY_CANDIDATE)
+
+
+def _dedupe_play_events(events: list[ReplayEvent], *, event_type: str) -> list[ReplayEvent]:
     best: dict[tuple[str | None, str], ReplayEvent] = {}
     for ev in events:
+        if ev.event_type != event_type:
+            continue
         key = (ev.card_id, ev.player)
         prev = best.get(key)
         if prev is None or ev.confidence > prev.confidence:

@@ -974,6 +974,7 @@ class ReplayTacticalAnalysisResponse(BaseModel):
     limitations: ReplayTacticalLimitationsResponse = Field(
         default_factory=ReplayTacticalLimitationsResponse
     )
+    conclusions: list[dict] = Field(default_factory=list)
 
 
 class ReplayFactsResponse(BaseModel):
@@ -993,6 +994,12 @@ class ReplayFactsResponse(BaseModel):
     tactical_analysis: ReplayTacticalAnalysisResponse | None = None
     coach_reply: str | None = None
     coach_source: str | None = None
+    game_state_observations: list[dict] = Field(default_factory=list)
+    elixir_observations: list[dict] = Field(default_factory=list)
+    cycle: dict | None = None
+    what_is_confirmed: list[str] = Field(default_factory=list)
+    what_is_uncertain: list[str] = Field(default_factory=list)
+    what_is_unavailable: list[str] = Field(default_factory=list)
 
 
 class ReplayAnalyzeSuccess(BaseModel):

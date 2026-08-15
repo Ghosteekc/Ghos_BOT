@@ -19,8 +19,11 @@ from bot.services.ghosteek_ai.replay.card_recognizer import (
 )
 from bot.services.ghosteek_ai.replay.coach_renderer import ReplayCoachRenderer
 from bot.services.ghosteek_ai.replay.compressor import compress_replay_video
+from bot.services.ghosteek_ai.replay.cycle import build_cycle_from_confirmed_plays
+from bot.services.ghosteek_ai.replay.elixir import ElixirObserver
 from bot.services.ghosteek_ai.replay.events import ReplayEventDetector
 from bot.services.ghosteek_ai.replay.facts import ReplayFactsBuilder
+from bot.services.ghosteek_ai.replay.game_state import GameStateBuilder
 from bot.services.ghosteek_ai.replay.hud_analyzer import HeuristicHudAnalyzer
 from bot.services.ghosteek_ai.replay.models import (
     STATUS_CR,
@@ -29,6 +32,7 @@ from bot.services.ghosteek_ai.replay.models import (
     ReplayAnalyzeOutcome,
     ReplayAnalysisResult,
     ReplayDetection,
+    max_concurrent_jobs,
 )
 from bot.services.ghosteek_ai.replay.sampler import FrameSampler
 from bot.services.ghosteek_ai.replay.tactical_analysis import ReplayTacticalAnalyzer
@@ -69,6 +73,8 @@ class ReplayAnalyzeService:
         coach_renderer: ReplayCoachRenderer | None = None,
     ) -> None:
         self._busy = False
+        self._active_jobs = 0
+        self._max_jobs = max_concurrent_jobs()
         self._sampler = sampler
         self._analyzer = analyzer
         self._timeline_builder = timeline_builder
@@ -78,6 +84,8 @@ class ReplayAnalyzeService:
         self._battle_timeline_builder = battle_timeline_builder
         self._tactical_analyzer = tactical_analyzer
         self._coach_renderer = coach_renderer
+        self._game_state_builder = GameStateBuilder()
+        self._elixir_observer = ElixirObserver()
 
     async def validate_upload(
         self,
@@ -162,9 +170,10 @@ class ReplayAnalyzeService:
         read: ReadChunk,
         detect: bool,
     ) -> tuple[ReplayMeta, ReplayDetection | None, ReplayAnalysisResult | None]:
-        if self._busy:
+        if self._busy or self._active_jobs >= self._max_jobs:
             raise ReplayError(CODE_BUSY)
         self._busy = True
+        self._active_jobs += 1
         temps: list[Path] = []
         try:
             header, tmp_path, size_bytes = await _spool_limited(read)
@@ -208,6 +217,7 @@ class ReplayAnalyzeService:
         finally:
             for path in temps:
                 _unlink_quiet(path)
+            self._active_jobs = max(0, self._active_jobs - 1)
             self._busy = False
 
     def _run_detection(
@@ -269,11 +279,13 @@ class ReplayAnalyzeService:
             frames_analyzed=len(scores),
             signal_hits=hits,
         )
+        game_states = self._game_state_builder.build(frames)
         return DetectionBundle(
             detection=detection,
             frames=tuple(frames),
             confirmed_card_observations=tuple(confirmed_cards),
             ambiguous_card_observations=tuple(ambiguous_cards),
+            game_state_observations=tuple(game_states),
         )
 
     def _build_stage4(
@@ -310,6 +322,9 @@ class ReplayAnalyzeService:
             confirmed_events=confirmed_events,
             events=events,
         )
+        game_states = list(bundle.game_state_observations)
+        elixir = self._elixir_observer.observe(game_states)
+        cycle = build_cycle_from_confirmed_plays(confirmed_events)
         return facts_builder.build(
             bundle.detection,
             timeline,
@@ -320,6 +335,9 @@ class ReplayAnalyzeService:
             confirmed_events=confirmed_events,
             battle_timeline=battle_timeline,
             tactical_analysis=tactical,
+            game_state_observations=game_states,
+            elixir_observations=elixir,
+            cycle=cycle,
         )
 
 

@@ -1,4 +1,4 @@
-"""Uniform temporal frame sampling via system FFmpeg. No OpenCV, no LLM."""
+"""Uniform + adaptive temporal frame sampling via system FFmpeg. No OpenCV, no LLM."""
 
 from __future__ import annotations
 
@@ -14,10 +14,15 @@ from pathlib import Path
 from PIL import Image
 
 from bot.services.ghosteek_ai.replay.models import (
+    CHANGE_HASH_HAMMING,
     NEAR_DUP_HAMMING,
     TARGET_SHORT_SIDE,
     SampledFrame,
+    adaptive_sampling_enabled,
+    analysis_fps,
+    event_fps,
     frame_timeout_seconds,
+    max_analysis_frames,
     sample_frame_count,
 )
 from bot.services.ghosteek_ai.replay.validator import (
@@ -46,7 +51,6 @@ def timestamps_for_duration(duration: float, count: int) -> list[float]:
     stamps = [round(span * i / (n - 1), 4) for i in range(n)]
     stamps[0] = 0.0
     stamps[-1] = round(span, 4)
-    # keep unique monotonic timestamps
     out: list[float] = []
     for ts in stamps:
         if not out or ts > out[-1]:
@@ -56,6 +60,57 @@ def timestamps_for_duration(duration: float, count: int) -> list[float]:
     while len(out) < n:
         out.append(out[-1])
     return out[:n]
+
+
+def timestamps_at_fps(duration: float, fps: float, *, max_frames: int) -> list[float]:
+    """Regular grid at ~fps across duration, capped by max_frames."""
+    dur = max(0.0, float(duration))
+    rate = max(0.1, float(fps))
+    if dur <= 0:
+        return [0.0]
+    step = 1.0 / rate
+    stamps = [0.0]
+    t = step
+    end = max(0.0, dur - _END_EPS)
+    while t < end - 1e-6 and len(stamps) < max_frames - 1:
+        stamps.append(round(t, 4))
+        t += step
+    if end > stamps[-1] + 0.02 and len(stamps) < max_frames:
+        stamps.append(round(end, 4))
+    return _unique_sorted(stamps)[:max_frames]
+
+
+def densify_on_changes(
+    coarse: list[float],
+    change_after_index: set[int],
+    *,
+    duration: float,
+    event_fps: float,
+    max_frames: int,
+) -> list[float]:
+    """
+    Insert denser stamps between coarse[i] and coarse[i+1] when change_after_index contains i.
+    """
+    if not coarse:
+        return [0.0]
+    rate = max(0.1, float(event_fps))
+    step = 1.0 / rate
+    end = max(0.0, float(duration) - _END_EPS)
+    out = list(coarse)
+    for i in sorted(change_after_index):
+        if i < 0 or i >= len(coarse) - 1:
+            continue
+        a = coarse[i]
+        b = coarse[i + 1]
+        t = a + step
+        while t < b - 1e-4:
+            out.append(round(min(t, end), 4))
+            t += step
+    merged = _unique_sorted(out)
+    if len(merged) <= max_frames:
+        return merged
+    # Prefer keeping change densification: keep first/last + evenly thin
+    return timestamps_for_duration(duration, max_frames)
 
 
 def scaled_dimensions(width: int, height: int, short_side: int = TARGET_SHORT_SIDE) -> tuple[int, int]:
@@ -73,10 +128,18 @@ def _even(value: int) -> int:
     return value if value % 2 == 0 else max(2, value - 1)
 
 
+def _unique_sorted(stamps: list[float]) -> list[float]:
+    out: list[float] = []
+    for ts in sorted(stamps):
+        if not out or ts - out[-1] >= 0.02:
+            out.append(round(ts, 4))
+    return out
+
+
 def average_hash(path: Path) -> int:
     with Image.open(path) as raw:
         small = raw.convert("L").resize((8, 8), Image.BILINEAR)
-        pixels = list(small.getdata())
+        pixels = list(small.get_flattened_data())
     avg = sum(pixels) / max(len(pixels), 1)
     bits = 0
     for pixel in pixels:
@@ -89,7 +152,12 @@ def hamming_distance(a: int, b: int) -> int:
 
 
 class FrameSampler:
-    """Extract 16–24 representative frames. Caller should analyze then discard each file."""
+    """
+    Extract analysis frames at ~720p.
+
+    - Uniform mode (explicit count / adaptive off): Stage 2–4 compatible 16–24 grid.
+    - Adaptive mode: ~analysis_fps baseline, densify to ~event_fps on visual change.
+    """
 
     def __init__(
         self,
@@ -97,10 +165,24 @@ class FrameSampler:
         count: int | None = None,
         timeout_seconds: float | None = None,
         dedupe: bool = True,
+        adaptive: bool | None = None,
+        analysis_fps_value: float | None = None,
+        event_fps_value: float | None = None,
+        max_frames: int | None = None,
     ) -> None:
+        self._explicit_count = count
         self.count = count if count is not None else sample_frame_count()
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else frame_timeout_seconds()
         self.dedupe = dedupe
+        if adaptive is None:
+            self.adaptive = count is None and adaptive_sampling_enabled()
+        else:
+            self.adaptive = bool(adaptive)
+        self.analysis_fps = (
+            float(analysis_fps_value) if analysis_fps_value is not None else analysis_fps()
+        )
+        self.event_fps = float(event_fps_value) if event_fps_value is not None else event_fps()
+        self.max_frames = int(max_frames) if max_frames is not None else max_analysis_frames()
 
     def iter_sampled_frames(
         self,
@@ -114,19 +196,30 @@ class FrameSampler:
         if not binary:
             raise ReplayError(CODE_FFMPEG_UNAVAILABLE)
 
-        count = self.count
-        stamps = timestamps_for_duration(duration, count)
         out_w, out_h = scaled_dimensions(src_width, src_height)
         tmpdir = Path(tempfile.mkdtemp(prefix="ghosteek-replay-frames-"))
-        seen_hashes: list[int] = []
         deadline = time.monotonic() + self.timeout_seconds
         produced = 0
         try:
+            if self.adaptive:
+                stamps = self._plan_adaptive_stamps(
+                    binary=binary,
+                    video_path=video_path,
+                    duration=duration,
+                    width=out_w,
+                    height=out_h,
+                    tmpdir=tmpdir,
+                    deadline=deadline,
+                )
+            else:
+                stamps = timestamps_for_duration(duration, self.count)
+
+            seen_hashes: list[int] = []
             for index, ts in enumerate(stamps):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise ReplayError(CODE_ANALYSIS_TIMEOUT)
-                dest = tmpdir / f"frame_{index:02d}.jpg"
+                dest = tmpdir / f"frame_{index:03d}.jpg"
                 try:
                     self._extract_one(
                         binary=binary,
@@ -165,6 +258,55 @@ class FrameSampler:
 
         if produced == 0:
             raise ReplayError(CODE_FRAME_EXTRACTION_FAILED)
+
+    def _plan_adaptive_stamps(
+        self,
+        *,
+        binary: str,
+        video_path: Path,
+        duration: float,
+        width: int,
+        height: int,
+        tmpdir: Path,
+        deadline: float,
+    ) -> list[float]:
+        coarse = timestamps_at_fps(
+            duration,
+            self.analysis_fps,
+            max_frames=min(self.max_frames, max(8, int(duration * self.analysis_fps) + 2)),
+        )
+        hashes: list[int] = []
+        for i, ts in enumerate(coarse):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ReplayError(CODE_ANALYSIS_TIMEOUT)
+            dest = tmpdir / f"probe_{i:03d}.jpg"
+            try:
+                self._extract_one(
+                    binary=binary,
+                    video_path=video_path,
+                    timestamp=ts,
+                    dest=dest,
+                    width=width,
+                    height=height,
+                    timeout=min(_PER_FRAME_TIMEOUT, remaining),
+                )
+                hashes.append(average_hash(dest))
+            finally:
+                dest.unlink(missing_ok=True)
+
+        change_after: set[int] = set()
+        for i in range(len(hashes) - 1):
+            if hamming_distance(hashes[i], hashes[i + 1]) >= CHANGE_HASH_HAMMING:
+                change_after.add(i)
+
+        return densify_on_changes(
+            coarse,
+            change_after,
+            duration=duration,
+            event_fps=self.event_fps,
+            max_frames=self.max_frames,
+        )
 
     def _extract_one(
         self,
