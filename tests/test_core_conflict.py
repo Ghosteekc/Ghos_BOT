@@ -63,10 +63,14 @@ def test_conflict_picks_max_gain_card(monkeypatch):
         frozenset({"Hog Rider", "Executioner", "Valkyrie"}): 74.0,  # drop Mighty Miner
         frozenset({"Mighty Miner", "Executioner", "Valkyrie"}): 40.0,  # drop Hog
     }
+    full_core = {"Hog Rider", "Mighty Miner", "Executioner", "Valkyrie"}
 
     def fake_build(core, pool=None):
         key = frozenset(core)
         total = scores[key]
+        removed = next(iter(full_core - set(core)))
+        if pool is not None:
+            assert removed not in pool
         return BuildResult(
             deck=list(core) + ["Ice Spirit", "Skeletons", "The Log", "Cannon", "Fireball"][: 8 - len(core)],
             archetype="Cycle",
@@ -87,7 +91,42 @@ def test_conflict_picks_max_gain_card(monkeypatch):
     assert report.alternative_score == 91.0
     assert report.quality_gain == 41.0
     assert "Executioner" not in report.alternative_core
+    assert "Executioner" not in report.alternative_result.deck
     assert set(report.alternative_core) == {"Hog Rider", "Mighty Miner", "Valkyrie"}
+
+
+def test_conflict_rejects_when_removed_card_returns_as_filler(monkeypatch):
+    """Если билдер снова кладёт удалённую карту в колоду — trial невалиден."""
+
+    def fake_build(core, pool=None):
+        deck = [
+            "Hog Rider",
+            "Mighty Miner",
+            "Executioner",
+            "Valkyrie",
+            "Ice Spirit",
+            "Skeletons",
+            "The Log",
+            "Cannon",
+        ]
+        return BuildResult(
+            deck=deck,
+            archetype="Cycle",
+            average_elixir=3.0,
+            confidence=40.0,
+            evaluation=_fake_evaluation(90.0),
+        )
+
+    monkeypatch.setattr(
+        "bot.services.deck_builder.core_conflict.build_deck_from_core",
+        fake_build,
+    )
+    report = analyze_core_conflict(
+        ["Hog Rider", "Mighty Miner", "Executioner", "Valkyrie"],
+        pool={"Hog Rider", "Mighty Miner", "Executioner", "Valkyrie", "Ice Spirit"},
+        baseline_score=40.0,
+    )
+    assert report is None
 
 
 def test_conflict_skipped_when_no_viable_builds(monkeypatch):

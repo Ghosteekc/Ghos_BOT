@@ -949,12 +949,28 @@ def build_deck_coaching(
         tornado_extras.append(_TORNADO_KING_TOWER_ADVANTAGE)
 
     tips: list[str] = []
+    seen_tips: list[str] = []
+
+    def _add_tip(line: str) -> None:
+        text = (line or "").strip()
+        if not text:
+            return
+        key = text.casefold()
+        for seen in seen_tips:
+            if key == seen:
+                return
+            # Перефраз / вложенная копия (например primary_threat ⊂ how_to_win).
+            if len(key) >= 28 and (key in seen or seen in key):
+                return
+        seen_tips.append(key)
+        tips.append(text)
+
     if game_plan.when_to_attack:
-        tips.append(game_plan.when_to_attack)
+        _add_tip(game_plan.when_to_attack)
     if game_plan.how_to_win:
-        tips.append(game_plan.how_to_win)
+        _add_tip(game_plan.how_to_win)
     if game_plan.primary_threat:
-        tips.append(game_plan.primary_threat)
+        _add_tip(game_plan.primary_threat)
     if not tips:
         tips.append(f"Играйте в стиле «{intent.play_style}» от сильных обменов.")
 
@@ -979,18 +995,20 @@ def build_deck_coaching(
         "dps": "добавляет урон в защите и контратаке",
     }
     card_choices: list[dict[str, object]] = []
+    used_combo_lines: set[str] = set()
     for card in deck:
         from bot.services.card_data import get_card_roles
 
         roles = sorted(get_card_roles(card))
-        role_text = [role_labels[role] for role in roles if role in role_labels]
+        role_text = [role_labels[role] for role in roles if role in role_labels][:3]
         combo_en = next((line for line in combos_en if card in line), "")
-        reason = role_text[0] if role_text else "поддерживает общий план колоды"
-        synergy = (
-            format_card_combo_ru(combo_en)
-            if combo_en
-            else "Работает в связке с ключевыми картами колоды."
-        )
+        # roles уже показываются отдельно — не копируем первую роль в reason.
+        reason = ""
+        # Без реальной связки не подставляем заглушку; одну пару — только у одной карты.
+        synergy = ""
+        if combo_en and combo_en not in used_combo_lines:
+            synergy = format_card_combo_ru(combo_en)
+            used_combo_lines.add(combo_en)
 
         if card == "Tornado":
             advantages = [_TORNADO_KING_TOWER_ADVANTAGE]
@@ -1005,9 +1023,17 @@ def build_deck_coaching(
             else:
                 synergy = _TORNADO_KING_TOWER_ADVANTAGE + "."
 
+        # Tornado: reason/synergy могут пересекаться — оставляем одно.
+        if reason and synergy and (
+            reason.rstrip(".") == synergy.rstrip(".")
+            or reason in synergy
+            or synergy in reason
+        ):
+            synergy = ""
+
         card_choices.append({
             "card": _card_ru(card),
-            "roles": role_text[:3],
+            "roles": role_text,
             "reason": reason[:1].upper() + reason[1:] if reason else reason,
             "synergy": synergy,
         })

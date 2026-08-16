@@ -323,29 +323,36 @@ def _build_reasons(
     low_impact: list[KeyCardInsight],
     crown_score: str,
     duration: int,
+    compact: bool = False,
 ) -> list[str]:
+    """Собрать reasons.
+
+    compact=True — для полной страницы боя: не дублировать матчап/короны/время/
+    key cards / low impact / эликсир (они уже в своих блоках).
+    """
     reasons: list[str] = [outcome_summary]
 
-    reasons.append(
-        f"Матчап: {analysis.matchup_score:.0f}/100 — "
-        f"{rating_for(round(analysis.matchup_score))}."
-    )
-
-    if crown_score:
-        reasons.append(f"Счёт по коронам: {crown_score}.")
-
-    if duration:
-        mins, secs = divmod(duration, 60)
-        reasons.append(f"Длительность: {mins}:{secs:02d}.")
-
-    if user_top:
+    if not compact:
         reasons.append(
-            f"Ваша ключевая карта по урону башням (оценка): «{card_name_ru(user_top)}»."
+            f"Матчап: {analysis.matchup_score:.0f}/100 — "
+            f"{rating_for(round(analysis.matchup_score))}."
         )
-    if opp_top:
-        reasons.append(
-            f"Ключевая карта соперника по урону башням (оценка): «{card_name_ru(opp_top)}»."
-        )
+
+        if crown_score:
+            reasons.append(f"Счёт по коронам: {crown_score}.")
+
+        if duration:
+            mins, secs = divmod(duration, 60)
+            reasons.append(f"Длительность: {mins}:{secs:02d}.")
+
+        if user_top:
+            reasons.append(
+                f"Ваша ключевая карта по урону башням (оценка): «{card_name_ru(user_top)}»."
+            )
+        if opp_top:
+            reasons.append(
+                f"Ключевая карта соперника по урону башням (оценка): «{card_name_ru(opp_top)}»."
+            )
 
     for threat in analysis.opponent_threats:
         strong, partial = counters_in_deck(threat, analysis.user_deck)
@@ -366,23 +373,24 @@ def _build_reasons(
                 f"Нет счётчика на «{card_name_ru(threat)}». Рекомендуется: {rec}."
             )
 
-    user_stats = analyze_deck(analysis.user_deck)
-    opp_stats = analyze_deck(analysis.opponent_deck)
+    if not compact:
+        user_stats = analyze_deck(analysis.user_deck)
+        opp_stats = analyze_deck(analysis.opponent_deck)
 
-    if user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
-        if not analysis.won:
+        if user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
+            if not analysis.won:
+                reasons.append(
+                    f"Средний эликсир выше ({user_stats.avg_elixir} против {opp_stats.avg_elixir}) — "
+                    f"соперник чаще успевал атаковать."
+                )
+        if not user_stats.spells and opp_stats.spells:
+            reasons.append("В колоде нет заклинаний — сложнее добивать башни и контрить поле.")
+
+        if low_impact:
+            names = ", ".join(c.name_ru for c in low_impact[:3])
             reasons.append(
-                f"Средний эликсир выше ({user_stats.avg_elixir} против {opp_stats.avg_elixir}) — "
-                f"соперник чаще успевал атаковать."
+                f"Мало влияли на исход (оценка по колоде): {names}."
             )
-    if not user_stats.spells and opp_stats.spells:
-        reasons.append("В колоде нет заклинаний — сложнее добивать башни и контрить поле.")
-
-    if low_impact:
-        names = ", ".join(c.name_ru for c in low_impact[:3])
-        reasons.append(
-            f"Мало влияли на исход (оценка по колоде): {names}."
-        )
 
     return reasons
 
@@ -492,6 +500,7 @@ def analyze_battle_enhanced(
         low_impact=low_impact,
         crown_score=crown_score,
         duration=duration,
+        compact=include_matchup_modules,
     )
 
     tactical = None

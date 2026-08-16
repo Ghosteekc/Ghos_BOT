@@ -365,30 +365,43 @@ def build_constructor_decks(
     core_conflict_payload = None
     alternative_deck = None
     if conflict is not None:
+        # Ещё раз вычёркиваем карту из пула — на случай, если result собран иначе.
         reduced_parsed = [c for c in core_parsed if c["name"] != conflict.conflicting_card]
-        alt_entries = _entries_from_results(
-            [conflict.alternative_result],
-            reduced_parsed,
-            pool,
-            limit=1,
-            id_start=7900,
-            is_alternative=True,
-        )
-        if alt_entries:
-            alternative_deck = alt_entries[0]
-            core_conflict_payload = {
-                "conflicting_card": conflict.conflicting_card,
-                "conflicting_card_ru": card_name_ru(conflict.conflicting_card),
-                "reason": conflict.reason,
-                "baseline_score": conflict.baseline_score,
-                "alternative_score": conflict.alternative_score,
-                "quality_gain": conflict.quality_gain,
-                "message": conflict.message,
-                "drop_scores": conflict.drop_scores,
-            }
+        alt_deck_names = list(conflict.alternative_result.deck)
+        if conflict.conflicting_card in alt_deck_names:
+            conflict = None
+        else:
+            alt_entries = _entries_from_results(
+                [conflict.alternative_result],
+                reduced_parsed,
+                pool - {conflict.conflicting_card},
+                limit=1,
+                id_start=7900,
+                is_alternative=True,
+            )
+            if alt_entries:
+                alternative_deck = alt_entries[0]
+                # Страховка UI: конфликтующая карта не должна оказаться в cards.
+                alt_card_names = {
+                    (c.get("name") if isinstance(c, dict) else getattr(c, "name", None))
+                    for c in (alternative_deck.get("cards") or [])
+                }
+                if conflict.conflicting_card in alt_card_names:
+                    alternative_deck = None
+                else:
+                    core_conflict_payload = {
+                        "conflicting_card": conflict.conflicting_card,
+                        "conflicting_card_ru": card_name_ru(conflict.conflicting_card),
+                        "reason": conflict.reason,
+                        "baseline_score": conflict.baseline_score,
+                        "alternative_score": conflict.alternative_score,
+                        "quality_gain": conflict.quality_gain,
+                        "message": conflict.message,
+                        "drop_scores": conflict.drop_scores,
+                    }
 
-    # Слабые Stage-1 сборки: отдаём альтернативу как основной результат,
-    # чтобы Ghosteek / UI всегда получили готовую колоду.
+    # Слабые Stage-1 сборки: отдаём альтернативу как основной результат для API,
+    # но UI не должен рисовать её дважды (decks + alternative_deck).
     decks_out: list[dict] = []
     if alternative_deck:
         decks_out = [alternative_deck]

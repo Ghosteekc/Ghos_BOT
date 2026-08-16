@@ -16,6 +16,7 @@ from bot.services.deck_builder.builder import (
     _detect_archetype,
     build_deck_from_core,
 )
+from bot.services.deck_builder.loader import get_database
 
 # Выше validation floor (52): «действительно качественная» сборка Stage 1.
 MIN_QUALITY_TOTAL = 62.0
@@ -107,14 +108,26 @@ def analyze_core_conflict(
     if len(core) != 4 or len(set(core)) != 4:
         return None
 
+    base_pool = set(pool) if pool is not None else None
+
     trials: list[DropTrial] = []
     for removed in core:
         reduced = [c for c in core if c != removed]
+        # Конфликтующая карта не должна вернуться филлером из пула.
+        if base_pool is None:
+            trial_pool = set(get_database().cards.keys()) - {removed}
+        else:
+            trial_pool = set(base_pool) - {removed}
         result: BuildResult | None = None
         score = -1.0
         try:
-            result = build_deck_from_core(reduced, pool=pool)
-            score = evaluation_score(result)
+            result = build_deck_from_core(reduced, pool=trial_pool)
+            # Защита: не засчитываем сборку, куда removed снова попал как filler.
+            if result is not None and removed in result.deck:
+                result = None
+                score = -1.0
+            else:
+                score = evaluation_score(result)
         except ValueError:
             result = None
             score = -1.0
@@ -141,6 +154,8 @@ def analyze_core_conflict(
     if gain < 4.0 and best.score < MIN_QUALITY_TOTAL:
         return None
     if best.result is None:
+        return None
+    if best.removed in best.result.deck:
         return None
 
     reason = _conflict_reason(best.removed, core, best.result)
