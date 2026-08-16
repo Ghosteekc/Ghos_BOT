@@ -62,7 +62,7 @@ async def cmd_help(message: Message) -> None:
 
 @router.message(Command("digest"))
 async def cmd_digest_preview(message: Message) -> None:
-    """Превью недельной сводки (любое состояние FSM; не блокирует воскресную рассылку)."""
+    """Превью недельной сводки (любое состояние FSM; не блокирует понедельничную рассылку)."""
     async with async_session() as session:
         sub_service = SubscriptionService(session)
         user = await sub_service.get_or_create_user(message.from_user.id)

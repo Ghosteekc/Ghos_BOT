@@ -139,7 +139,7 @@ class TrackedMineDeck(Base):
 
 
 class WeeklyDigestSent(Base):
-    """Идемпотентность воскресной сводки: одна запись на пользователя и ISO-неделю."""
+    """Идемпотентность понедельничной сводки: одна запись на пользователя и ISO-неделю."""
 
     __tablename__ = "weekly_digest_sent"
     __table_args__ = (

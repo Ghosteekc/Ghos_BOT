@@ -81,7 +81,7 @@ def week_bounds(week_key: str) -> WeekWindow:
 
 
 def target_week_for_now(now: datetime | None = None) -> WeekWindow | None:
-    """Sunday from 16:00 MSK → current week; Mon–Wed → previous week catch-up."""
+    """Понедельник с 11:00 МСК → прошедшая ISO-неделя (пн–вс); вт–ср — догон."""
     now = now or now_msk()
     if now.tzinfo is None:
         now = now.replace(tzinfo=now_msk().tzinfo)
@@ -89,12 +89,43 @@ def target_week_for_now(now: datetime | None = None) -> WeekWindow | None:
         now = now.astimezone(now_msk().tzinfo)
 
     wd = now.isoweekday()  # Mon=1 … Sun=7
-    if wd == 7 and now.hour >= 16:
-        return week_bounds(iso_week_key(now.date()))
-    if wd in (1, 2, 3):
+    if wd == 1 and now.hour >= 11:
+        last_sunday = now.date() - timedelta(days=1)
+        return week_bounds(iso_week_key(last_sunday))
+    if wd in (2, 3):
         last_sunday = now.date() - timedelta(days=wd)
         return week_bounds(iso_week_key(last_sunday))
     return None
+
+
+def seconds_until_digest_wake(now: datetime | None = None) -> float:
+    """Сон до окна рассылки: пн 11:00 МСК, затем почасовой догон до среды."""
+    now = now or now_msk()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=now_msk().tzinfo)
+    else:
+        now = now.astimezone(now_msk().tzinfo)
+
+    wd = now.isoweekday()
+    if (wd == 1 and now.hour >= 11) or wd in (2, 3):
+        return 3600.0
+
+    if wd == 1 and now.hour < 11:
+        target = now.replace(hour=11, minute=0, second=0, microsecond=0)
+        return max(30.0, (target - now).total_seconds())
+
+    days_ahead = (8 - wd) % 7 or 7
+    target_date = now.date() + timedelta(days=days_ahead)
+    target = datetime(
+        target_date.year,
+        target_date.month,
+        target_date.day,
+        11,
+        0,
+        0,
+        tzinfo=now.tzinfo,
+    )
+    return max(30.0, (target - now).total_seconds())
 
 
 def _best_win_streak(results: list[bool]) -> int:
@@ -668,10 +699,9 @@ async def run_digest_cycle(bot: Bot) -> int:
 
 
 async def run_periodic(bot: Bot, stop_event: asyncio.Event) -> None:
-    """Hourly digest loop with catch-up after downtime."""
-    logger.info("Weekly digest loop started")
-    # First check shortly after startup
-    first_delay = 90
+    """Digest loop: понедельник 11:00 МСК + догон вт–ср."""
+    logger.info("Weekly digest loop started (Mon 11:00 MSK, Mon–Sun stats)")
+    first_delay = min(90.0, seconds_until_digest_wake())
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=first_delay)
         return
@@ -688,8 +718,9 @@ async def run_periodic(bot: Bot, stop_event: asyncio.Event) -> None:
         except Exception:
             logger.exception("Digest cycle error")
 
+        delay = seconds_until_digest_wake()
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=3600)
+            await asyncio.wait_for(stop_event.wait(), timeout=delay)
             break
         except asyncio.TimeoutError:
             pass
