@@ -1,4 +1,4 @@
-"""Transcode bulky replay uploads to 720p/30fps H.264. No OpenCV, no LLM."""
+"""Transcode bulky replay uploads to 1080p/30fps H.264. No OpenCV, no LLM."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from bot.services.ghosteek_ai.replay.models import TARGET_SHORT_SIDE
 from bot.services.ghosteek_ai.replay.sampler import scaled_dimensions
 from bot.services.ghosteek_ai.replay.validator import (
     CODE_COMPRESS_FAILED,
@@ -29,7 +30,7 @@ def needs_compress(size_bytes: int, width: int, height: int, fps: float | None) 
         return True
     if size_bytes < MIN_COMPRESS_BYTES:
         return False
-    if min(max(1, width), max(1, height)) > 720:
+    if min(max(1, width), max(1, height)) > TARGET_SHORT_SIDE:
         return True
     if fps is not None and fps > 32:
         return True

@@ -28,8 +28,13 @@ def test_needs_compress_large_file() -> None:
     assert needs_compress(25 * 1024 * 1024, 640, 360, 24.0) is True
 
 
-def test_needs_compress_1080p_real_file() -> None:
-    assert needs_compress(2 * 1024 * 1024, 1920, 1080, 30.0) is True
+def test_needs_compress_1080p_already_at_target() -> None:
+    # Short side == 1080 and moderate size/fps → no compress by resolution alone
+    assert needs_compress(2 * 1024 * 1024, 1920, 1080, 30.0) is False
+
+
+def test_needs_compress_above_1080_short_side() -> None:
+    assert needs_compress(2 * 1024 * 1024, 1440, 2560, 30.0) is True
 
 
 def test_needs_compress_60fps_real_file() -> None:
@@ -43,6 +48,7 @@ def test_needs_compress_already_small_720p30() -> None:
 def test_compress_skipped_returns_same_path(tmp_path: Path) -> None:
     src = tmp_path / "clip.mp4"
     src.write_bytes(MP4_HEADER)
+    # Tiny stub skipped by size floor
     out = compress_replay_video(src, size_bytes=src.stat().st_size, width=1920, height=1080, fps=60.0)
     assert out == src
 
@@ -61,12 +67,13 @@ def test_transcode_invokes_ffmpeg(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     monkeypatch.setattr(compressor, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(compressor.subprocess, "run", fake_run)
 
-    out = compress_replay_video(src, size_bytes=600_000, width=1920, height=1080, fps=60.0)
+    # 1440x2560 → short side 1080 → 1080x1920
+    out = compress_replay_video(src, size_bytes=600_000, width=1440, height=2560, fps=60.0)
     assert out != src
     assert out.exists()
     cmd = captured["cmd"]
     assert "libx264" in cmd
-    assert "scale=1280:720:flags=lanczos,fps=30" in cmd
+    assert "scale=1080:1920:flags=lanczos,fps=30" in cmd
     assert "-an" in cmd
     out.unlink()
 
@@ -81,7 +88,7 @@ def test_transcode_failure_keeps_original(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setattr(compressor, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(compressor.subprocess, "run", fake_run)
 
-    out = compress_replay_video(src, size_bytes=600_000, width=1920, height=1080, fps=30.0)
+    out = compress_replay_video(src, size_bytes=600_000, width=1440, height=2560, fps=30.0)
     assert out == src
 
 
@@ -97,7 +104,7 @@ def test_keeps_original_if_compress_not_smaller(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(compressor, "find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(compressor.subprocess, "run", fake_run)
 
-    out = compress_replay_video(src, size_bytes=600_000, width=1920, height=1080, fps=30.0)
+    out = compress_replay_video(src, size_bytes=600_000, width=1440, height=2560, fps=30.0)
     assert out == src
 
 

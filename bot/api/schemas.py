@@ -979,6 +979,13 @@ class ReplayTacticalAnalysisResponse(BaseModel):
     conclusions: list[dict] = Field(default_factory=list)
 
 
+class ReplayMomentShotResponse(BaseModel):
+    timestamp_seconds: float
+    label: str
+    kind: str = "confirmed"
+    image_base64: str
+
+
 class ReplayFactsResponse(BaseModel):
     source: str = "replay_analysis"
     replay_status: str
@@ -993,6 +1000,7 @@ class ReplayFactsResponse(BaseModel):
     events: list[ReplayEventResponse] = Field(default_factory=list)
     confirmed_events: list[ReplayEventResponse] = Field(default_factory=list)
     candidate_events: list[ReplayEventResponse] = Field(default_factory=list)
+    moment_shots: list[ReplayMomentShotResponse] = Field(default_factory=list)
     battle_timeline: ReplayBattleTimelineResponse | None = None
     tactical_analysis: ReplayTacticalAnalysisResponse | None = None
     coach_reply: str | None = None

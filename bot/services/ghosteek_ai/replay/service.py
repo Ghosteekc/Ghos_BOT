@@ -34,6 +34,7 @@ from bot.services.ghosteek_ai.replay.models import (
     ReplayDetection,
     max_concurrent_jobs,
 )
+from bot.services.ghosteek_ai.replay.moment_shots import extract_moment_shots
 from bot.services.ghosteek_ai.replay.sampler import FrameSampler
 from bot.services.ghosteek_ai.replay.tactical_analysis import ReplayTacticalAnalyzer
 from bot.services.ghosteek_ai.replay.timeline import ReplayTimelineBuilder
@@ -212,6 +213,16 @@ class ReplayAnalyzeService:
                 return meta, None, None
             bundle = self._run_detection(working, duration, width, height)
             analysis = self._build_stage4(bundle, duration_seconds=meta.duration_seconds)
+            if analysis is not None:
+                shots = extract_moment_shots(
+                    working,
+                    src_width=width,
+                    src_height=height,
+                    confirmed_events=list(analysis.confirmed_events),
+                    candidate_events=list(analysis.candidate_events),
+                    confirmed_cards=list(analysis.confirmed_cards),
+                )
+                analysis = replace(analysis, moment_shots=shots)
             return meta, bundle.detection, analysis
         except ReplayError:
             raise

@@ -72,13 +72,15 @@ def test_timestamps_3min_and_8min() -> None:
         assert duration * 0.35 < mid < duration * 0.65
 
 
-def test_scaled_720p_preserves_aspect() -> None:
+def test_scaled_1080p_preserves_aspect() -> None:
     w, h = scaled_dimensions(1920, 1080)
-    assert (w, h) == (1280, 720)
+    assert (w, h) == (1920, 1080)
     assert abs(w / h - 1920 / 1080) < 0.02
     pw, ph = scaled_dimensions(1080, 1920)
-    assert (pw, ph) == (720, 1280)
+    assert (pw, ph) == (1080, 1920)
     assert abs(pw / ph - 1080 / 1920) < 0.02
+    uw, uh = scaled_dimensions(1440, 2560)
+    assert min(uw, uh) == 1080
     # already small: do not upscale
     assert scaled_dimensions(640, 360)[0] <= 640
 
@@ -109,8 +111,8 @@ def test_sampler_30s_frame_count(monkeypatch: pytest.MonkeyPatch) -> None:
     frames, created = _run_sampler(monkeypatch, 30.0, 1920, 1080, 20)
     assert 16 <= len(frames) <= 24
     assert len(frames) == 20
-    assert frames[0].width == 1280
-    assert frames[0].height == 720
+    assert frames[0].width == 1920
+    assert frames[0].height == 1080
     assert all(not path.exists() for path in created)
 
 
@@ -118,8 +120,8 @@ def test_sampler_3min_and_8min_count(monkeypatch: pytest.MonkeyPatch) -> None:
     for duration in (180.0, 480.0):
         frames, _created = _run_sampler(monkeypatch, duration, 1080, 1920, 20)
         assert len(frames) == 20
-        assert frames[0].width == 720
-        assert frames[0].height == 1280
+        assert frames[0].width == 1080
+        assert frames[0].height == 1920
 
 
 def test_first_last_timestamps_included(monkeypatch: pytest.MonkeyPatch) -> None:

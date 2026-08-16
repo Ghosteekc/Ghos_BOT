@@ -33,7 +33,7 @@ CR_THRESHOLD_DEFAULT = 0.75
 NOT_CR_THRESHOLD_DEFAULT = 0.30
 
 FRAME_TIMEOUT_DEFAULT = 120.0
-TARGET_SHORT_SIDE = 720
+TARGET_SHORT_SIDE = 1080
 NEAR_DUP_HAMMING = 6
 
 ALLOWED_STATUS = frozenset({STATUS_CR, STATUS_NOT_CR, STATUS_UNCERTAIN})
@@ -248,6 +248,7 @@ class ReplayAnalysisResult:
     what_is_confirmed: list[str] = field(default_factory=list)
     what_is_uncertain: list[str] = field(default_factory=list)
     what_is_unavailable: list[str] = field(default_factory=list)
+    moment_shots: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -278,6 +279,10 @@ class ReplayAnalysisResult:
             "candidate_events": [
                 item.to_dict() if hasattr(item, "to_dict") else dict(item)
                 for item in self.candidate_events
+            ],
+            "moment_shots": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.moment_shots
             ],
             "battle_timeline": (
                 self.battle_timeline.to_dict()

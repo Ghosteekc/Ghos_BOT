@@ -18,6 +18,7 @@ from bot.api.schemas import (
     ReplayDetectionResponse,
     ReplayEventResponse,
     ReplayFactsResponse,
+    ReplayMomentShotResponse,
     ReplayTacticalAnalysisResponse,
     ReplayTimelineItemResponse,
 )
@@ -159,6 +160,11 @@ async def analyze_replay(
                 ReplayEventResponse(**item)
                 for item in (payload.get("candidate_events") or [])
                 if isinstance(item, dict)
+            ],
+            moment_shots=[
+                ReplayMomentShotResponse(**item)
+                for item in (payload.get("moment_shots") or [])
+                if isinstance(item, dict) and item.get("image_base64")
             ],
             battle_timeline=(
                 ReplayBattleTimelineResponse.model_validate(payload["battle_timeline"])

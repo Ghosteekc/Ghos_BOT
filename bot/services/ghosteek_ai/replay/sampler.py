@@ -119,7 +119,7 @@ def densify_on_changes(
 
 
 def scaled_dimensions(width: int, height: int, short_side: int = TARGET_SHORT_SIDE) -> tuple[int, int]:
-    """Downscale so the shorter side is ~720px. Do not upscale. Keep aspect ratio."""
+    """Downscale so the shorter side is ~1080px. Do not upscale. Keep aspect ratio."""
     w = max(1, int(width))
     h = max(1, int(height))
     shortest = min(w, h)
@@ -212,7 +212,7 @@ def should_skip_adjacent_duplicate(
 
 class FrameSampler:
     """
-    Extract analysis frames at ~720p.
+    Extract analysis frames at ~1080p.
 
     - Uniform mode (explicit count / adaptive off): Stage 2–4 compatible 16–24 grid.
     - Adaptive mode: ~analysis_fps baseline, densify to ~event_fps on visual change.
