@@ -15,7 +15,6 @@ from PIL import Image
 
 from bot.services.ghosteek_ai.replay.models import (
     CHANGE_HASH_HAMMING,
-    NEAR_DUP_HAMMING,
     SAMPLE_FRAMES_MIN,
     TARGET_SHORT_SIDE,
     SampledFrame,
@@ -40,6 +39,9 @@ _PER_FRAME_TIMEOUT = 8.0
 _END_EPS = 0.04
 # Soft floor after adjacent dedupe for a normal sampling plan (~20/96 stamps).
 _MIN_KEPT_AFTER_DEDUPE = max(8, SAMPLE_FRAMES_MIN // 2)
+# aHash is coarse on CR HUD chrome: only skip near-exact adjacent clones.
+# Full NEAR_DUP_HAMMING=6 collapses almost every CR adjacent pair → 1 frame.
+_ADJACENT_SKIP_HAMMING = 2
 
 
 def timestamps_for_duration(duration: float, count: int) -> list[float]:
@@ -168,12 +170,44 @@ def is_adjacent_near_duplicate(
     digest: int,
     previous_digest: int | None,
     *,
-    threshold: int = NEAR_DUP_HAMMING,
+    threshold: int = _ADJACENT_SKIP_HAMMING,
 ) -> bool:
     """True only when digest is near-identical to the immediately previous accepted frame."""
     if previous_digest is None:
         return False
     return hamming_distance(digest, previous_digest) <= threshold
+
+
+def should_skip_adjacent_duplicate(
+    *,
+    is_duplicate: bool,
+    index: int,
+    planned: int,
+    produced: int,
+    min_keep: int,
+) -> bool:
+    """
+    Skip adjacent near-dups only when temporal coverage can still be met.
+
+    Always keep first/last and evenly spaced coverage stamps so CR HUD-like
+    sequences do not collapse to a single frame.
+    """
+    if not is_duplicate:
+        return False
+    n = max(1, int(planned))
+    i = max(0, int(index))
+    kept = max(0, int(produced))
+    floor = max(1, int(min_keep))
+    if i <= 0 or i >= n - 1:
+        return False
+    stride = max(1, n // floor)
+    if i % stride == 0:
+        return False
+    # If skipping would make min_keep unreachable, force-keep.
+    max_if_skip = kept + (n - i - 1)
+    if max_if_skip < floor:
+        return False
+    return True
 
 
 class FrameSampler:
@@ -240,6 +274,7 @@ class FrameSampler:
                 stamps = timestamps_for_duration(duration, self.count)
 
             last_hash: int | None = None
+            min_keep = min_kept_frames_for_plan(len(stamps))
             for index, ts in enumerate(stamps):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -257,7 +292,14 @@ class FrameSampler:
                     )
                     digest = average_hash(dest)
                     # Adjacent-only: never compare against the full history (CR HUD collapse).
-                    if self.dedupe and is_adjacent_near_duplicate(digest, last_hash):
+                    is_dup = self.dedupe and is_adjacent_near_duplicate(digest, last_hash)
+                    if should_skip_adjacent_duplicate(
+                        is_duplicate=is_dup,
+                        index=index,
+                        planned=len(stamps),
+                        produced=produced,
+                        min_keep=min_keep,
+                    ):
                         dest.unlink(missing_ok=True)
                         continue
                     last_hash = digest
@@ -282,8 +324,8 @@ class FrameSampler:
 
         if produced == 0:
             raise ReplayError(CODE_FRAME_EXTRACTION_FAILED)
-        min_keep = min_kept_frames_for_plan(len(stamps))
         if produced < min_keep:
+            # Should be rare after coverage force-keep; still block silent 1-frame success.
             logger.warning(
                 "replay sampler collapse: kept %s of %s planned (min %s)",
                 produced,
