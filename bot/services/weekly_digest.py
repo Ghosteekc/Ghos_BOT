@@ -80,6 +80,21 @@ def week_bounds(week_key: str) -> WeekWindow:
     return WeekWindow(week_key=week_key, start=start, end=end)
 
 
+def previous_completed_week(now: datetime | None = None) -> WeekWindow:
+    """Last finished Mon–Sun in MSK.
+
+    On Monday this is previous Monday … yesterday's Sunday.
+    Mid-week it stays that same closed week until the next Monday.
+    """
+    now = now or now_msk()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=now_msk().tzinfo)
+    else:
+        now = now.astimezone(now_msk().tzinfo)
+    last_sunday = now.date() - timedelta(days=now.isoweekday())
+    return week_bounds(iso_week_key(last_sunday))
+
+
 def target_week_for_now(now: datetime | None = None) -> WeekWindow | None:
     """Понедельник с 11:00 МСК → прошедшая ISO-неделя (пн–вс); вт–ср — догон."""
     now = now or now_msk()
@@ -90,11 +105,9 @@ def target_week_for_now(now: datetime | None = None) -> WeekWindow | None:
 
     wd = now.isoweekday()  # Mon=1 … Sun=7
     if wd == 1 and now.hour >= 11:
-        last_sunday = now.date() - timedelta(days=1)
-        return week_bounds(iso_week_key(last_sunday))
+        return previous_completed_week(now)
     if wd in (2, 3):
-        last_sunday = now.date() - timedelta(days=wd)
-        return week_bounds(iso_week_key(last_sunday))
+        return previous_completed_week(now)
     return None
 
 
@@ -662,16 +675,16 @@ async def send_digest_to_user(
 
 
 async def send_digest_preview(bot: Bot, user: User) -> tuple[bool, str]:
-    """Force-send current ISO week digest without marking as delivered."""
+    """Force-send previous completed week digest without marking as delivered."""
     if not user.player_tag:
         return False, "Сначала привяжите тег: /link #ВАШТЕГ"
     await ensure_cards_loaded()
-    window = week_bounds(iso_week_key(now_msk().date()))
+    window = previous_completed_week()
     ok = await send_digest_to_user(bot, user, window, force=True, mark=False)
     if ok:
         return True, ""
     return False, (
-        f"За неделю {window.start.strftime('%d.%m')}–{window.end.strftime('%d.%m')} "
+        f"За предыдущую неделю {window.start.strftime('%d.%m')}–{window.end.strftime('%d.%m')} "
         "в кеше нет боёв — сыграйте на лестнице или дождитесь синхронизации."
     )
 

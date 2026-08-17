@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from bot.services.weekly_digest import (
     iso_week_key,
+    previous_completed_week,
     seconds_until_digest_wake,
     target_week_for_now,
     week_bounds,
@@ -21,6 +22,24 @@ def test_week_bounds_are_monday_sunday():
     assert w.start.weekday() == 0  # Monday
     assert w.end.weekday() == 6  # Sunday
     assert (w.end - w.start).days == 6
+
+
+def test_previous_completed_week_on_monday_is_yesterday_sunday():
+    # Monday 2026-08-17 → 10.08–16.08, not the just-started 17.08–23.08
+    window = previous_completed_week(_msk(2026, 8, 17, 8, 58))
+    assert window.start == date(2026, 8, 10)
+    assert window.end == date(2026, 8, 16)
+    assert window.week_key == iso_week_key(date(2026, 8, 16))
+
+
+def test_previous_completed_week_stays_closed_until_next_monday():
+    expected = previous_completed_week(_msk(2026, 8, 17, 12))
+    assert previous_completed_week(_msk(2026, 8, 18, 9)).week_key == expected.week_key
+    assert previous_completed_week(_msk(2026, 8, 23, 23)).week_key == expected.week_key
+    # Next Monday starts reporting the week that just ended
+    nxt = previous_completed_week(_msk(2026, 8, 24, 8))
+    assert nxt.start == date(2026, 8, 17)
+    assert nxt.end == date(2026, 8, 23)
 
 
 def test_monday_before_11_no_window():
