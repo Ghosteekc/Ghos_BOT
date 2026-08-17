@@ -8,6 +8,7 @@ from bot.services.battle_opponent import resolve_opponent_fields
 from bot.api.schemas import (
     BattleCoachResponse,
     BattleDetailResponse,
+    BattleLeagueBadge,
     TacticalDangerCard,
     TacticalMatchupResponse,
     ElixirEfficiencyResponse,
@@ -23,6 +24,7 @@ from bot.api.schemas import (
     DeckStatsResponse,
     KeyCardEntry,
 )
+from bot.services.battle_day_stats import ranked_battle_sides
 from bot.models.database import User
 from bot.services.battle_service import (
     BATTLE_LOG_LIMIT,
@@ -79,6 +81,22 @@ def _team_deck_cards(team: dict) -> list[DeckCardInfo]:
     return infos
 
 
+def _league_badge(raw: dict | None) -> BattleLeagueBadge | None:
+    if not raw:
+        return None
+    return BattleLeagueBadge(
+        league_number=int(raw["league_number"]),
+        league_name=str(raw["league_name"]),
+        league_icon=raw.get("league_icon"),
+        starting_trophies=raw.get("starting_trophies"),
+    )
+
+
+def _ranked_fields(battle: dict) -> tuple[bool, BattleLeagueBadge | None, BattleLeagueBadge | None]:
+    is_ranked, user, opponent = ranked_battle_sides(battle)
+    return is_ranked, _league_badge(user), _league_badge(opponent)
+
+
 def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
     team = battle.get("team", [{}])[0]
     opponent = battle.get("opponent", [{}])[0]
@@ -99,6 +117,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         top_reason = None
     opp_name, opp_tag = resolve_opponent_fields(opponent)
     raw_time = battle_time_from_record(battle) or ""
+    is_ranked, user_league, opponent_league = _ranked_fields(battle)
     return BattleSummary(
         index=index,
         opponent_name=opp_name,
@@ -116,6 +135,9 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         top_reason=top_reason,
         timestamp=raw_time,
         played_at=format_battle_played_at(raw_time),
+        is_ranked=is_ranked,
+        user_league=user_league,
+        opponent_league=opponent_league,
     )
 
 
@@ -240,6 +262,7 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
             sufficient=bc.sufficient,
         )
 
+    is_ranked, user_league, opponent_league = _ranked_fields(battle)
     return BattleDetailResponse(
         index=index,
         won=analysis.won,
@@ -295,6 +318,9 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
             else None
         ),
         battle_coach=battle_coach,
+        is_ranked=is_ranked,
+        user_league=user_league,
+        opponent_league=opponent_league,
     )
 
 

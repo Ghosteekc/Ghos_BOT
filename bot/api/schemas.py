@@ -103,6 +103,13 @@ class PlayerCollectionResponse(BaseModel):
     cards_by_level: list[CardLevelCount] = []
 
 
+class BattleLeagueBadge(BaseModel):
+    league_number: int
+    league_name: str
+    league_icon: str | None = None
+    starting_trophies: int | None = None
+
+
 class BattleSummary(BaseModel):
     index: int
     opponent_name: str
@@ -120,6 +127,9 @@ class BattleSummary(BaseModel):
     top_reason: str | None = None
     timestamp: str = ""
     played_at: str = ""
+    is_ranked: bool = False
+    user_league: BattleLeagueBadge | None = None
+    opponent_league: BattleLeagueBadge | None = None
 
 
 class BattleListResponse(BaseModel):
@@ -241,6 +251,9 @@ class BattleDetailResponse(BaseModel):
     match_difficulty: MatchDifficultyResponse | None = None
     match_plan: MatchPlanResponse | None = None
     battle_coach: BattleCoachResponse | None = None
+    is_ranked: bool = False
+    user_league: BattleLeagueBadge | None = None
+    opponent_league: BattleLeagueBadge | None = None
 
 
 class OpponentEntry(BaseModel):

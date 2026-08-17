@@ -111,6 +111,106 @@ def _league_icon(ranked_number: int | None) -> str | None:
     return f"{_ICON_CDN}/league{icon_n}.png"
 
 
+def league_badge(ranked_number: int | None) -> dict | None:
+    """Public snapshot: number + RU name + icon for a Ranked league 1..7."""
+    n = _to_ranked_number(ranked_number)
+    if n is None:
+        return None
+    return {
+        "league_number": n,
+        "league_name": _league_name(n),
+        "league_icon": _league_icon(n),
+    }
+
+
+def _int_or_none(raw: object) -> int | None:
+    try:
+        if raw is None or raw == "":
+            return None
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def infer_ranked_number_from_score(
+    score: int,
+    trophy_change: int | None = None,
+) -> int | None:
+    """Map Ranked steps (0–63+) or leftover Path of Legend cups to 1..7."""
+    if score < 0:
+        return None
+    step_like = trophy_change is None or abs(int(trophy_change)) <= 12
+    if score <= 80 and step_like:
+        if score >= 63:
+            return 7
+        if score >= 53:
+            return 6
+        if score >= 43:
+            return 5
+        if score >= 33:
+            return 4
+        if score >= 22:
+            return 3
+        if score >= 11:
+            return 2
+        return 1
+    if score > 8000:
+        return None
+    if score >= 4000:
+        return 7
+    if score >= 3500:
+        return 6
+    if score >= 3000:
+        return 5
+    if score >= 2500:
+        return 4
+    if score >= 2000:
+        return 3
+    if score >= 1600:
+        return 2
+    return 1
+
+
+def _player_league_number(
+    player: dict,
+    *,
+    fallback: int | None = None,
+    trophy_change: int | None = None,
+) -> int | None:
+    raw = player.get("leagueNumber")
+    if raw is None and isinstance(player.get("league"), dict):
+        league = player["league"]
+        raw = league.get("number") if league.get("number") is not None else league.get("id")
+    n = _to_ranked_number(_int_or_none(raw))
+    if n is not None:
+        return n
+    if fallback is not None:
+        return _to_ranked_number(fallback)
+    cups = _int_or_none(player.get("startingTrophies"))
+    if cups is None:
+        return None
+    return infer_ranked_number_from_score(cups, trophy_change)
+
+
+def battle_player_league(
+    player: dict,
+    *,
+    fallback_number: int | None = None,
+    trophy_change: int | None = None,
+) -> dict | None:
+    n = _player_league_number(
+        player,
+        fallback=fallback_number,
+        trophy_change=trophy_change,
+    )
+    badge = league_badge(n)
+    if not badge:
+        return None
+    cups = _int_or_none(player.get("startingTrophies"))
+    badge["starting_trophies"] = cups
+    return badge
+
+
 def _meaningful_ranked(
     current_num: int | None,
     current_cups: int | None,

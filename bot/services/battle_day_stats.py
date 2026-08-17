@@ -36,6 +36,38 @@ def _game_mode_key(battle: dict) -> str:
     return _normalize_battle_type(name)
 
 
+def is_ranked_1v1(battle: dict) -> bool:
+    """Ranked / Path of Legend 1v1 — not Trophy Road ladder."""
+    team = battle.get("team") or []
+    if len(team) != 1:
+        return False
+    battle_type = _normalize_battle_type(battle.get("type"))
+    if battle_type == "pathoflegend":
+        return True
+    mode_key = _game_mode_key(battle)
+    if "ranked" in mode_key or mode_key == "pathoflegend":
+        return True
+    return False
+
+
+def ranked_battle_sides(battle: dict) -> tuple[bool, dict | None, dict | None]:
+    """(is_ranked, user_league, opponent_league) from battlelog fields."""
+    from bot.services.league_info import battle_player_league, _int_or_none, _to_ranked_number
+
+    if not is_ranked_1v1(battle):
+        return False, None, None
+    team = (battle.get("team") or [{}])[0] or {}
+    opponent = (battle.get("opponent") or [{}])[0] or {}
+    battle_n = _to_ranked_number(_int_or_none(battle.get("leagueNumber")))
+    user_tc = _int_or_none(team.get("trophyChange"))
+    opp_tc = _int_or_none(opponent.get("trophyChange"))
+    if opp_tc is None:
+        opp_tc = user_tc
+    user = battle_player_league(team, fallback_number=battle_n, trophy_change=user_tc)
+    opp = battle_player_league(opponent, fallback_number=None, trophy_change=opp_tc)
+    return True, user, opp
+
+
 def is_ladder_1v1(battle: dict) -> bool:
     """Ladder 1v1 battles that award trophies (excludes 2v2, classic, casual)."""
     team = battle.get("team") or []
