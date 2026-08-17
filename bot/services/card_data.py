@@ -156,7 +156,7 @@ COUNTERS: dict[str, list[str]] = {
     ],
     "Elite Barbarians": ["Skeleton Army", "Valkyrie", "Mini P.E.K.K.A", "Knight"],
     "Three Musketeers": ["Fireball", "Lightning", "Rocket", "Valkyrie"],
-    "Sparky": ["Zap", "Rocket", "Lightning", "Goblin Barrel", "Miner"],
+    "Sparky": ["Zap", "Electro Wizard", "Rocket", "Lightning", "Goblin Barrel", "Miner"],
     "Giant": ["Inferno Tower", "Inferno Dragon", "Mini P.E.K.K.A", "P.E.K.K.A", "Mighty Miner"],
     "P.E.K.K.A": ["Skeleton Army", "Guards", "Goblin Gang", "Inferno Tower", "Ronin"],
     "Royal Ghost": ["Valkyrie", "Knight", "Barbarians", "Mega Minion", "Poison"],
@@ -201,7 +201,7 @@ COUNTERS: dict[str, list[str]] = {
         "Tesla", "Inferno Tower", "Skeleton Army", "Bats", "Minions",
     ],
     "Phoenix": ["Inferno Tower", "Inferno Dragon", "Mega Minion", "Musketeer"],
-    "Electro Wizard": ["Sparky", "Elite Barbarians", "Barbarians"],
+    "Electro Wizard": ["Lightning", "Knight", "Valkyrie", "Mini P.E.K.K.A", "Hunter"],
     "Tornado": ["Balloon", "Lava Hound", "Miner", "Goblin Barrel"],
 }
 
@@ -364,7 +364,7 @@ MANUAL_COUNTERS_STRONG: dict[str, frozenset[str]] = {
     "Archers": frozenset({"Ronin"}),
     "Wizard": frozenset({"Ronin"}),
     "Executioner": frozenset({"Ronin"}),
-    "Electro Wizard": frozenset({"Ronin"}),
+    "Electro Wizard": frozenset({"Ronin", "Sparky"}),
     "Hunter": frozenset({"Ronin"}),
     "Princess": frozenset({"Ronin"}),
     "Mega Minion": frozenset({"Ronin"}),
