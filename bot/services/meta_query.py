@@ -13,7 +13,7 @@ from bot.models.database import MetaDeckAggregate, MetaDeckDailyStat, MetaSnapsh
 from bot.services.card_data import get_card_elixir
 from bot.services.card_registry import build_deck_share_link, get_card_info
 from bot.services.clan_war_decks import load_clan_war_snapshot
-from bot.services.meta_stats import MODE_LEAGUE, MODE_TROPHIES, trend_from_counts
+from bot.services.meta_stats import MODE_LEAGUE, MODE_TROPHIES, ranking_score, trend_from_counts
 
 SAMPLE_NOTE = (
     "Количество боёв в накопленной выборке Ghosteek, а не число всех мировых боёв."
@@ -113,6 +113,25 @@ async def get_ladder_meta(mode: str) -> dict[str, Any]:
             ).scalars().all()
             for item in daily_rows:
                 daily_map.setdefault(item.deck_hash, []).append(item)
+
+    now = datetime.now(timezone.utc)
+    max_games = max((row.total_games for row in rows), default=1)
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            ranking_score(
+                wins=row.wins,
+                games=row.total_games,
+                unique_players=row.unique_players,
+                last_seen=row.last_seen,
+                max_games=max_games,
+                now=now,
+            ),
+            row.total_games,
+            row.wins,
+        ),
+        reverse=True,
+    )
 
     ranked: list[dict[str, Any]] = []
     low_sample: list[dict[str, Any]] = []

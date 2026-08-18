@@ -41,6 +41,14 @@ def test_ranking_prefers_volume_over_tiny_hot_streak():
     assert solid > hot
 
 
+def test_ranking_same_winrate_prefers_more_games():
+    now = datetime(2026, 8, 18, tzinfo=timezone.utc)
+    last = now - timedelta(days=1)
+    few = ranking_score(wins=80, games=100, unique_players=8, last_seen=last, max_games=500, now=now)
+    many = ranking_score(wins=400, games=500, unique_players=8, last_seen=last, max_games=500, now=now)
+    assert many > few
+
+
 def test_trend_up_down_stable():
     assert trend_from_counts(24, 10)[0] == "up"
     assert trend_from_counts(10, 24)[0] == "down"

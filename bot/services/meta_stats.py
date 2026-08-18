@@ -118,12 +118,14 @@ def ranking_score(
 ) -> float:
     if games <= 0:
         return 0.0
+    del max_games
     wr_lb = wilson_lower_bound(wins, games)
-    pop_den = math.log(1.0 + max(max_games, 1))
-    popularity = math.log(1.0 + games) / pop_den if pop_den else 0.0
+    # Same win rate → more games ranks higher. Tiny hot streaks stay below
+    # a large sample even if raw WR looks similar.
+    volume = math.log(1.0 + games)
     players = min(1.0, unique_players / 8.0)
     fresh = recency_factor(last_seen, now)
-    return round(wr_lb * 0.58 + popularity * 0.24 + players * 0.08 + fresh * 0.10, 6)
+    return round(wr_lb * volume * 0.88 + players * 0.04 + fresh * 0.08, 6)
 
 
 def trend_from_counts(recent_games: int, previous_games: int) -> tuple[str, float | None]:
