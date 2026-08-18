@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from bot.api.errors import register_exception_handlers
-from bot.api.routes import ai, battles, decks, misc, profile
+from bot.api.routes import ai, battles, decks, meta, misc, profile
 
 WEBAPP_DIST = Path(__file__).resolve().parents[2] / "webapp" / "dist"
 STATIC_CARDS = Path(__file__).resolve().parents[1] / "static" / "cards"
@@ -27,6 +27,7 @@ def create_app() -> FastAPI:
     app.include_router(profile.router)
     app.include_router(battles.router)
     app.include_router(decks.router)
+    app.include_router(meta.router)
     app.include_router(misc.router)
     app.include_router(ai.router)
 

@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -154,6 +154,83 @@ class WeeklyDigestSent(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="weekly_digests")
+
+
+class MetaBattleObservation(Base):
+    """One unique ladder battle observation from a scanned player's battlelog."""
+
+    __tablename__ = "meta_battle_observations"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_meta_obs_dedupe"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dedupe_key: Mapped[str] = mapped_column(String(120), index=True)
+    player_tag: Mapped[str] = mapped_column(String(20), index=True)
+    opponent_tag: Mapped[str] = mapped_column(String(20), default="", server_default="")
+    battle_time: Mapped[str] = mapped_column(String(30))
+    mode: Mapped[str] = mapped_column(String(16), index=True)  # league | trophies
+    trophy_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    deck_hash: Mapped[str] = mapped_column(String(200), index=True)
+    cards_csv: Mapped[str] = mapped_column(Text, default="")
+    cards_json: Mapped[str] = mapped_column(Text, default="", server_default="")
+    result: Mapped[str] = mapped_column(String(8))  # win | loss | draw
+    source: Mapped[str] = mapped_column(String(32), default="cr_api", server_default="cr_api")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class MetaDeckAggregate(Base):
+    __tablename__ = "meta_deck_aggregates"
+    __table_args__ = (
+        UniqueConstraint("deck_hash", "mode", name="uq_meta_agg_hash_mode"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    deck_hash: Mapped[str] = mapped_column(String(200), index=True)
+    mode: Mapped[str] = mapped_column(String(16), index=True)
+    cards_csv: Mapped[str] = mapped_column(Text, default="")
+    cards_json: Mapped[str] = mapped_column(Text, default="", server_default="")
+    total_games: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    unique_players: Mapped[int] = mapped_column(Integer, default=0)
+    ranking_score: Mapped[float] = mapped_column(Float, default=0.0)
+    first_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class MetaDeckDailyStat(Base):
+    __tablename__ = "meta_deck_daily_stats"
+    __table_args__ = (
+        UniqueConstraint("deck_hash", "mode", "day", name="uq_meta_daily_hash_mode_day"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    deck_hash: Mapped[str] = mapped_column(String(200), index=True)
+    mode: Mapped[str] = mapped_column(String(16), index=True)
+    day: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD UTC
+    games: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    unique_players: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class MetaSnapshot(Base):
+    __tablename__ = "meta_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    mode: Mapped[str] = mapped_column(String(16), index=True)
+    source: Mapped[str] = mapped_column(String(64), default="cr_api")
+    season: Mapped[str] = mapped_column(String(16), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    payload_json: Mapped[str] = mapped_column(Text, default="")
 
 
 class FsmStorageRecord(Base):

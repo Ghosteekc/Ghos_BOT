@@ -117,17 +117,7 @@ async def _sync_all_once_locked(*, stop_event: asyncio.Event | None = None) -> d
 
 
 async def _refresh_meta_safe() -> None:
-    try:
-        from bot.services.meta_analyzer import refresh_meta_background
-
-        await refresh_meta_background()
-    except ClashRoyaleAPIError as exc:
-        if exc.status == 429:
-            logger.warning("Background meta refresh skipped after rate limit: %s", exc)
-            return
-        logger.exception("Background meta refresh failed")
-    except Exception:
-        logger.exception("Background meta refresh failed")
+    logger.debug("Background classic meta refresh skipped — collector owns live meta")
 
 
 async def _refresh_top_players_safe() -> None:

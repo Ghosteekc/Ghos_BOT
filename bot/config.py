@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     meta_refresh_hours: int = 6
     meta_top_players_scan: int = 20
     meta_seed_tags: str = ""
+    # Persistent meta collector (league / trophy road). Independent from in-memory meta_analyzer.
+    meta_collector_interval_minutes: int = 180
+    meta_collector_startup_delay_sec: int = 90
+    meta_collector_players: int = 40
+    meta_collector_concurrency: int = 4
+    meta_min_games: int = 5
+    meta_trophy_min: int = 10000
+    meta_history_days: int = 14
+    meta_ranking_limit: int = 16
 
     # Ghosteek AI response backend: qwen | groq | ollama | template
     # LLM errors fall back to TemplateGenerator automatically.

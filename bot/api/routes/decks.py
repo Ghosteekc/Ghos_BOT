@@ -55,7 +55,7 @@ from bot.services.counter_engine import (
     suggest_counter_deck,
 )
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates, get_most_played_cards
-from bot.services.arena_decks import build_classic_meta_entries, get_arena_popular_decks
+from bot.services.arena_decks import get_arena_popular_decks
 from bot.services.deck_constructor import build_constructor_decks
 from bot.services.deck_compare import compare_decks
 from bot.services.deck_detail import build_mine_deck_stats
@@ -141,37 +141,6 @@ def _stats_from_battles(battles: list, tag: str):
         top_decks=[],
         top_cards=top_cards,
     )
-
-
-async def _build_meta_deck_entries() -> tuple[list[DeckEntry], str | None, str | None]:
-    items, updated, source = await build_classic_meta_entries()
-    entries: list[DeckEntry] = []
-    for item in items:
-        cards = [
-            DeckCardInfo(
-                id=c["id"],
-                name=c["name"],
-                icon=c.get("icon", ""),
-                cost=c.get("cost", 0),
-                evolution_level=c.get("evolution_level", 0),
-                is_hero=c.get("is_hero", False),
-                slot=c.get("slot", 0),
-            )
-            for c in item["cards"]
-        ]
-        entries.append(DeckEntry(
-            id=item["id"],
-            name=item["name"],
-            cards=cards,
-            winrate=item.get("winrate", 0.0),
-            total_games=item.get("total_games", 0),
-            avg_elixir=item.get("avg_elixir", 0.0),
-            type="meta",
-            category=item.get("category", "meta"),
-            deck_link=item.get("deck_link"),
-            description=item.get("description", ""),
-        ))
-    return entries, updated, source
 
 
 def _user_current_deck(battles: list, tag: str) -> list[str]:
@@ -354,8 +323,9 @@ async def list_decks(
     meta_source: str | None = None
 
     if filter_type in ("all", "meta"):
-        meta, meta_updated_at, meta_source = await _build_meta_deck_entries()
-        decks.extend(meta)
+        # Classic archetypes are no longer served as meta. Live meta lives at /api/meta/*.
+        meta_updated_at = None
+        meta_source = "deprecated"
 
     if filter_type in ("all", "mine"):
         battles = await _get_battles(user)

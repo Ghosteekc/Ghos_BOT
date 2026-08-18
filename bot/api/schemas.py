@@ -1053,3 +1053,56 @@ class GhosteekAiAskResponse(BaseModel):
     deck_card: DeckCardResponse | None = None
     battle_card: BattleCardResponse | None = None
     analysis_card: AnalysisCardResponse | None = None
+
+
+class MetaHistoryPoint(BaseModel):
+    day: str
+    games: int
+
+
+class MetaLadderDeck(BaseModel):
+    rank: int
+    deck_hash: str = ""
+    cards: list[DeckCardInfo]
+    games_count: int
+    wins: int = 0
+    losses: int = 0
+    win_rate: float
+    unique_players: int = 0
+    trend: str = "stable"
+    trend_percent: float | None = None
+    history: list[MetaHistoryPoint] = Field(default_factory=list)
+    history_available: bool = False
+    last_seen: str | None = None
+    deck_link: str | None = None
+    low_sample: bool = False
+
+
+class MetaLadderResponse(BaseModel):
+    mode: str
+    status: str
+    message: str | None = None
+    sample_note: str
+    updated_at: str | None = None
+    min_games: int = 0
+    decks: list[MetaLadderDeck] = Field(default_factory=list)
+
+
+class MetaWarDeck(BaseModel):
+    rank: int
+    cards: list[DeckCardInfo]
+    name: str = ""
+    role: str = ""
+    recommendation: str = ""
+    deck_link: str | None = None
+
+
+class MetaWarResponse(BaseModel):
+    mode: str = "clan_wars"
+    status: str
+    message: str | None = None
+    source: str = ""
+    source_url: str = ""
+    updated_at: str | None = None
+    sample_note: str = ""
+    decks: list[MetaWarDeck] = Field(default_factory=list)

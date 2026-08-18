@@ -49,6 +49,4 @@ async def _warmup_top_players() -> None:
 
 
 async def _warmup_meta() -> None:
-    from bot.services.meta_analyzer import refresh_meta_background
-
-    await refresh_meta_background()
+    logger.info("Startup warmup: meta collector runs on its own schedule")
