@@ -133,7 +133,7 @@ def trend_from_counts(recent_games: int, previous_games: int) -> tuple[str, floa
     if previous_games <= 0 and recent_games <= 0:
         return "stable", None
     if previous_games <= 0:
-        return "up", None
+        return "stable", None
     pct = (recent_games - previous_games) / previous_games * 100.0
     pct = round(pct, 1)
     if pct >= TREND_UP_PCT:
@@ -141,3 +141,28 @@ def trend_from_counts(recent_games: int, previous_games: int) -> tuple[str, floa
     if pct <= TREND_DOWN_PCT:
         return "down", pct
     return "stable", pct
+
+
+def trend_from_history_values(
+    values: list[int],
+    *,
+    history_days: int = 14,
+) -> tuple[str, float | None]:
+    """Compare adjacent short windows at the end of the series (matches sparkline tail)."""
+    if len(values) < 4:
+        return "stable", None
+
+    window = min(7, max(3, history_days // 4))
+    if len(values) >= window * 2:
+        recent = sum(values[-window:])
+        previous = sum(values[-window * 2 : -window])
+        if len(values) >= 3:
+            tail = values[-3:]
+            if tail[0] > tail[1] > tail[2] and tail[0] >= 2:
+                tail_pct = round((tail[2] - tail[0]) / tail[0] * 100.0, 1)
+                if tail_pct <= -15:
+                    return "down", tail_pct
+        return trend_from_counts(recent, previous)
+
+    half = max(1, len(values) // 2)
+    return trend_from_counts(sum(values[-half:]), sum(values[:half]))

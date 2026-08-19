@@ -13,7 +13,7 @@ from bot.models.database import MetaDeckAggregate, MetaDeckDailyStat, MetaSnapsh
 from bot.services.card_data import get_card_elixir
 from bot.services.card_registry import build_deck_share_link, get_card_info
 from bot.services.clan_war_decks import load_clan_war_snapshot
-from bot.services.meta_stats import MODE_LEAGUE, MODE_TROPHIES, ranking_score, trend_from_counts
+from bot.services.meta_stats import MODE_LEAGUE, MODE_TROPHIES, ranking_score, trend_from_history_values
 
 SAMPLE_NOTE = (
     "Количество боёв в накопленной выборке Ghosteek, а не число всех мировых боёв."
@@ -62,10 +62,8 @@ def _history_and_trend(
             "games": int(row.games) if row else 0,
         })
     filled_days = sum(1 for item in history if item["games"] > 0)
-    half = max(1, history_days // 2)
-    recent = sum(item["games"] for item in history[-half:])
-    previous = sum(item["games"] for item in history[:half])
-    trend, pct = trend_from_counts(recent, previous)
+    values = [item["games"] for item in history]
+    trend, pct = trend_from_history_values(values, history_days=history_days)
     enough = filled_days >= 3
     return history, trend, pct, enough
 

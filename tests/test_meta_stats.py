@@ -10,6 +10,7 @@ from bot.services.meta_stats import (
     observation_dedupe_key,
     ranking_score,
     trend_from_counts,
+    trend_from_history_values,
     wilson_lower_bound,
 )
 
@@ -53,6 +54,12 @@ def test_trend_up_down_stable():
     assert trend_from_counts(24, 10)[0] == "up"
     assert trend_from_counts(10, 24)[0] == "down"
     assert trend_from_counts(11, 10)[0] == "stable"
+    assert trend_from_counts(10, 0)[0] == "stable"
+
+
+def test_trend_from_history_declining_tail_not_up():
+    values = [0, 0, 0, 0, 0, 0, 0, 5, 10, 15, 12, 8, 4, 2]
+    assert trend_from_history_values(values)[0] == "down"
 
 
 def test_classify_modes():
