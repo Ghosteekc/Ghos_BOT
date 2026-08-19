@@ -57,9 +57,10 @@ def test_trend_up_down_stable():
     assert trend_from_counts(10, 0)[0] == "stable"
 
 
-def test_trend_from_history_declining_tail_not_up():
-    values = [0, 0, 0, 0, 0, 0, 0, 5, 10, 15, 12, 8, 4, 2]
-    assert trend_from_history_values(values)[0] == "down"
+def test_trend_from_history_matches_sparkline_tail():
+    assert trend_from_history_values([0, 0, 0, 0, 0, 0, 0, 2, 50, 4])[0] == "down"
+    assert trend_from_history_values([1, 2, 4, 5, 6, 7, 8])[0] == "up"
+    assert trend_from_history_values([5, 5, 5, 5, 5])[0] == "stable"
 
 
 def test_classify_modes():

@@ -148,21 +148,37 @@ def trend_from_history_values(
     *,
     history_days: int = 14,
 ) -> tuple[str, float | None]:
-    """Compare adjacent short windows at the end of the series (matches sparkline tail)."""
-    if len(values) < 4:
+    """Match sparkline tail: last day vs previous day, then short-window slope."""
+    if len(values) < 2:
         return "stable", None
 
-    window = min(7, max(3, history_days // 4))
-    if len(values) >= window * 2:
-        recent = sum(values[-window:])
-        previous = sum(values[-window * 2 : -window])
-        if len(values) >= 3:
-            tail = values[-3:]
-            if tail[0] > tail[1] > tail[2] and tail[0] >= 2:
-                tail_pct = round((tail[2] - tail[0]) / tail[0] * 100.0, 1)
-                if tail_pct <= -15:
-                    return "down", tail_pct
-        return trend_from_counts(recent, previous)
+    tail_len = min(7, len(values))
+    tail = values[-tail_len:]
+    if sum(tail) <= 0:
+        return "stable", None
 
-    half = max(1, len(values) // 2)
-    return trend_from_counts(sum(values[-half:]), sum(values[:half]))
+    last = tail[-1]
+    prev = tail[-2]
+    segment_threshold = max(1.0, prev * 0.15)
+
+    if prev > 0:
+        segment_change = last - prev
+        if segment_change <= -segment_threshold:
+            return "down", None
+        if segment_change >= segment_threshold:
+            return "up", None
+
+    n = len(tail)
+    sum_x = sum(range(n))
+    sum_y = sum(tail)
+    sum_xy = sum(i * value for i, value in enumerate(tail))
+    sum_xx = sum(i * i for i in range(n))
+    denom = n * sum_xx - sum_x * sum_x
+    slope = (n * sum_xy - sum_x * sum_y) / denom if denom else 0.0
+    slope_threshold = max(0.35, (sum_y / n) * 0.12)
+
+    if slope >= slope_threshold:
+        return "up", None
+    if slope <= -slope_threshold:
+        return "down", None
+    return "stable", None
