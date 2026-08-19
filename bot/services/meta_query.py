@@ -184,6 +184,12 @@ async def get_ladder_meta(mode: str) -> dict[str, Any]:
     elif updated_at is None:
         status = "empty"
         message = "Недостаточно данных для формирования актуальной меты."
+    elif mode == MODE_TROPHIES:
+        status = "insufficient"
+        message = (
+            "В выборке пока нет боёв кубковой дороги (Ladder). "
+            "Топ игроки чаще играют Ranked — данные накапливаются."
+        )
     else:
         status = "stale"
         message = "Мета временно не обновлена."

@@ -63,6 +63,14 @@ def test_trend_from_history_matches_sparkline_tail():
     assert trend_from_history_values([5, 5, 5, 5, 5])[0] == "stable"
 
 
+def test_classify_trophy_change_ladder():
+    assert classify_battle_mode({
+        "type": "PvP",
+        "gameMode": {"name": "UnknownMode"},
+        "team": [{"trophyChange": 30, "startingTrophies": 11000}],
+    }) == "trophies"
+
+
 def test_classify_modes():
     assert classify_battle_mode({"type": "pathOfLegend", "team": [{}]}) == "league"
     assert classify_battle_mode({
@@ -73,7 +81,7 @@ def test_classify_modes():
     assert classify_battle_mode({
         "type": "PvP",
         "gameMode": {"name": "Ladder"},
-        "team": [{}],
+        "team": [{"startingTrophies": 11000}],
     }) == "trophies"
     assert classify_battle_mode({"type": "clanMate", "team": [{}]}) is None
 

@@ -24,6 +24,7 @@ from bot.models.database import (
 )
 from bot.services.card_registry import ensure_cards_loaded
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
+from bot.services.clan_war_decks import refresh_clan_war_snapshot
 from bot.services.meta_observation import observation_from_battle
 from bot.services.meta_stats import (
     MODE_LEAGUE,
@@ -63,7 +64,47 @@ async def _fetch_ranking(client: ClashRoyaleClient, paths: tuple[str, ...], limi
     return []
 
 
+def _seed_players() -> list[dict]:
+    from bot.config import settings
 
+    out: list[dict] = []
+    for raw_tag in settings.meta_seed_tags.split(","):
+        tag = raw_tag.strip()
+        if not tag:
+            continue
+        out.append({"tag": tag if tag.startswith("#") else f"#{tag}", "name": tag})
+    return out
+
+
+def _merge_players(*groups: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    merged: list[dict] = []
+    for group in groups:
+        for item in group:
+            tag = str(item.get("tag") or "").upper()
+            if not tag or tag in seen:
+                continue
+            seen.add(tag)
+            merged.append(item)
+    return merged
+
+
+async def _players_for_mode(client: ClashRoyaleClient, mode: str) -> list[dict]:
+    base_limit = max(8, settings.meta_collector_players)
+    limit = base_limit * 3 if mode == MODE_TROPHIES else base_limit
+    paths = _LEAGUE_RANK_PATHS if mode == MODE_LEAGUE else _TROPHY_RANK_PATHS
+    players = await _fetch_ranking(client, paths, limit)
+    if mode == MODE_TROPHIES:
+        players = _merge_players(players, _seed_players())
+        trophy_min = max(0, settings.meta_trophy_min)
+        filtered: list[dict] = []
+        for item in players:
+            trophies = int(item.get("trophies") or 0)
+            if trophies and trophies < trophy_min:
+                continue
+            filtered.append(item)
+        players = filtered
+    return players
 
 async def _insert_observations_safe(session: AsyncSession, rows: list[dict[str, Any]]) -> int:
     """Insert ignoring duplicates. Uses per-row SAVEPOINT so one clash does not abort the batch."""
@@ -225,24 +266,15 @@ async def _save_snapshot(session: AsyncSession, mode: str, source: str) -> None:
 async def collect_mode(mode: str) -> dict[str, Any]:
     """Fetch ranking + battlelogs for one mode and persist new observations."""
     await ensure_cards_loaded()
-    limit = max(8, settings.meta_collector_players)
     trophy_min = max(0, settings.meta_trophy_min)
     concurrency = max(1, settings.meta_collector_concurrency)
-    paths = _LEAGUE_RANK_PATHS if mode == MODE_LEAGUE else _TROPHY_RANK_PATHS
     client = ClashRoyaleClient()
     source = "cr_api"
     new_obs = 0
     scanned = 0
+    players: list[dict] = []
     try:
-        players = await _fetch_ranking(client, paths, limit)
-        if mode == MODE_TROPHIES:
-            filtered: list[dict] = []
-            for item in players:
-                trophies = int(item.get("trophies") or 0)
-                if trophies and trophies < trophy_min:
-                    continue
-                filtered.append(item)
-            players = filtered
+        players = await _players_for_mode(client, mode)
         source = f"cr_api:{mode}:{len(players)}"
         sem = asyncio.Semaphore(concurrency)
         observations: list[dict[str, Any]] = []
@@ -312,7 +344,22 @@ async def collect_all() -> dict[str, Any]:
     async with _collect_lock:
         league = await collect_mode(MODE_LEAGUE)
         trophies = await collect_mode(MODE_TROPHIES)
-        return {"league": league, "trophies": trophies}
+        client = ClashRoyaleClient()
+        try:
+            league_players = await _players_for_mode(client, MODE_LEAGUE)
+            trophy_players = await _players_for_mode(client, MODE_TROPHIES)
+            cw = await refresh_clan_war_snapshot(
+                client,
+                _merge_players(league_players, trophy_players),
+                concurrency=max(1, settings.meta_collector_concurrency),
+            )
+        finally:
+            await client.close()
+        return {
+            "league": league,
+            "trophies": trophies,
+            "clan_wars": {"decks": len(cw.get("decks") or []), "available": cw.get("available")},
+        }
 
 
 async def run_periodic(stop_event: asyncio.Event) -> None:

@@ -43,12 +43,12 @@ def observation_dedupe_key(player_tag: str, battle_time: str, mode: str) -> str:
 
 
 def classify_battle_mode(battle: dict) -> str | None:
-    from bot.services.battle_day_stats import is_ranked_1v1
+    from bot.services.battle_day_stats import is_ladder_1v1, is_ranked_1v1
 
     btype = str(battle.get("type") or "").lower().replace(" ", "")
     if is_ranked_1v1(battle) or btype in LEAGUE_BATTLE_TYPES:
         return MODE_LEAGUE
-    if btype in TROPHY_BATTLE_TYPES:
+    if is_ladder_1v1(battle):
         return MODE_TROPHIES
     return None
 
