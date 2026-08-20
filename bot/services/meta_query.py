@@ -171,6 +171,12 @@ async def get_ladder_meta(mode: str) -> dict[str, Any]:
     for index, item in enumerate(decks, start=1):
         item["rank"] = index
 
+    if not decks and low_sample:
+        preview = sorted(low_sample, key=lambda item: item["games_count"], reverse=True)[:limit]
+        for index, item in enumerate(preview, start=1):
+            item["rank"] = index
+        decks = preview
+
     collector_failed = (
         "429" in snapshot_source
         or ":error:" in snapshot_source
@@ -180,7 +186,11 @@ async def get_ladder_meta(mode: str) -> dict[str, Any]:
         message = "Мета временно не обновлена." if collector_failed else None
     elif any(row.total_games > 0 for row in rows):
         status = "insufficient"
-        message = "Недостаточно данных для формирования актуальной меты."
+        message = (
+            "Предварительная мета — мало боёв в выборке, данные накапливаются."
+            if mode == MODE_TROPHIES
+            else "Недостаточно данных для формирования актуальной меты."
+        )
     elif updated_at is None:
         status = "empty"
         message = "Недостаточно данных для формирования актуальной меты."
@@ -238,6 +248,6 @@ async def get_clan_wars_meta() -> dict[str, Any]:
         "source": snap.get("source") or "",
         "source_url": snap.get("source_url") or "",
         "updated_at": snap.get("updated_at"),
-        "sample_note": "Колоды КВ из внешнего источника, не статистика выборки Ghosteek.",
+        "sample_note": "Колоды КВ из выборки Ghosteek или базовой подборки, если боёв КВ ещё нет.",
         "decks": decks,
     }

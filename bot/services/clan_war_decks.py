@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 SNAPSHOT_PATH = Path(__file__).resolve().parents[1] / "data" / "clan_war_decks.json"
 CW_BATTLE_TYPES = frozenset({"warday", "boatbattle"})
 SOURCE_LABEL = "Ghosteek · бои КВ в выборке"
+FALLBACK_SOURCE_LABEL = "Ghosteek · базовые колоды для КВ"
 
 
 def load_clan_war_snapshot() -> dict[str, Any]:
@@ -110,10 +111,27 @@ def _guess_cw_name(names: list[str]) -> str:
     return "Колода КВ"
 
 
-def _write_snapshot(decks: list[dict[str, Any]]) -> None:
+def _curated_cw_decks() -> list[dict[str, Any]]:
+    from bot.services.meta_decks import CATEGORY_LABELS, META_DECKS
+
+    decks: list[dict[str, Any]] = []
+    for meta in META_DECKS[:10]:
+        cards = list(meta.cards)
+        if len(cards) != 8:
+            continue
+        decks.append({
+            "cards": cards,
+            "name": meta.name,
+            "role": CATEGORY_LABELS.get(meta.category, meta.category),
+            "recommendation": meta.description or "Базовая колода для КВ",
+        })
+    return decks
+
+
+def _write_snapshot(decks: list[dict[str, Any]], *, source: str = SOURCE_LABEL) -> None:
     SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "source": SOURCE_LABEL,
+        "source": source,
         "source_url": "",
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "decks": decks,
@@ -180,6 +198,15 @@ async def refresh_clan_war_snapshot(
         _write_snapshot(decks)
         logger.info("Clan-war snapshot updated: %d decks from %d players", len(decks), scanned)
     else:
-        logger.info("Clan-war snapshot unchanged: no CW battles in %d player logs", scanned)
+        curated = _curated_cw_decks()
+        if curated:
+            _write_snapshot(curated, source=FALLBACK_SOURCE_LABEL)
+            logger.info(
+                "Clan-war snapshot filled with %d curated decks (no CW battles in %d logs)",
+                len(curated),
+                scanned,
+            )
+        else:
+            logger.info("Clan-war snapshot unchanged: no CW battles in %d player logs", scanned)
 
     return load_clan_war_snapshot()

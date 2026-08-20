@@ -14,6 +14,14 @@ def test_clan_war_snapshot_empty_is_unavailable():
     assert "КВ" in (snap["message"] or "")
 
 
+def test_cw_curated_fallback_decks():
+    from bot.services.clan_war_decks import _curated_cw_decks
+
+    decks = _curated_cw_decks()
+    assert len(decks) >= 4
+    assert all(len(item["cards"]) == 8 for item in decks)
+
+
 def test_cw_battle_types_and_deck_parse():
     assert "warday" in CW_BATTLE_TYPES
     names = [f"Card{i}" for i in range(8)]

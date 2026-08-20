@@ -20,11 +20,13 @@ from bot.models.database import (
     MetaDeckAggregate,
     MetaDeckDailyStat,
     MetaSnapshot,
+    User,
     async_session,
 )
 from bot.services.card_registry import ensure_cards_loaded
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
 from bot.services.clan_war_decks import refresh_clan_war_snapshot
+from bot.services.meta_battle_cache_ingest import ingest_trophies_from_battle_cache
 from bot.services.meta_observation import observation_from_battle
 from bot.services.meta_stats import (
     MODE_LEAGUE,
@@ -89,22 +91,59 @@ def _merge_players(*groups: list[dict]) -> list[dict]:
     return merged
 
 
+async def _linked_player_tags(limit: int = 100) -> list[dict]:
+    async with async_session() as session:
+        tags = (
+            await session.execute(
+                select(User.player_tag)
+                .where(User.player_tag.is_not(None))
+                .limit(max(1, limit))
+            )
+        ).scalars().all()
+    out: list[dict] = []
+    for tag in tags:
+        clean = str(tag or "").strip()
+        if not clean:
+            continue
+        normalized = clean if clean.startswith("#") else f"#{clean}"
+        out.append({"tag": normalized, "name": normalized})
+    return out
+
+
 async def _players_for_mode(client: ClashRoyaleClient, mode: str) -> list[dict]:
     base_limit = max(8, settings.meta_collector_players)
-    limit = base_limit * 3 if mode == MODE_TROPHIES else base_limit
-    paths = _LEAGUE_RANK_PATHS if mode == MODE_LEAGUE else _TROPHY_RANK_PATHS
-    players = await _fetch_ranking(client, paths, limit)
     if mode == MODE_TROPHIES:
-        players = _merge_players(players, _seed_players())
+        from bot.services.arena_decks import _tags_from_player_clans, _tags_from_rankings
+
         trophy_min = max(0, settings.meta_trophy_min)
-        filtered: list[dict] = []
-        for item in players:
-            trophies = int(item.get("trophies") or 0)
-            if trophies and trophies < trophy_min:
+        trophy_high = trophy_min + 3000
+        band_tags = await _tags_from_rankings(
+            client,
+            max(0, trophy_min - 500),
+            trophy_high,
+            max_tags=max(80, base_limit * 3),
+        )
+        players = [{"tag": tag, "name": tag} for tag in band_tags]
+        players = _merge_players(players, _seed_players(), await _linked_player_tags())
+
+        for item in players[:12]:
+            tag = item.get("tag") or ""
+            if not tag:
                 continue
-            filtered.append(item)
-        players = filtered
-    return players
+            clan_tags = await _tags_from_player_clans(
+                client,
+                tag,
+                max(0, trophy_min - 1000),
+                trophy_high + 1000,
+                max_tags=20,
+            )
+            for clan_tag in clan_tags:
+                players = _merge_players(players, [{"tag": clan_tag, "name": clan_tag}])
+        return players[: max(120, base_limit * 3)]
+
+    paths = _LEAGUE_RANK_PATHS
+    players = await _fetch_ranking(client, paths, base_limit)
+    return _merge_players(players, await _linked_player_tags(limit=40))
 
 async def _insert_observations_safe(session: AsyncSession, rows: list[dict[str, Any]]) -> int:
     """Insert ignoring duplicates. Uses per-row SAVEPOINT so one clash does not abort the batch."""
@@ -323,6 +362,8 @@ async def collect_mode(mode: str) -> dict[str, Any]:
         await client.close()
 
     async with async_session() as session:
+        if mode == MODE_TROPHIES:
+            observations.extend(await ingest_trophies_from_battle_cache(session))
         if observations:
             new_obs = await _insert_observations_safe(session, observations)
         decks = await rebuild_mode_aggregates(session, mode)
@@ -340,18 +381,36 @@ async def collect_mode(mode: str) -> dict[str, Any]:
     return {"mode": mode, "scanned": scanned, "new_obs": new_obs, "decks": decks, "source": source}
 
 
+async def _cw_player_pool(client: ClashRoyaleClient) -> list[dict[str, Any]]:
+    from bot.services.arena_decks import _tags_from_player_clans
+
+    linked = await _linked_player_tags(limit=120)
+    league_players = await _players_for_mode(client, MODE_LEAGUE)
+    trophy_players = await _players_for_mode(client, MODE_TROPHIES)
+    players = _merge_players(linked, league_players, trophy_players)
+
+    expanded: list[dict] = []
+    for item in linked[:25]:
+        tag = item.get("tag") or ""
+        if not tag:
+            continue
+        for clan_tag in await _tags_from_player_clans(client, tag, 0, 30_000, max_tags=35):
+            expanded.append({"tag": clan_tag, "name": clan_tag})
+    return _merge_players(players, expanded)
+
+
 async def collect_all() -> dict[str, Any]:
     async with _collect_lock:
         league = await collect_mode(MODE_LEAGUE)
         trophies = await collect_mode(MODE_TROPHIES)
         client = ClashRoyaleClient()
         try:
-            league_players = await _players_for_mode(client, MODE_LEAGUE)
-            trophy_players = await _players_for_mode(client, MODE_TROPHIES)
+            cw_players = await _cw_player_pool(client)
             cw = await refresh_clan_war_snapshot(
                 client,
-                _merge_players(league_players, trophy_players),
+                cw_players,
                 concurrency=max(1, settings.meta_collector_concurrency),
+                min_games=1,
             )
         finally:
             await client.close()
