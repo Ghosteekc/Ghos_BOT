@@ -56,6 +56,10 @@ def _public_visual_moment(item: dict) -> dict:
         "clip_available": bool(item.get("clip_available")),
         "preview_base64": item.get("preview_base64"),
         "source": str(item.get("source") or "vision"),
+        "title": item.get("title"),
+        "short_description": item.get("short_description"),
+        "explanation_kind": item.get("explanation_kind"),
+        "explanation_source": item.get("explanation_source"),
     }
 
 
@@ -217,6 +221,21 @@ async def analyze_replay(
             coach_source=(
                 str(payload["coach_source"])
                 if payload.get("coach_source") is not None
+                else None
+            ),
+            grounded_summary=(
+                str(payload["grounded_summary"])
+                if payload.get("grounded_summary") is not None
+                else None
+            ),
+            grounded_limitations=(
+                str(payload["grounded_limitations"])
+                if payload.get("grounded_limitations") is not None
+                else None
+            ),
+            grounded_summary_source=(
+                str(payload["grounded_summary_source"])
+                if payload.get("grounded_summary_source") is not None
                 else None
             ),
         )

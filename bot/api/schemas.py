@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -1017,6 +1019,10 @@ class ReplayVisualMomentResponse(BaseModel):
     clip_available: bool = False
     preview_base64: str | None = None
     source: str = "vision"
+    title: str | None = None
+    short_description: str | None = None
+    explanation_kind: str | None = None
+    explanation_source: str | None = None
 
 
 class ReplayFactsResponse(BaseModel):
@@ -1039,6 +1045,9 @@ class ReplayFactsResponse(BaseModel):
     tactical_analysis: ReplayTacticalAnalysisResponse | None = None
     coach_reply: str | None = None
     coach_source: str | None = None
+    grounded_summary: str | None = None
+    grounded_limitations: str | None = None
+    grounded_summary_source: str | None = None
     game_state_observations: list[dict] = Field(default_factory=list)
     elixir_observations: list[dict] = Field(default_factory=list)
     cycle: dict | None = None

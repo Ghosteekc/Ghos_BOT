@@ -205,6 +205,39 @@ def evidence_max_moments() -> int:
     )
 
 
+# Stage 7: grounded moment explanation (Qwen wording only)
+MOMENT_RENDER_ENABLED_DEFAULT = "1"
+MOMENT_MAX_DEFAULT = 6
+MOMENT_MAX_MIN = 1
+MOMENT_MAX_MAX = 6
+MOMENT_QWEN_TIMEOUT_DEFAULT = 30.0
+MOMENT_QWEN_TIMEOUT_MIN = 5.0
+MOMENT_QWEN_TIMEOUT_MAX = 120.0
+
+
+def moment_render_enabled() -> bool:
+    raw = os.environ.get("REPLAY_MOMENT_RENDER_ENABLED", MOMENT_RENDER_ENABLED_DEFAULT)
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def moment_max() -> int:
+    return _env_int(
+        "REPLAY_MOMENT_MAX",
+        MOMENT_MAX_DEFAULT,
+        MOMENT_MAX_MIN,
+        MOMENT_MAX_MAX,
+    )
+
+
+def moment_qwen_timeout_seconds() -> float:
+    return _env_float(
+        "REPLAY_MOMENT_QWEN_TIMEOUT_SECONDS",
+        MOMENT_QWEN_TIMEOUT_DEFAULT,
+        MOMENT_QWEN_TIMEOUT_MIN,
+        MOMENT_QWEN_TIMEOUT_MAX,
+    )
+
+
 @dataclass(frozen=True)
 class HeuristicSignal:
     signal: str
@@ -385,6 +418,9 @@ class ReplayAnalysisResult:
     what_is_unavailable: list[str] = field(default_factory=list)
     moment_shots: list = field(default_factory=list)
     visual_moments: list = field(default_factory=list)
+    grounded_summary: str | None = None
+    grounded_limitations: str | None = None
+    grounded_summary_source: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -436,6 +472,9 @@ class ReplayAnalysisResult:
             ),
             "coach_reply": self.coach_reply,
             "coach_source": self.coach_source,
+            "grounded_summary": self.grounded_summary,
+            "grounded_limitations": self.grounded_limitations,
+            "grounded_summary_source": self.grounded_summary_source,
             "game_state_observations": [
                 item.to_dict() if hasattr(item, "to_dict") else dict(item)
                 for item in self.game_state_observations

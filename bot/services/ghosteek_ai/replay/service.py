@@ -35,7 +35,13 @@ from bot.services.ghosteek_ai.replay.models import (
     ReplayAnalysisResult,
     ReplayDetection,
     max_concurrent_jobs,
+    moment_render_enabled,
     vision_enabled,
+)
+from bot.services.ghosteek_ai.replay.moment_renderer import (
+    ReplayMomentRenderer,
+    ReplaySummaryRenderer,
+    fallback_replay_summary,
 )
 from bot.services.ghosteek_ai.replay.moment_shots import extract_moment_shots
 from bot.services.ghosteek_ai.replay.evidence import EvidenceBuilder
@@ -136,6 +142,7 @@ class ReplayAnalyzeService:
         )
         assert detection is not None
         if analysis is not None and detection.status == STATUS_CR:
+            analysis = await self._attach_moment_explanations(analysis)
             analysis = await self._attach_coach(analysis)
         return ReplayAnalyzeOutcome(
             filename=meta.filename,
@@ -148,6 +155,43 @@ class ReplayAnalyzeService:
             detection=detection,
             analysis=analysis,
         )
+
+    async def _attach_moment_explanations(
+        self, analysis: ReplayAnalysisResult
+    ) -> ReplayAnalysisResult:
+        if not moment_render_enabled():
+            return analysis
+        try:
+            moments = await ReplayMomentRenderer().arender_moments(
+                list(analysis.visual_moments),
+                confirmed_events=list(analysis.confirmed_events),
+                limitations=list(analysis.limitations),
+            )
+            summary = await ReplaySummaryRenderer().arender(
+                moments=moments,
+                facts=list(analysis.facts),
+                limitations=list(analysis.limitations),
+                timeline=list(analysis.timeline),
+            )
+            return replace(
+                analysis,
+                visual_moments=moments,
+                grounded_summary=summary.overview,
+                grounded_limitations=summary.limitations,
+                grounded_summary_source=summary.source,
+            )
+        except Exception:
+            logger.exception("replay moment explanation failed — fallback only")
+            fb = fallback_replay_summary(
+                moments=list(analysis.visual_moments),
+                limitations=list(analysis.limitations),
+            )
+            return replace(
+                analysis,
+                grounded_summary=fb.overview,
+                grounded_limitations=fb.limitations,
+                grounded_summary_source=fb.source,
+            )
 
     async def _attach_coach(self, analysis: ReplayAnalysisResult) -> ReplayAnalysisResult:
         renderer = self._coach_renderer or ReplayCoachRenderer()

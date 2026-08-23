@@ -93,9 +93,13 @@ class ReplayVisualMoment:
     preview_base64: str | None = None
     clip_available: bool = False
     source: str = SOURCE_VISION
+    title: str | None = None
+    short_description: str | None = None
+    explanation_kind: str | None = None
+    explanation_source: str | None = None
 
     def to_dict(self) -> dict:
-        return {
+        out: dict = {
             "event_type": self.event_type,
             "timestamp_seconds": round(float(self.timestamp_seconds), 3),
             "card_name": self.card_name,
@@ -107,6 +111,15 @@ class ReplayVisualMoment:
             "preview_base64": self.preview_base64,
             "source": self.source,
         }
+        if self.title is not None:
+            out["title"] = self.title
+        if self.short_description is not None:
+            out["short_description"] = self.short_description
+        if self.explanation_kind is not None:
+            out["explanation_kind"] = self.explanation_kind
+        if self.explanation_source is not None:
+            out["explanation_source"] = self.explanation_source
+        return out
 
 
 @dataclass
