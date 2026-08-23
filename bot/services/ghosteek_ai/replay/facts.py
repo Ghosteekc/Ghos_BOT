@@ -36,12 +36,15 @@ from bot.services.ghosteek_ai.replay.models import (
     OBS_CARD_BAR_VISIBLE,
     OBS_ELIXIR_HUD_VISIBLE,
     OBS_GAMEPLAY_SCREEN,
+    SOURCE_VISION,
     STATUS_CR,
     ReplayAnalysisResult,
     ReplayDetection,
     TimelineObservation,
+    replay_event_confidence_threshold,
 )
 from bot.services.ghosteek_ai.replay.tactical_analysis import ReplayTacticalAnalysis
+from bot.services.ghosteek_ai.replay.vision_events import vision_event_label
 
 
 _FORBIDDEN_FACT_TOKENS = (
@@ -98,6 +101,12 @@ class ReplayFactsBuilder:
         all_events = list(events or ())
         confirmed_only = list(confirmed_events or ())
         candidates_only = list(candidate_events or ())
+        facts.extend(
+            _facts_from_vision_events(
+                confirmed_only,
+                threshold=replay_event_confidence_threshold(),
+            )
+        )
         if not candidates_only:
             candidates_only = [
                 e for e in all_events if e.event_type == EVENT_CARD_PLAY_CANDIDATE
@@ -178,6 +187,28 @@ def _facts_from_counts(counts: dict[str, int], frames: int) -> list[str]:
 def _looks_invented(text: str) -> bool:
     low = text.lower()
     return any(token in low for token in _FORBIDDEN_FACT_TOKENS)
+
+
+def _facts_from_vision_events(
+    confirmed: Sequence[ReplayEvent],
+    *,
+    threshold: float,
+) -> list[str]:
+    """Grounded vision facts — bypass heuristic invention filter."""
+    facts: list[str] = []
+    for ev in confirmed:
+        if ev.source != SOURCE_VISION:
+            continue
+        if float(ev.confidence) < float(threshold):
+            continue
+        card_name = ev.details.get("card_name") if ev.details else None
+        ts = float(ev.timestamp_seconds)
+        if card_name:
+            facts.append(f"Vision confirmed {card_name} visibility at {ts:.1f}s.")
+        else:
+            label = vision_event_label(ev.event_type)
+            facts.append(f"Vision confirmed {label} at {ts:.1f}s.")
+    return facts[:12]
 
 
 def _limitations_for(

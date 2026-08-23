@@ -59,8 +59,15 @@ ALLOWED_EVENT_TYPES = frozenset(
         EVENT_OVERTIME_VISIBLE,
         EVENT_UNKNOWN,
         EVENT_RESULT_VISIBLE,
-        # Accept historical spellings if callers construct events manually
+        # Vision observation types (Stage 5)
         "card_visible",
+        "troop_visible",
+        "spell_visible",
+        "building_visible",
+        "tower_damage_candidate",
+        "defensive_interaction_candidate",
+        "offensive_interaction_candidate",
+        # Accept historical spellings if callers construct events manually
         "card_play",
         "battle_started",
         "battle_ended",

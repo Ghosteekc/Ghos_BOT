@@ -334,6 +334,56 @@ class FrameSampler:
             )
             raise ReplayError(CODE_FRAME_EXTRACTION_FAILED)
 
+    def extract_persisted_frames(
+        self,
+        video_path: Path,
+        *,
+        timestamps: list[float],
+        duration: float,
+        src_width: int,
+        src_height: int,
+    ) -> tuple[list[SampledFrame], Path]:
+        """Extract specific timestamps; caller must delete returned tmpdir."""
+        binary = find_ffmpeg()
+        if not binary:
+            raise ReplayError(CODE_FFMPEG_UNAVAILABLE)
+
+        out_w, out_h = scaled_dimensions(src_width, src_height)
+        tmpdir = Path(tempfile.mkdtemp(prefix="ghosteek-replay-vision-"))
+        deadline = time.monotonic() + self.timeout_seconds
+        frames: list[SampledFrame] = []
+        try:
+            for index, ts in enumerate(timestamps):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ReplayError(CODE_ANALYSIS_TIMEOUT)
+                dest = tmpdir / f"vision_{index:03d}.jpg"
+                self._extract_one(
+                    binary=binary,
+                    video_path=video_path,
+                    timestamp=ts,
+                    dest=dest,
+                    width=out_w,
+                    height=out_h,
+                    timeout=min(_PER_FRAME_TIMEOUT, remaining),
+                )
+                frames.append(
+                    SampledFrame(
+                        path=str(dest),
+                        timestamp=ts,
+                        width=out_w,
+                        height=out_h,
+                    )
+                )
+        except Exception:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            raise
+
+        if not frames:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            raise ReplayError(CODE_FRAME_EXTRACTION_FAILED)
+        return frames, tmpdir
+
     def _plan_adaptive_stamps(
         self,
         *,

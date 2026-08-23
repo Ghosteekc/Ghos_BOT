@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
 
 from bot.services.ghosteek_ai.replay.battle_timeline import ReplayBattleTimelineBuilder
+from bot.services.ghosteek_ai.replay.candidate_frames import CandidateFrameSelector
 from bot.services.ghosteek_ai.replay.card_recognizer import (
     AmbiguousCardObservation,
     ConfirmedCardObservation,
@@ -33,8 +35,13 @@ from bot.services.ghosteek_ai.replay.models import (
     ReplayAnalysisResult,
     ReplayDetection,
     max_concurrent_jobs,
+    vision_enabled,
 )
 from bot.services.ghosteek_ai.replay.moment_shots import extract_moment_shots
+from bot.services.ghosteek_ai.replay.ollama_vision_analyzer import (
+    OllamaVisionTimeout,
+    OllamaVisionUnavailable,
+)
 from bot.services.ghosteek_ai.replay.sampler import FrameSampler
 from bot.services.ghosteek_ai.replay.tactical_analysis import ReplayTacticalAnalyzer
 from bot.services.ghosteek_ai.replay.timeline import ReplayTimelineBuilder
@@ -51,6 +58,12 @@ from bot.services.ghosteek_ai.replay.validator import (
     probe_video,
     validate_identity,
     validate_size,
+)
+from bot.services.ghosteek_ai.replay.vision_analyzer import VisionAnalyzer
+from bot.services.ghosteek_ai.replay.vision_events import (
+    merge_event_lists,
+    repartition_merged_events,
+    vision_observations_to_events,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +85,8 @@ class ReplayAnalyzeService:
         battle_timeline_builder: ReplayBattleTimelineBuilder | None = None,
         tactical_analyzer: ReplayTacticalAnalyzer | None = None,
         coach_renderer: ReplayCoachRenderer | None = None,
+        vision_analyzer: VisionAnalyzer | None = None,
+        candidate_selector: CandidateFrameSelector | None = None,
     ) -> None:
         self._busy = False
         self._active_jobs = 0
@@ -85,6 +100,8 @@ class ReplayAnalyzeService:
         self._battle_timeline_builder = battle_timeline_builder
         self._tactical_analyzer = tactical_analyzer
         self._coach_renderer = coach_renderer
+        self._vision_analyzer = vision_analyzer
+        self._candidate_selector = candidate_selector
         self._game_state_builder = GameStateBuilder()
         self._elixir_observer = ElixirObserver()
 
@@ -212,6 +229,14 @@ class ReplayAnalyzeService:
             if not detect:
                 return meta, None, None
             bundle = self._run_detection(working, duration, width, height)
+            if vision_enabled():
+                bundle = await self._attach_vision(
+                    bundle,
+                    video_path=working,
+                    duration=duration,
+                    width=width,
+                    height=height,
+                )
             analysis = self._build_stage4(bundle, duration_seconds=meta.duration_seconds)
             if analysis is not None:
                 shots = extract_moment_shots(
@@ -303,6 +328,75 @@ class ReplayAnalyzeService:
             game_state_observations=tuple(game_states),
         )
 
+    async def _attach_vision(
+        self,
+        bundle: DetectionBundle,
+        *,
+        video_path: Path,
+        duration: float,
+        width: int,
+        height: int,
+    ) -> DetectionBundle:
+        if bundle.detection.status != STATUS_CR:
+            return bundle
+
+        analyzer = self._vision_analyzer
+        if analyzer is None:
+            from bot.services.ghosteek_ai.replay.ollama_vision_analyzer import OllamaVisionAnalyzer
+
+            analyzer = OllamaVisionAnalyzer()
+
+        timeline_builder = self._timeline_builder or ReplayTimelineBuilder()
+        heuristic_timeline = timeline_builder.build(bundle.frames)
+        selector = self._candidate_selector or CandidateFrameSelector()
+        candidates = selector.select(
+            bundle.frames,
+            timeline=heuristic_timeline,
+            duration_seconds=duration,
+        )
+        if not candidates:
+            return bundle
+
+        sampler = self._sampler or FrameSampler()
+        stamps = [c.timestamp_seconds for c in candidates]
+        tmpdir: Path | None = None
+        observations = []
+        try:
+            extracted, tmpdir = sampler.extract_persisted_frames(
+                video_path,
+                timestamps=stamps,
+                duration=duration,
+                src_width=width,
+                src_height=height,
+            )
+            by_ts = {round(f.timestamp, 4): f for f in extracted}
+            sequence: list[tuple[str, int, float]] = []
+            for cand in candidates:
+                frame = by_ts.get(round(cand.timestamp_seconds, 4))
+                if frame is None:
+                    frame = min(extracted, key=lambda f: abs(f.timestamp - cand.timestamp_seconds))
+                sequence.append((frame.path, cand.frame_index, cand.timestamp_seconds))
+
+            try:
+                observations = await analyzer.analyze_frame_sequence(sequence)
+            except OllamaVisionTimeout:
+                logger.warning("replay vision timed out")
+                return bundle
+            except OllamaVisionUnavailable:
+                logger.warning("replay vision unavailable")
+                return bundle
+            except Exception:
+                logger.exception("replay vision analysis failed")
+                return bundle
+        except ReplayError:
+            logger.warning("replay vision frame extraction failed")
+            return bundle
+        finally:
+            if tmpdir is not None:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
+        return replace(bundle, vision_observations=tuple(observations))
+
     def _build_stage4(
         self,
         bundle: DetectionBundle,
@@ -314,14 +408,16 @@ class ReplayAnalyzeService:
         timeline_builder = self._timeline_builder or ReplayTimelineBuilder()
         facts_builder = self._facts_builder or ReplayFactsBuilder()
         event_detector = self._event_detector or ReplayEventDetector()
-        timeline = timeline_builder.build(bundle.frames)
+        timeline = timeline_builder.build_from_bundle(bundle)
         confirmed = group_confirmed_cards(bundle.confirmed_card_observations)
         raw_events = event_detector.detect(
             card_observations=list(bundle.confirmed_card_observations),
-            timeline=timeline,
+            timeline=timeline_builder.build(bundle.frames),
             ambiguous_present=bool(bundle.ambiguous_card_observations),
         )
-        events, confirmed_events, candidate_events = event_detector.partition(raw_events)
+        vision_events = vision_observations_to_events(bundle.vision_observations)
+        merged_events = merge_event_lists(raw_events, vision_events)
+        events, confirmed_events, candidate_events = repartition_merged_events(merged_events)
         battle_builder = self._battle_timeline_builder or ReplayBattleTimelineBuilder()
         battle_timeline = battle_builder.build(
             duration_seconds=duration_seconds,

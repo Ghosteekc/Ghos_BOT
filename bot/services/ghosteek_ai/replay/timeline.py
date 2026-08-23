@@ -10,6 +10,8 @@ from bot.services.ghosteek_ai.replay.models import (
     FrameSignalSnapshot,
     TimelineObservation,
 )
+from bot.services.ghosteek_ai.replay.vision_analyzer import VisionObservation
+from bot.services.ghosteek_ai.replay.vision_events import merge_timeline_with_vision
 
 _SIGNAL_SCORE_MIN = 0.55
 
@@ -54,4 +56,14 @@ class ReplayTimelineBuilder:
         return out
 
     def build_from_bundle(self, bundle: DetectionBundle) -> list[TimelineObservation]:
-        return self.build(bundle.frames)
+        timeline = self.build(bundle.frames)
+        if bundle.vision_observations:
+            timeline = self.merge_vision(timeline, bundle.vision_observations)
+        return timeline
+
+    def merge_vision(
+        self,
+        timeline: list[TimelineObservation],
+        observations: list[VisionObservation] | tuple[VisionObservation, ...],
+    ) -> list[TimelineObservation]:
+        return merge_timeline_with_vision(timeline, observations)

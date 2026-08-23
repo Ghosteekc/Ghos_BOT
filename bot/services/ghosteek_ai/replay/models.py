@@ -36,6 +36,15 @@ FRAME_TIMEOUT_DEFAULT = 120.0
 TARGET_SHORT_SIDE = 1080
 NEAR_DUP_HAMMING = 6
 
+# Stage 5 vision analyzer
+VISION_MAX_FRAMES_DEFAULT = 12
+VISION_MAX_FRAMES_MIN = 1
+VISION_MAX_FRAMES_MAX = 24
+VISION_MIN_GAP_SECONDS_DEFAULT = 1.0
+VISION_TIMEOUT_DEFAULT = 90.0
+VISION_CONFIDENCE_THRESHOLD_DEFAULT = 0.90
+VISION_CANDIDATE_MIN_DEFAULT = 3
+
 ALLOWED_STATUS = frozenset({STATUS_CR, STATUS_NOT_CR, STATUS_UNCERTAIN})
 
 
@@ -98,6 +107,56 @@ def detection_thresholds() -> tuple[float, float]:
     return cr, not_cr
 
 
+def vision_enabled() -> bool:
+    raw = os.environ.get("REPLAY_VISION_ENABLED", "0")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def vision_max_frames_per_job() -> int:
+    return _env_int(
+        "REPLAY_VISION_MAX_FRAMES_PER_JOB",
+        VISION_MAX_FRAMES_DEFAULT,
+        VISION_MAX_FRAMES_MIN,
+        VISION_MAX_FRAMES_MAX,
+    )
+
+
+def vision_min_frame_gap_seconds() -> float:
+    return _env_float(
+        "REPLAY_VISION_MIN_FRAME_GAP_SECONDS",
+        VISION_MIN_GAP_SECONDS_DEFAULT,
+        0.25,
+        10.0,
+    )
+
+
+def vision_timeout_seconds() -> float:
+    return _env_float(
+        "REPLAY_VISION_TIMEOUT_SECONDS",
+        VISION_TIMEOUT_DEFAULT,
+        10.0,
+        300.0,
+    )
+
+
+def replay_event_confidence_threshold() -> float:
+    return _env_float(
+        "REPLAY_EVENT_CONFIDENCE_THRESHOLD",
+        VISION_CONFIDENCE_THRESHOLD_DEFAULT,
+        0.50,
+        0.99,
+    )
+
+
+def vision_candidate_min_before_fallback() -> int:
+    return _env_int(
+        "REPLAY_VISION_CANDIDATE_MIN",
+        VISION_CANDIDATE_MIN_DEFAULT,
+        1,
+        VISION_MAX_FRAMES_MAX,
+    )
+
+
 @dataclass(frozen=True)
 class HeuristicSignal:
     signal: str
@@ -146,6 +205,30 @@ OBS_BATTLE_UI_VISIBLE = "battle_ui_visible"
 OBS_RESULT_SCREEN = "result_screen"
 OBS_UNKNOWN = "unknown"
 
+# Vision-only timeline / event observation types (Stage 5)
+OBS_CARD_VISIBLE = "card_visible"
+OBS_CARD_PLAY_CANDIDATE = "card_play_candidate"
+OBS_TROOP_VISIBLE = "troop_visible"
+OBS_SPELL_VISIBLE = "spell_visible"
+OBS_BUILDING_VISIBLE = "building_visible"
+OBS_TOWER_DAMAGE_CANDIDATE = "tower_damage_candidate"
+OBS_DEFENSIVE_INTERACTION_CANDIDATE = "defensive_interaction_candidate"
+OBS_OFFENSIVE_INTERACTION_CANDIDATE = "offensive_interaction_candidate"
+
+VISION_OBSERVATION_TYPES = frozenset(
+    {
+        OBS_CARD_VISIBLE,
+        OBS_CARD_PLAY_CANDIDATE,
+        OBS_TROOP_VISIBLE,
+        OBS_SPELL_VISIBLE,
+        OBS_BUILDING_VISIBLE,
+        OBS_TOWER_DAMAGE_CANDIDATE,
+        OBS_DEFENSIVE_INTERACTION_CANDIDATE,
+        OBS_OFFENSIVE_INTERACTION_CANDIDATE,
+        OBS_UNKNOWN,
+    }
+)
+
 OBSERVATION_TYPES = frozenset(
     {
         OBS_GAMEPLAY_SCREEN,
@@ -156,6 +239,7 @@ OBSERVATION_TYPES = frozenset(
         OBS_RESULT_SCREEN,
         OBS_UNKNOWN,
     }
+    | VISION_OBSERVATION_TYPES
 )
 
 SIGNAL_TO_OBSERVATION = {
@@ -183,6 +267,8 @@ DEFAULT_UNAVAILABLE = (
 )
 
 SOURCE_HEURISTIC = "heuristic"
+SOURCE_VISION = "vision"
+SOURCE_DERIVED = "derived"
 
 
 @dataclass(frozen=True)
@@ -200,6 +286,7 @@ class DetectionBundle:
     confirmed_card_observations: tuple = ()
     ambiguous_card_observations: tuple = ()
     game_state_observations: tuple = ()
+    vision_observations: tuple = ()
 
 
 @dataclass(frozen=True)
