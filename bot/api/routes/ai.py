@@ -21,14 +21,42 @@ from bot.api.schemas import (
     ReplayMomentShotResponse,
     ReplayTacticalAnalysisResponse,
     ReplayTimelineItemResponse,
+    ReplayVisualMomentResponse,
 )
 from bot.models.database import User
 from bot.services.ghosteek_ai import ask_ghosteek_ai
 from bot.services.ghosteek_ai.conversation.manager import ConversationManager
 from bot.services.ghosteek_ai.replay import ReplayError, get_replay_service
+from bot.services.ghosteek_ai.replay.evidence import get_evidence_store
 from bot.services.ghosteek_ai.session_context import clear_session
+from fastapi.responses import Response
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+
+def _public_visual_moment(item: dict) -> dict:
+    """Strip any accidental path keys before API serialization."""
+    frame = item.get("evidence_frame") if isinstance(item.get("evidence_frame"), dict) else {}
+    safe_frame: dict = {
+        "timestamp_seconds": float(frame.get("timestamp_seconds") or item.get("timestamp_seconds") or 0),
+        "frame_index": int(frame.get("frame_index") or 0),
+    }
+    if frame.get("width") is not None:
+        safe_frame["width"] = int(frame["width"])
+    if frame.get("height") is not None:
+        safe_frame["height"] = int(frame["height"])
+    return {
+        "event_type": str(item.get("event_type") or "unknown"),
+        "timestamp_seconds": float(item.get("timestamp_seconds") or 0),
+        "card_name": item.get("card_name"),
+        "confidence": float(item.get("confidence") or 0),
+        "evidence_frame": safe_frame,
+        "evidence_id": item.get("evidence_id"),
+        "clip_id": item.get("clip_id"),
+        "clip_available": bool(item.get("clip_available")),
+        "preview_base64": item.get("preview_base64"),
+        "source": str(item.get("source") or "vision"),
+    }
 
 
 @router.post("/ask", response_model=GhosteekAiAskResponse)
@@ -166,6 +194,11 @@ async def analyze_replay(
                 for item in (payload.get("moment_shots") or [])
                 if isinstance(item, dict) and item.get("image_base64")
             ],
+            visual_moments=[
+                ReplayVisualMomentResponse.model_validate(_public_visual_moment(item))
+                for item in (payload.get("visual_moments") or [])
+                if isinstance(item, dict)
+            ],
             battle_timeline=(
                 ReplayBattleTimelineResponse.model_validate(payload["battle_timeline"])
                 if isinstance(payload.get("battle_timeline"), dict)
@@ -203,6 +236,27 @@ async def analyze_replay(
             observations=list(detection.observations),
         ),
         replay_facts=replay_facts,
+    )
+
+
+@router.get("/replay/evidence/{evidence_id}")
+async def get_replay_evidence(
+    evidence_id: str,
+    user: User = Depends(require_subscription),
+):
+    """Serve opaque evidence bytes. Never accepts filesystem paths."""
+    del user  # auth gate only
+    stored = get_evidence_store().get(evidence_id)
+    if stored is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error_code": "EVIDENCE_NOT_FOUND"})
+    data, content_type = stored
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "private, max-age=60",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

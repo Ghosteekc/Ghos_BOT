@@ -999,6 +999,26 @@ class ReplayMomentShotResponse(BaseModel):
     image_base64: str
 
 
+class ReplayEvidenceFrameResponse(BaseModel):
+    timestamp_seconds: float
+    frame_index: int
+    width: int | None = None
+    height: int | None = None
+
+
+class ReplayVisualMomentResponse(BaseModel):
+    event_type: str
+    timestamp_seconds: float
+    card_name: str | None = None
+    confidence: float
+    evidence_frame: ReplayEvidenceFrameResponse
+    evidence_id: str | None = None
+    clip_id: str | None = None
+    clip_available: bool = False
+    preview_base64: str | None = None
+    source: str = "vision"
+
+
 class ReplayFactsResponse(BaseModel):
     source: str = "replay_analysis"
     replay_status: str
@@ -1014,6 +1034,7 @@ class ReplayFactsResponse(BaseModel):
     confirmed_events: list[ReplayEventResponse] = Field(default_factory=list)
     candidate_events: list[ReplayEventResponse] = Field(default_factory=list)
     moment_shots: list[ReplayMomentShotResponse] = Field(default_factory=list)
+    visual_moments: list[ReplayVisualMomentResponse] = Field(default_factory=list)
     battle_timeline: ReplayBattleTimelineResponse | None = None
     tactical_analysis: ReplayTacticalAnalysisResponse | None = None
     coach_reply: str | None = None

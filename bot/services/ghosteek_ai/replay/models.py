@@ -45,6 +45,17 @@ VISION_TIMEOUT_DEFAULT = 90.0
 VISION_CONFIDENCE_THRESHOLD_DEFAULT = 0.90
 VISION_CANDIDATE_MIN_DEFAULT = 3
 
+# Stage 6 visual evidence
+EVIDENCE_ENABLED_DEFAULT = "1"
+EVIDENCE_CLIP_ENABLED_DEFAULT = "0"
+EVIDENCE_PRE_SECONDS_DEFAULT = 1.5
+EVIDENCE_POST_SECONDS_DEFAULT = 1.5
+EVIDENCE_MAX_MOMENTS_DEFAULT = 6
+EVIDENCE_MAX_MOMENTS_MIN = 1
+EVIDENCE_MAX_MOMENTS_MAX = 6
+EVIDENCE_WINDOW_SECONDS_MIN = 0.25
+EVIDENCE_WINDOW_SECONDS_MAX = 5.0
+
 ALLOWED_STATUS = frozenset({STATUS_CR, STATUS_NOT_CR, STATUS_UNCERTAIN})
 
 
@@ -154,6 +165,43 @@ def vision_candidate_min_before_fallback() -> int:
         VISION_CANDIDATE_MIN_DEFAULT,
         1,
         VISION_MAX_FRAMES_MAX,
+    )
+
+
+def evidence_enabled() -> bool:
+    raw = os.environ.get("REPLAY_EVIDENCE_ENABLED", EVIDENCE_ENABLED_DEFAULT)
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def evidence_clip_enabled() -> bool:
+    raw = os.environ.get("REPLAY_EVIDENCE_CLIP_ENABLED", EVIDENCE_CLIP_ENABLED_DEFAULT)
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def evidence_pre_seconds() -> float:
+    return _env_float(
+        "REPLAY_EVIDENCE_PRE_SECONDS",
+        EVIDENCE_PRE_SECONDS_DEFAULT,
+        EVIDENCE_WINDOW_SECONDS_MIN,
+        EVIDENCE_WINDOW_SECONDS_MAX,
+    )
+
+
+def evidence_post_seconds() -> float:
+    return _env_float(
+        "REPLAY_EVIDENCE_POST_SECONDS",
+        EVIDENCE_POST_SECONDS_DEFAULT,
+        EVIDENCE_WINDOW_SECONDS_MIN,
+        EVIDENCE_WINDOW_SECONDS_MAX,
+    )
+
+
+def evidence_max_moments() -> int:
+    return _env_int(
+        "REPLAY_EVIDENCE_MAX_MOMENTS",
+        EVIDENCE_MAX_MOMENTS_DEFAULT,
+        EVIDENCE_MAX_MOMENTS_MIN,
+        EVIDENCE_MAX_MOMENTS_MAX,
     )
 
 
@@ -336,6 +384,7 @@ class ReplayAnalysisResult:
     what_is_uncertain: list[str] = field(default_factory=list)
     what_is_unavailable: list[str] = field(default_factory=list)
     moment_shots: list = field(default_factory=list)
+    visual_moments: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -370,6 +419,10 @@ class ReplayAnalysisResult:
             "moment_shots": [
                 item.to_dict() if hasattr(item, "to_dict") else dict(item)
                 for item in self.moment_shots
+            ],
+            "visual_moments": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.visual_moments
             ],
             "battle_timeline": (
                 self.battle_timeline.to_dict()

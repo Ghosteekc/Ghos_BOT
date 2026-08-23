@@ -38,6 +38,7 @@ from bot.services.ghosteek_ai.replay.models import (
     vision_enabled,
 )
 from bot.services.ghosteek_ai.replay.moment_shots import extract_moment_shots
+from bot.services.ghosteek_ai.replay.evidence import EvidenceBuilder
 from bot.services.ghosteek_ai.replay.ollama_vision_analyzer import (
     OllamaVisionTimeout,
     OllamaVisionUnavailable,
@@ -248,6 +249,18 @@ class ReplayAnalyzeService:
                     confirmed_cards=list(analysis.confirmed_cards),
                 )
                 analysis = replace(analysis, moment_shots=shots)
+                try:
+                    moments = EvidenceBuilder().build(
+                        video_path=working,
+                        duration_seconds=float(meta.duration_seconds),
+                        src_width=width,
+                        src_height=height,
+                        vision_observations=list(bundle.vision_observations),
+                        sampled_frames=list(bundle.frames),
+                    )
+                    analysis = replace(analysis, visual_moments=moments)
+                except Exception:
+                    logger.exception("replay evidence build failed")
             return meta, bundle.detection, analysis
         except ReplayError:
             raise
