@@ -579,6 +579,7 @@ class ReplayMomentRenderer:
         timeout_seconds: float | None = None,
     ) -> None:
         self._provider = provider
+        self._owns_provider = provider is None
         self._catalog = catalog
         self._max = int(max_moments) if max_moments is not None else moment_max()
         self._timeout = (
@@ -586,6 +587,23 @@ class ReplayMomentRenderer:
             if timeout_seconds is not None
             else moment_qwen_timeout_seconds()
         )
+
+    async def _ensure_provider(self) -> Any:
+        if self._provider is None:
+            from bot.services.ghosteek_ai.llm.provider import (
+                OllamaProvider,
+                ollama_config_from_settings,
+            )
+
+            self._provider = OllamaProvider(ollama_config_from_settings())
+            self._owns_provider = True
+        return self._provider
+
+    async def close(self) -> None:
+        if self._owns_provider and self._provider is not None:
+            await self._provider.close()
+        if self._owns_provider:
+            self._provider = None
 
     async def arender_moments(
         self,
@@ -597,35 +615,38 @@ class ReplayMomentRenderer:
     ) -> list[ReplayVisualMoment]:
         if not moment_render_enabled():
             return list(moments)
-        selected = list(moments)[: max(0, self._max)]
-        out: list[ReplayVisualMoment] = []
-        qwen_budget = self._max if use_qwen else 0
-        for moment in selected:
-            kind = classify_explanation_kind(
-                moment,
-                confirmed_events=confirmed_events,
-                catalog=self._catalog,
-            )
-            explanation: MomentExplanation | None = None
-            if qwen_budget > 0:
-                explanation = await self._explain_with_qwen(
-                    moment, kind=kind, limitations=limitations
-                )
-                qwen_budget -= 1
-            if explanation is None:
-                explanation = fallback_moment_explanation(
-                    moment, kind=kind, confirmed_events=confirmed_events
-                )
-            out.append(
-                replace(
+        try:
+            selected = list(moments)[: max(0, self._max)]
+            out: list[ReplayVisualMoment] = []
+            qwen_budget = self._max if use_qwen else 0
+            for moment in selected:
+                kind = classify_explanation_kind(
                     moment,
-                    title=explanation.title,
-                    short_description=explanation.short_description,
-                    explanation_kind=explanation.explanation_kind,
-                    explanation_source=explanation.source,
+                    confirmed_events=confirmed_events,
+                    catalog=self._catalog,
                 )
-            )
-        return out
+                explanation: MomentExplanation | None = None
+                if qwen_budget > 0:
+                    explanation = await self._explain_with_qwen(
+                        moment, kind=kind, limitations=limitations
+                    )
+                    qwen_budget -= 1
+                if explanation is None:
+                    explanation = fallback_moment_explanation(
+                        moment, kind=kind, confirmed_events=confirmed_events
+                    )
+                out.append(
+                    replace(
+                        moment,
+                        title=explanation.title,
+                        short_description=explanation.short_description,
+                        explanation_kind=explanation.explanation_kind,
+                        explanation_source=explanation.source,
+                    )
+                )
+            return out
+        finally:
+            await self.close()
 
     async def _explain_with_qwen(
         self,
@@ -677,15 +698,7 @@ class ReplayMomentRenderer:
 
         from bot.services.ghosteek_ai.generator.llm_generator import OllamaResponseGenerator
 
-        provider = self._provider
-        if provider is None:
-            from bot.services.ghosteek_ai.llm.provider import (
-                OllamaProvider,
-                ollama_config_from_settings,
-            )
-
-            provider = OllamaProvider(ollama_config_from_settings())
-
+        provider = await self._ensure_provider()
         gen = OllamaResponseGenerator(provider=provider, prompt_builder=builder)
         ctx = SimpleNamespace(raw_message=user_message)
         result = await asyncio.wait_for(
@@ -715,12 +728,30 @@ class ReplaySummaryRenderer:
         timeout_seconds: float | None = None,
     ) -> None:
         self._provider = provider
+        self._owns_provider = provider is None
         self._catalog = catalog
         self._timeout = (
             float(timeout_seconds)
             if timeout_seconds is not None
             else moment_qwen_timeout_seconds()
         )
+
+    async def _ensure_provider(self) -> Any:
+        if self._provider is None:
+            from bot.services.ghosteek_ai.llm.provider import (
+                OllamaProvider,
+                ollama_config_from_settings,
+            )
+
+            self._provider = OllamaProvider(ollama_config_from_settings())
+            self._owns_provider = True
+        return self._provider
+
+    async def close(self) -> None:
+        if self._owns_provider and self._provider is not None:
+            await self._provider.close()
+        if self._owns_provider:
+            self._provider = None
 
     async def arender(
         self,
@@ -758,45 +789,40 @@ class ReplaySummaryRenderer:
         if not use_qwen:
             return fallback_replay_summary(moments=moments, limitations=limitations)
         try:
-            raw = await self._call_qwen(json.dumps(payload, ensure_ascii=False))
-        except Exception:
-            logger.info("summary renderer Qwen failed — fallback", exc_info=True)
-            return fallback_replay_summary(moments=moments, limitations=limitations)
-        data = _parse_json_object(raw)
-        if data is None:
-            return fallback_replay_summary(moments=moments, limitations=limitations)
-        overview = str(data.get("overview") or "").strip()
-        lim = str(data.get("limitations") or "").strip()
-        reason = validate_summary_text(
-            overview=overview,
-            limitations=lim,
-            allowed_cards=allowed_cards,
-            allowed_timestamps=allowed_ts,
-            catalog=self._catalog,
-        )
-        if reason:
-            logger.info("summary renderer rejected qwen output: %s", reason)
-            return fallback_replay_summary(moments=moments, limitations=limitations)
-        return ReplayGroundedSummary(
-            overview=overview[:_SUMMARY_MAX],
-            limitations=lim[:_SUMMARY_MAX],
-            source="qwen",
-        )
+            try:
+                raw = await self._call_qwen(json.dumps(payload, ensure_ascii=False))
+            except Exception:
+                logger.info("summary renderer Qwen failed — fallback", exc_info=True)
+                return fallback_replay_summary(moments=moments, limitations=limitations)
+            data = _parse_json_object(raw)
+            if data is None:
+                return fallback_replay_summary(moments=moments, limitations=limitations)
+            overview = str(data.get("overview") or "").strip()
+            lim = str(data.get("limitations") or "").strip()
+            reason = validate_summary_text(
+                overview=overview,
+                limitations=lim,
+                allowed_cards=allowed_cards,
+                allowed_timestamps=allowed_ts,
+                catalog=self._catalog,
+            )
+            if reason:
+                logger.info("summary renderer rejected qwen output: %s", reason)
+                return fallback_replay_summary(moments=moments, limitations=limitations)
+            return ReplayGroundedSummary(
+                overview=overview[:_SUMMARY_MAX],
+                limitations=lim[:_SUMMARY_MAX],
+                source="qwen",
+            )
+        finally:
+            await self.close()
 
     async def _call_qwen(self, facts_json: str) -> str:
         from types import SimpleNamespace
 
         from bot.services.ghosteek_ai.generator.llm_generator import OllamaResponseGenerator
 
-        provider = self._provider
-        if provider is None:
-            from bot.services.ghosteek_ai.llm.provider import (
-                OllamaProvider,
-                ollama_config_from_settings,
-            )
-
-            provider = OllamaProvider(ollama_config_from_settings())
-
+        provider = await self._ensure_provider()
         builder = _SummaryPromptBuilder(facts_json)
         gen = OllamaResponseGenerator(provider=provider, prompt_builder=builder)
         ctx = SimpleNamespace(raw_message="Верни JSON overview+limitations по facts.")

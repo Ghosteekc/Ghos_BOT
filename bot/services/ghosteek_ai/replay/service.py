@@ -398,61 +398,68 @@ class ReplayAnalyzeService:
             return bundle
 
         analyzer = self._vision_analyzer
+        owns_analyzer = analyzer is None
         if analyzer is None:
             from bot.services.ghosteek_ai.replay.ollama_vision_analyzer import OllamaVisionAnalyzer
 
             analyzer = OllamaVisionAnalyzer()
 
-        timeline_builder = self._timeline_builder or ReplayTimelineBuilder()
-        heuristic_timeline = timeline_builder.build(bundle.frames)
-        selector = self._candidate_selector or CandidateFrameSelector()
-        candidates = selector.select(
-            bundle.frames,
-            timeline=heuristic_timeline,
-            duration_seconds=duration,
-        )
-        if not candidates:
-            return bundle
-
-        sampler = self._sampler or FrameSampler()
-        stamps = [c.timestamp_seconds for c in candidates]
-        tmpdir: Path | None = None
-        observations = []
         try:
-            extracted, tmpdir = sampler.extract_persisted_frames(
-                video_path,
-                timestamps=stamps,
-                duration=duration,
-                src_width=width,
-                src_height=height,
+            timeline_builder = self._timeline_builder or ReplayTimelineBuilder()
+            heuristic_timeline = timeline_builder.build(bundle.frames)
+            selector = self._candidate_selector or CandidateFrameSelector()
+            candidates = selector.select(
+                bundle.frames,
+                timeline=heuristic_timeline,
+                duration_seconds=duration,
             )
-            by_ts = {round(f.timestamp, 4): f for f in extracted}
-            sequence: list[tuple[str, int, float]] = []
-            for cand in candidates:
-                frame = by_ts.get(round(cand.timestamp_seconds, 4))
-                if frame is None:
-                    frame = min(extracted, key=lambda f: abs(f.timestamp - cand.timestamp_seconds))
-                sequence.append((frame.path, cand.frame_index, cand.timestamp_seconds))
+            if not candidates:
+                return bundle
 
+            sampler = self._sampler or FrameSampler()
+            stamps = [c.timestamp_seconds for c in candidates]
+            tmpdir: Path | None = None
+            observations = []
             try:
-                observations = await analyzer.analyze_frame_sequence(sequence)
-            except OllamaVisionTimeout:
-                logger.warning("replay vision timed out")
-                return bundle
-            except OllamaVisionUnavailable:
-                logger.warning("replay vision unavailable")
-                return bundle
-            except Exception:
-                logger.exception("replay vision analysis failed")
-                return bundle
-        except ReplayError:
-            logger.warning("replay vision frame extraction failed")
-            return bundle
-        finally:
-            if tmpdir is not None:
-                shutil.rmtree(tmpdir, ignore_errors=True)
+                extracted, tmpdir = sampler.extract_persisted_frames(
+                    video_path,
+                    timestamps=stamps,
+                    duration=duration,
+                    src_width=width,
+                    src_height=height,
+                )
+                by_ts = {round(f.timestamp, 4): f for f in extracted}
+                sequence: list[tuple[str, int, float]] = []
+                for cand in candidates:
+                    frame = by_ts.get(round(cand.timestamp_seconds, 4))
+                    if frame is None:
+                        frame = min(
+                            extracted, key=lambda f: abs(f.timestamp - cand.timestamp_seconds)
+                        )
+                    sequence.append((frame.path, cand.frame_index, cand.timestamp_seconds))
 
-        return replace(bundle, vision_observations=tuple(observations))
+                try:
+                    observations = await analyzer.analyze_frame_sequence(sequence)
+                except OllamaVisionTimeout:
+                    logger.warning("replay vision timed out")
+                    return bundle
+                except OllamaVisionUnavailable:
+                    logger.warning("replay vision unavailable")
+                    return bundle
+                except Exception:
+                    logger.exception("replay vision analysis failed")
+                    return bundle
+            except ReplayError:
+                logger.warning("replay vision frame extraction failed")
+                return bundle
+            finally:
+                if tmpdir is not None:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+
+            return replace(bundle, vision_observations=tuple(observations))
+        finally:
+            if owns_analyzer:
+                await analyzer.close()
 
     def _build_stage4(
         self,

@@ -338,3 +338,33 @@ def test_followup_returns_coach_when_present() -> None:
         }
     )
     assert text == "Живой тренерский разбор: вижу Hog Rider."
+
+
+def test_arender_closes_owned_provider() -> None:
+    cards, confirmed, events, battle, tactical = _sample_bundle()
+    closed = {"n": 0}
+
+    class TrackingProvider:
+        async def close(self) -> None:
+            closed["n"] += 1
+
+    renderer = ReplayCoachRenderer(provider=TrackingProvider())
+    renderer._owns_provider = True
+
+    async def _fake_call(envelope, *, user_message=None):
+        del envelope, user_message
+        return "По подтверждённым данным вижу Hog Rider."
+
+    renderer._call_qwen = _fake_call  # type: ignore[method-assign]
+
+    async def _run():
+        return await renderer.arender(
+            tactical=tactical,
+            battle_timeline=battle,
+            confirmed_cards=cards,
+            confirmed_events=confirmed,
+            events=events,
+        )
+
+    asyncio.run(_run())
+    assert closed["n"] == 1

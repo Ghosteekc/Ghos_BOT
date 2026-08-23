@@ -689,6 +689,24 @@ class ReplayCoachRenderer:
 
     def __init__(self, *, provider: Any | None = None) -> None:
         self._provider = provider
+        self._owns_provider = provider is None
+
+    async def _ensure_provider(self) -> Any:
+        if self._provider is None:
+            from bot.services.ghosteek_ai.llm.provider import (
+                OllamaProvider,
+                ollama_config_from_settings,
+            )
+
+            self._provider = OllamaProvider(ollama_config_from_settings())
+            self._owns_provider = True
+        return self._provider
+
+    async def close(self) -> None:
+        if self._owns_provider and self._provider is not None:
+            await self._provider.close()
+        if self._owns_provider:
+            self._provider = None
 
     def render_template(
         self,
@@ -747,19 +765,22 @@ class ReplayCoachRenderer:
         assert envelope["data"].get("has_debug_objects") is False
 
         try:
-            text = await self._call_qwen(envelope, user_message=user_message)
-            gated = apply_replay_coach_gate(text, envelope)
-            source = "qwen" if gated == (text or "").strip() else "template"
-            if source == "template":
-                gated = render_replay_coach_fallback(envelope)
-            return ReplayCoachResult(text=gated, source=source, envelope=envelope)
-        except Exception:
-            logger.exception("replay renderer Qwen failed — using template")
-            return ReplayCoachResult(
-                text=render_replay_coach_fallback(envelope),
-                source="template",
-                envelope=envelope,
-            )
+            try:
+                text = await self._call_qwen(envelope, user_message=user_message)
+                gated = apply_replay_coach_gate(text, envelope)
+                source = "qwen" if gated == (text or "").strip() else "template"
+                if source == "template":
+                    gated = render_replay_coach_fallback(envelope)
+                return ReplayCoachResult(text=gated, source=source, envelope=envelope)
+            except Exception:
+                logger.exception("replay renderer Qwen failed — using template")
+                return ReplayCoachResult(
+                    text=render_replay_coach_fallback(envelope),
+                    source="template",
+                    envelope=envelope,
+                )
+        finally:
+            await self.close()
 
     async def _call_qwen(
         self,
@@ -771,14 +792,7 @@ class ReplayCoachRenderer:
 
         from bot.services.ghosteek_ai.generator.llm_generator import OllamaResponseGenerator
 
-        provider = self._provider
-        if provider is None:
-            from bot.services.ghosteek_ai.llm.provider import (
-                OllamaProvider,
-                ollama_config_from_settings,
-            )
-
-            provider = OllamaProvider(ollama_config_from_settings())
+        provider = await self._ensure_provider()
 
         builder = ReplayCoachPromptBuilder(envelope)
         gen = OllamaResponseGenerator(provider=provider, prompt_builder=builder)

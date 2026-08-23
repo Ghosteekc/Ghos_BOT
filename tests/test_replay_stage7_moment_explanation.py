@@ -274,3 +274,49 @@ def test_use_qwen_false_skips_model(monkeypatch: pytest.MonkeyPatch) -> None:
     out = asyncio.run(_run())
     assert calls["n"] == 0
     assert out[0].explanation_source == "fallback"
+
+
+def test_arender_moments_closes_owned_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REPLAY_MOMENT_RENDER_ENABLED", "1")
+    closed = {"n": 0}
+
+    class TrackingProvider:
+        async def close(self) -> None:
+            closed["n"] += 1
+
+    renderer = ReplayMomentRenderer(provider=TrackingProvider())
+    renderer._owns_provider = True
+
+    async def noop(*_a, **_k):
+        return '{"title":"t","description":"d"}'
+
+    monkeypatch.setattr(renderer, "_call_qwen", noop)
+
+    async def _run():
+        await renderer.arender_moments([_moment()], use_qwen=True)
+
+    asyncio.run(_run())
+    assert closed["n"] == 1
+
+
+def test_summary_arender_closes_owned_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REPLAY_MOMENT_RENDER_ENABLED", "1")
+    closed = {"n": 0}
+
+    class TrackingProvider:
+        async def close(self) -> None:
+            closed["n"] += 1
+
+    renderer = ReplaySummaryRenderer(provider=TrackingProvider())
+    renderer._owns_provider = True
+
+    async def noop(*_a, **_k):
+        return '{"overview":"o","limitations":"l"}'
+
+    monkeypatch.setattr(renderer, "_call_qwen", noop)
+
+    async def _run():
+        await renderer.arender(moments=[_moment()], facts=["f"], limitations=["lim"])
+
+    asyncio.run(_run())
+    assert closed["n"] == 1
