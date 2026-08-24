@@ -9,6 +9,7 @@ from math import ceil
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.config import get_admin_telegram_ids
 from bot.models.database import Subscription, User
 
 
@@ -116,12 +117,31 @@ def status_from_subscription(sub: Subscription | None, *, now: datetime | None =
     )
 
 
+def is_admin_pro_user(user: User) -> bool:
+    """Telegram IDs from ADMIN_TELEGRAM_IDS / ADMIN_TELEGRAM_ID get full Pro access."""
+    return user.telegram_id in get_admin_telegram_ids()
+
+
+def admin_pro_status() -> ProStatus:
+    return ProStatus(
+        is_pro=True,
+        started_at=None,
+        expires_at=None,
+        days_left=None,
+        plan_id="admin",
+        trial_used=False,
+        expired=False,
+    )
+
+
 async def get_subscription_row(session: AsyncSession, user: User) -> Subscription | None:
     result = await session.execute(select(Subscription).where(Subscription.user_id == user.id))
     return result.scalar_one_or_none()
 
 
 async def get_pro_status(session: AsyncSession, user: User) -> ProStatus:
+    if is_admin_pro_user(user):
+        return admin_pro_status()
     sub = await get_subscription_row(session, user)
     status = status_from_subscription(sub)
     # Lazy deactivate expired rows so UI/DB stay consistent after restart

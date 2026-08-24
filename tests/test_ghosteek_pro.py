@@ -17,7 +17,7 @@ from bot.api.routes import meta as meta_route
 from bot.api.schemas import MetaLadderResponse, SubscriptionInfo
 from bot.models.database import Base, ProPayment, Subscription, User
 from bot.services.pro.activation import activate_pro_from_payload
-from bot.services.pro.entitlement import is_user_pro, status_from_subscription
+from bot.services.pro.entitlement import get_pro_status, is_user_pro, status_from_subscription
 from bot.services.pro.plans import PRO_PLANS, add_calendar_months
 
 MINUTE = timedelta(minutes=1)
@@ -142,6 +142,49 @@ def test_active_pro_passes_guards() -> None:
 
 def test_expired_pro_is_denied() -> None:
     asyncio.run(_run_expired_pro_is_denied())
+
+
+async def _run_admin_env_gets_pro_without_subscription() -> None:
+    from unittest.mock import patch
+
+    admin_id = 960_777
+    engine, factory = await _make_db()
+    async with factory() as session:
+        user = await _add_user(session, admin_id)
+        with patch("bot.services.pro.entitlement.get_admin_telegram_ids", return_value=[admin_id]):
+            status = await get_pro_status(session, user)
+            assert status.is_pro is True
+            assert status.plan_id == "admin"
+            assert status.expires_at is None
+            assert await is_user_pro(session, user) is True
+            for _feature, guard in GUARDED_FEATURES:
+                assert await guard(user=user, session=session) is user
+    await engine.dispose()
+
+
+async def _run_non_admin_still_requires_subscription() -> None:
+    from unittest.mock import patch
+
+    engine, factory = await _make_db()
+    async with factory() as session:
+        user = await _add_user(session, 960_778)
+        with patch("bot.services.pro.entitlement.get_admin_telegram_ids", return_value=[111_222_333]):
+            assert await is_user_pro(session, user) is False
+            try:
+                await require_pro("player_search")(user=user, session=session)
+            except HTTPException as exc:
+                assert _pro_detail(exc)["error_code"] == PRO_REQUIRED
+            else:
+                raise AssertionError("non-admin passed Pro guard")
+    await engine.dispose()
+
+
+def test_admin_telegram_ids_grant_pro_access() -> None:
+    asyncio.run(_run_admin_env_gets_pro_without_subscription())
+
+
+def test_non_admin_not_granted_pro_by_admin_list() -> None:
+    asyncio.run(_run_non_admin_still_requires_subscription())
 
 
 def test_expiration_boundary_is_not_pro() -> None:
