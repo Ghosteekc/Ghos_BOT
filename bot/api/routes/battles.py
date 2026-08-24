@@ -2,8 +2,10 @@ import asyncio
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.api.deps import require_linked_player, require_subscription
+from bot.api.deps import get_db, require_linked_player
+from bot.services.pro.entitlement import is_user_pro
 from bot.services.battle_opponent import resolve_opponent_fields
 from bot.api.schemas import (
     BattleCoachResponse,
@@ -146,7 +148,7 @@ def _build_summaries(battles: list) -> list[BattleSummary]:
 
 
 @router.get("", response_model=BattleListResponse)
-async def list_battles(user: User = Depends(require_subscription)) -> BattleListResponse:
+async def list_battles(user: User = Depends(require_linked_player)) -> BattleListResponse:
     battles = await load_and_persist(user)
     if battles is None:
         raise http_error("E020", status=502)
@@ -324,22 +326,57 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
     )
 
 
+def _strip_pro_details(detail: BattleDetailResponse) -> BattleDetailResponse:
+    """FREE plan keeps the basic battle card; deep coaching stays behind Ghosteek Pro."""
+    detail.reasons = []
+    detail.opponent_threats = []
+    detail.user_key_cards = []
+    detail.opponent_key_cards = []
+    detail.low_impact_cards = []
+    detail.tactical_matchup = None
+    detail.user_elixir = None
+    detail.opponent_elixir = None
+    detail.match_difficulty = None
+    detail.match_plan = None
+    detail.battle_coach = None
+    detail.detailed_unlocked = False
+    detail.pro_required = True
+    return detail
+
+
+async def _battle_detail_for_user(
+    index: int,
+    battle: dict,
+    user: User,
+    session: AsyncSession,
+) -> BattleDetailResponse:
+    detail = await asyncio.to_thread(_build_battle_detail, index, battle)
+    if await is_user_pro(session, user):
+        return detail
+    return _strip_pro_details(detail)
+
+
 @router.get("/by-time/{battle_time:path}", response_model=BattleDetailResponse)
 async def battle_detail_by_time(
     battle_time: str,
-    user: User = Depends(require_subscription),
+    user: User = Depends(require_linked_player),
+    session: AsyncSession = Depends(get_db),
 ) -> BattleDetailResponse:
     raw = unquote(battle_time)
     battles = await _load_user_battles(user)
     for i, battle in enumerate(battles):
         if battle_times_equal(_battle_timestamp(battle), raw):
-            return await asyncio.to_thread(_build_battle_detail, i, battle)
+            return await _battle_detail_for_user(i, battle, user, session)
     raise http_error("E004", status=404)
 
 
 @router.get("/{index}", response_model=BattleDetailResponse)
-async def battle_detail(index: int, user: User = Depends(require_subscription)) -> BattleDetailResponse:
+async def battle_detail(
+    index: int,
+    user: User = Depends(require_linked_player),
+    session: AsyncSession = Depends(get_db),
+) -> BattleDetailResponse:
     battles = await _load_user_battles(user)
     if index < 0 or index >= len(battles):
         raise http_error("E004", status=404)
-    return await asyncio.to_thread(_build_battle_detail, index, battles[index])
+    return await _battle_detail_for_user(index, battles[index], user, session)

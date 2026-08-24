@@ -1,5 +1,7 @@
 import logging
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,9 +10,12 @@ from bot.api.auth import InitDataError, validate_init_data
 from bot.config import get_admin_telegram_ids, settings
 from bot.models.database import User, async_session
 from bot.services.clash_api import SubscriptionService
+from bot.services.pro.entitlement import get_pro_status, is_user_pro
 from bot.user_errors import http_error, log_error
 
 logger = logging.getLogger(__name__)
+
+PRO_REQUIRED = "PRO_REQUIRED"
 
 
 async def get_db() -> AsyncSession:
@@ -58,14 +63,54 @@ async def require_linked_player(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def pro_required_error(feature: str) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "ok": False,
+            "error_code": PRO_REQUIRED,
+            "code": PRO_REQUIRED,
+            "feature": feature,
+            "message": "Эта функция доступна в Ghosteek Pro.",
+        },
+    )
+
+
+def require_pro(feature: str) -> Callable[..., Any]:
+    """Factory: backend guard for paid Ghosteek Pro features."""
+
+    async def _dep(
+        user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_db),
+    ) -> User:
+        if not await is_user_pro(session, user):
+            raise pro_required_error(feature)
+        return user
+
+    return _dep
+
+
+def require_pro_linked(feature: str) -> Callable[..., Any]:
+    """Pro + linked Clash Royale tag."""
+
+    async def _dep(
+        user: User = Depends(require_linked_player),
+        session: AsyncSession = Depends(get_db),
+    ) -> User:
+        if not await is_user_pro(session, user):
+            raise pro_required_error(feature)
+        return user
+
+    return _dep
+
+
 async def require_subscription(
     user: User = Depends(require_linked_player),
     session: AsyncSession = Depends(get_db),
 ) -> User:
-    """Требует привязанный тег; подписка сейчас бесплатная для всех."""
-    sub_service = SubscriptionService(session)
-    if not await sub_service.has_active_subscription(user):
-        raise http_error("E093", status=403, message="Подписка не активна.")
+    """Legacy alias: linked player + active Ghosteek Pro."""
+    if not await is_user_pro(session, user):
+        raise pro_required_error("subscription")
     return user
 
 
@@ -76,11 +121,14 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
 
 
 async def get_subscription_info(user: User, session: AsyncSession) -> dict:
-    sub_service = SubscriptionService(session)
-    info = await sub_service.get_subscription_info(user)
-    expires = info["expires_at"]
+    status = await get_pro_status(session, user)
     return {
-        "active": info["active"],
-        "expires_at": expires.isoformat() if isinstance(expires, datetime) else None,
-        "trial_used": info["trial_used"],
+        "active": status.is_pro,
+        "is_pro": status.is_pro,
+        "expires_at": status.expires_at.isoformat() if status.expires_at else None,
+        "started_at": status.started_at.isoformat() if status.started_at else None,
+        "days_left": status.days_left,
+        "trial_used": status.trial_used,
+        "plan_id": status.plan_id,
+        "expired": status.expired,
     }

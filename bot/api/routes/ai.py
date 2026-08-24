@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import JSONResponse
 
-from bot.api.deps import require_subscription
+from bot.api.deps import require_pro_linked
 from bot.api.schemas import (
     GhosteekAiAction,
     GhosteekAiAskRequest,
@@ -32,6 +32,8 @@ from bot.services.ghosteek_ai.session_context import clear_session
 from fastapi.responses import Response
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+require_ai_pro = require_pro_linked("ai_coach")
 
 
 def _public_visual_moment(item: dict) -> dict:
@@ -66,7 +68,7 @@ def _public_visual_moment(item: dict) -> dict:
 @router.post("/ask", response_model=GhosteekAiAskResponse)
 async def ask_ai(
     body: GhosteekAiAskRequest,
-    user: User = Depends(require_subscription),
+    user: User = Depends(require_ai_pro),
 ) -> GhosteekAiAskResponse:
     context: dict = {}
     if body.context is not None:
@@ -109,7 +111,7 @@ _REPLAY_HTTP_STATUS = {
 
 @router.post("/replay/analyze", response_model=None)
 async def analyze_replay(
-    user: User = Depends(require_subscription),
+    user: User = Depends(require_ai_pro),
     file: UploadFile = File(...),
 ):
     """Validate video, sample frames, heuristic CR detection. No Qwen."""
@@ -261,7 +263,7 @@ async def analyze_replay(
 @router.get("/replay/evidence/{evidence_id}")
 async def get_replay_evidence(
     evidence_id: str,
-    user: User = Depends(require_subscription),
+    user: User = Depends(require_ai_pro),
 ):
     """Serve opaque evidence bytes. Never accepts filesystem paths."""
     del user  # auth gate only
@@ -280,7 +282,7 @@ async def get_replay_evidence(
 
 
 @router.get("/session")
-async def get_ai_session(user: User = Depends(require_subscription)) -> dict:
+async def get_ai_session(user: User = Depends(require_ai_pro)) -> dict:
     """Read-only: история ConversationManager для UI-чата (без изменения состояния)."""
     session = ConversationManager.get(user.telegram_id)
     if session is None:
@@ -294,7 +296,7 @@ async def get_ai_session(user: User = Depends(require_subscription)) -> dict:
 
 
 @router.delete("/session")
-async def clear_ai_session(user: User = Depends(require_subscription)) -> dict:
+async def clear_ai_session(user: User = Depends(require_ai_pro)) -> dict:
     """Очистить Session Context текущего пользователя (кнопка «Начать новый разговор»)."""
     clear_session(user.telegram_id)
     return {"ok": True, "cleared": True}

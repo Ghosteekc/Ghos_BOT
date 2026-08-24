@@ -360,26 +360,27 @@ class SubscriptionService:
             user = User(telegram_id=telegram_id)
             self.session.add(user)
             await self.session.flush()
-            sub = Subscription(user_id=user.id, is_active=True, expires_at=None)
+            # New users start FREE — Pro only after confirmed Stars payment.
+            sub = Subscription(user_id=user.id, is_active=False, expires_at=None)
             self.session.add(sub)
             await self.session.commit()
             await self.session.refresh(user)
         else:
-            await self._ensure_free_access(user)
+            await self._ensure_subscription_row(user)
         return user
 
-    async def _ensure_free_access(self, user: User) -> None:
+    async def _ensure_subscription_row(self, user: User) -> Subscription:
         result = await self.session.execute(select(Subscription).where(Subscription.user_id == user.id))
         sub = result.scalar_one_or_none()
         if sub is None:
-            sub = Subscription(user_id=user.id, is_active=True, expires_at=None)
+            sub = Subscription(user_id=user.id, is_active=False, expires_at=None)
             self.session.add(sub)
             await self.session.commit()
-            return
-        if not sub.is_active or sub.expires_at is not None:
-            sub.is_active = True
-            sub.expires_at = None
-            await self.session.commit()
+        return sub
+
+    async def _ensure_free_access(self, user: User) -> None:
+        """Deprecated no-op kept for call-site compatibility."""
+        await self._ensure_subscription_row(user)
 
     async def find_user_by_player_tag(
         self,
@@ -465,51 +466,68 @@ class SubscriptionService:
         return tag
 
     async def has_active_subscription(self, user: User) -> bool:
-        return True
+        from bot.services.pro.entitlement import is_user_pro
+
+        return await is_user_pro(self.session, user)
 
     async def activate_trial(self, user: User) -> tuple[bool, str]:
-        result = await self.session.execute(select(Subscription).where(Subscription.user_id == user.id))
-        sub = result.scalar_one_or_none()
-        if sub is None:
-            sub = Subscription(user_id=user.id)
-            self.session.add(sub)
+        from bot.services.pro.plans import add_calendar_months
 
+        sub = await self._ensure_subscription_row(user)
         if sub.trial_used:
             return False, "Пробный период уже использован."
 
+        now = datetime.now(timezone.utc)
         sub.is_active = True
         sub.trial_used = True
-        sub.expires_at = datetime.now(timezone.utc) + timedelta(days=settings.trial_days)
+        sub.started_at = now
+        sub.expires_at = add_calendar_months(now, 1)
+        sub.plan_id = "trial_1m"
         await self.session.commit()
-        return True, f"Пробный период активирован на {settings.trial_days} дней!"
+        return True, "Пробный период Ghosteek Pro активирован на 1 месяц!"
 
     async def activate_subscription(self, user: User, days: int = 30) -> None:
-        result = await self.session.execute(select(Subscription).where(Subscription.user_id == user.id))
-        sub = result.scalar_one_or_none()
-        if sub is None:
-            sub = Subscription(user_id=user.id)
-            self.session.add(sub)
+        """Legacy day-based activation (admin / old handlers). Prefer plan activation."""
+        from bot.services.pro.plans import add_calendar_months
 
+        sub = await self._ensure_subscription_row(user)
         now = datetime.now(timezone.utc)
-        expires_at = _utc_aware(sub.expires_at)
+        expires_at = sub.expires_at
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        months = max(1, int(round(days / 30))) if days else 1
         if expires_at and expires_at > now:
-            sub.expires_at = expires_at + timedelta(days=days)
+            base = expires_at
+            started = sub.started_at or now
+            sub.expires_at = add_calendar_months(base, months)
         else:
-            sub.expires_at = now + timedelta(days=days)
+            started = now
+            sub.expires_at = add_calendar_months(now, months)
+        sub.started_at = started if sub.started_at and expires_at and expires_at > now else started
         sub.is_active = True
         await self.session.commit()
 
     async def activate_unlimited_subscription(self, user: User) -> None:
-        result = await self.session.execute(select(Subscription).where(Subscription.user_id == user.id))
-        sub = result.scalar_one_or_none()
-        if sub is None:
-            sub = Subscription(user_id=user.id)
-            self.session.add(sub)
-
+        sub = await self._ensure_subscription_row(user)
+        now = datetime.now(timezone.utc)
         sub.is_active = True
+        sub.started_at = sub.started_at or now
         sub.expires_at = None
+        sub.plan_id = "unlimited"
         await self.session.commit()
 
     async def get_subscription_info(self, user: User) -> dict:
-        await self._ensure_free_access(user)
-        return {"active": True, "expires_at": None, "trial_used": True}
+        from bot.services.pro.entitlement import get_pro_status
+
+        status = await get_pro_status(self.session, user)
+        return {
+            "active": status.is_pro,
+            "is_pro": status.is_pro,
+            "expires_at": status.expires_at,
+            "started_at": status.started_at,
+            "days_left": status.days_left,
+            "trial_used": status.trial_used,
+            "plan_id": status.plan_id,
+            "expired": status.expired,
+        }

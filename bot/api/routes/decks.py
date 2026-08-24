@@ -4,7 +4,7 @@ from bot.services.battle_day_stats import build_last_results, build_most_used_ca
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from bot.api.deps import get_db, require_linked_player, require_subscription
+from bot.api.deps import get_db, require_linked_player, require_pro_linked, require_subscription
 from bot.user_errors import http_error
 from bot.api.schemas import (
     ArenaDecksResponse,
@@ -556,7 +556,7 @@ async def compare_user_deck(
 @router.post("/decks/recommend", response_model=RecommendDeckResponse)
 async def recommend_deck(
     body: RecommendDeckRequest,
-    user: User = Depends(require_linked_player),
+    user: User = Depends(require_pro_linked("deck_improve")),
 ) -> RecommendDeckResponse:
     """Объяснение колоды либо явное улучшение пользовательской колоды."""
     del user

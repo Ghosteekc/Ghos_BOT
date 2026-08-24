@@ -1,0 +1,160 @@
+"""Activate / extend Ghosteek Pro with Telegram Stars payment idempotency."""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot.models.database import ProPayment, Subscription, User
+from bot.services.pro.entitlement import ProStatus, get_pro_status, status_from_subscription
+from bot.services.pro.plans import ProPlan, add_calendar_months, get_plan
+
+logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+class ProActivationResult:
+    def __init__(
+        self,
+        *,
+        activated: bool,
+        duplicate: bool,
+        status: ProStatus,
+        message: str,
+    ) -> None:
+        self.activated = activated
+        self.duplicate = duplicate
+        self.status = status
+        self.message = message
+
+
+async def _get_or_create_subscription(session: AsyncSession, user: User) -> Subscription:
+    result = await session.execute(select(Subscription).where(Subscription.user_id == user.id))
+    sub = result.scalar_one_or_none()
+    if sub is None:
+        sub = Subscription(user_id=user.id, is_active=False, expires_at=None)
+        session.add(sub)
+        await session.flush()
+    return sub
+
+
+async def activate_pro_plan(
+    session: AsyncSession,
+    user: User,
+    *,
+    plan: ProPlan,
+    payment_charge_id: str,
+    provider_payment_charge_id: str | None = None,
+    currency: str = "XTR",
+    amount_stars: int | None = None,
+    invoice_payload: str | None = None,
+) -> ProActivationResult:
+    """Grant/extend Pro from a confirmed Stars payment. Idempotent on charge id."""
+    charge_id = (payment_charge_id or "").strip()
+    if not charge_id:
+        raise ValueError("payment_charge_id is required")
+
+    existing = await session.execute(
+        select(ProPayment).where(ProPayment.telegram_payment_charge_id == charge_id)
+    )
+    if existing.scalar_one_or_none() is not None:
+        status = await get_pro_status(session, user)
+        return ProActivationResult(
+            activated=False,
+            duplicate=True,
+            status=status,
+            message="Платёж уже обработан.",
+        )
+
+    now = _utc_now()
+    sub = await _get_or_create_subscription(session, user)
+    current = status_from_subscription(sub, now=now)
+
+    if current.is_pro and current.expires_at is not None:
+        base = _aware(current.expires_at) or now
+        started = _aware(getattr(sub, "started_at", None)) or now
+        expires = add_calendar_months(base, plan.months)
+    elif current.is_pro and current.expires_at is None:
+        started = _aware(getattr(sub, "started_at", None)) or now
+        expires = None
+    else:
+        started = now
+        expires = add_calendar_months(now, plan.months)
+
+    sub.is_active = True
+    sub.started_at = started
+    sub.expires_at = expires
+    sub.plan_id = plan.id
+    sub.payment_id = charge_id
+
+    payment = ProPayment(
+        user_id=user.id,
+        telegram_id=user.telegram_id,
+        plan_id=plan.id,
+        stars=int(amount_stars if amount_stars is not None else plan.stars),
+        currency=currency or "XTR",
+        telegram_payment_charge_id=charge_id,
+        provider_payment_charge_id=provider_payment_charge_id,
+        invoice_payload=invoice_payload,
+        started_at=started,
+        expires_at=expires,
+        created_at=now,
+    )
+    session.add(payment)
+    await session.commit()
+
+    status = status_from_subscription(sub, now=now)
+    logger.info(
+        "Ghosteek Pro activated: user=%s plan=%s charge=%s expires=%s",
+        user.telegram_id,
+        plan.id,
+        charge_id,
+        expires.isoformat() if expires else "unlimited",
+    )
+    return ProActivationResult(
+        activated=True,
+        duplicate=False,
+        status=status,
+        message="Ghosteek Pro активирован",
+    )
+
+
+async def activate_pro_from_payload(
+    session: AsyncSession,
+    user: User,
+    *,
+    plan_id: str,
+    payment_charge_id: str,
+    provider_payment_charge_id: str | None = None,
+    currency: str = "XTR",
+    amount_stars: int | None = None,
+    invoice_payload: str | None = None,
+) -> ProActivationResult:
+    plan = get_plan(plan_id)
+    if plan is None:
+        raise ValueError(f"Unknown plan_id: {plan_id}")
+    # Never trust client/Telegram amount over catalog price for entitlement length.
+    return await activate_pro_plan(
+        session,
+        user,
+        plan=plan,
+        payment_charge_id=payment_charge_id,
+        provider_payment_charge_id=provider_payment_charge_id,
+        currency=currency,
+        amount_stars=plan.stars,
+        invoice_payload=invoice_payload,
+    )

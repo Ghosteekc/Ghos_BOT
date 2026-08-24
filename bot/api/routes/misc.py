@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.api.deps import get_current_user, get_db
+from bot.api.deps import get_current_user, get_db, require_pro
 from bot.api.schemas import (
     CardCatalogResponse,
     FavoriteDeckEntry,
@@ -38,7 +38,7 @@ class FavoriteDeckPayload(BaseModel):
 @router.get("/search", response_model=list[SearchResult])
 async def search_player(
     q: str = Query(..., min_length=3),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_pro("player_search")),
 ) -> list[SearchResult]:
     del user
     tag = normalize_tag(q.strip())
@@ -75,7 +75,7 @@ async def search_player(
 @router.get("/players/{tag}", response_model=SearchResult)
 async def get_player_preview(
     tag: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_pro("player_search")),
 ) -> SearchResult:
     del user
     normalized = normalize_tag(tag.strip())

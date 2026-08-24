@@ -7,8 +7,13 @@ from pydantic import BaseModel, Field
 
 class SubscriptionInfo(BaseModel):
     active: bool
-    expires_at: str | None
-    trial_used: bool
+    is_pro: bool = False
+    expires_at: str | None = None
+    started_at: str | None = None
+    days_left: int | None = None
+    trial_used: bool = False
+    plan_id: str | None = None
+    expired: bool = False
 
 
 class CardLevelCount(BaseModel):
@@ -256,6 +261,8 @@ class BattleDetailResponse(BaseModel):
     is_ranked: bool = False
     user_league: BattleLeagueBadge | None = None
     opponent_league: BattleLeagueBadge | None = None
+    detailed_unlocked: bool = True
+    pro_required: bool = False
 
 
 class OpponentEntry(BaseModel):
@@ -1116,6 +1123,9 @@ class MetaLadderResponse(BaseModel):
     updated_at: str | None = None
     min_games: int = 0
     decks: list[MetaLadderDeck] = Field(default_factory=list)
+    is_pro: bool = True
+    total_decks: int = 0
+    pro_locked_count: int = 0
 
 
 class MetaWarDeck(BaseModel):
@@ -1136,3 +1146,6 @@ class MetaWarResponse(BaseModel):
     updated_at: str | None = None
     sample_note: str = ""
     decks: list[MetaWarDeck] = Field(default_factory=list)
+    is_pro: bool = True
+    total_decks: int = 0
+    pro_locked_count: int = 0

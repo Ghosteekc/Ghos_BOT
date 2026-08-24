@@ -12,10 +12,20 @@ from bot.user_errors import DEFAULT_UNAVAILABLE, MESSAGES
 logger = logging.getLogger(__name__)
 
 
-def _normalize_detail(exc: HTTPException) -> dict[str, str]:
+def _normalize_detail(exc: HTTPException) -> dict:
     detail = exc.detail
-    if isinstance(detail, dict) and "code" in detail and "message" in detail:
-        return {"message": str(detail["message"]), "code": str(detail["code"])}
+    if isinstance(detail, dict):
+        code = str(detail.get("code") or detail.get("error_code") or "E099")
+        message = str(detail.get("message") or DEFAULT_UNAVAILABLE)
+        body: dict = {"message": message, "code": code}
+        # Preserve Ghosteek Pro contract fields
+        if detail.get("error_code"):
+            body["error_code"] = str(detail["error_code"])
+        if detail.get("feature") is not None:
+            body["feature"] = detail["feature"]
+        if "ok" in detail:
+            body["ok"] = bool(detail["ok"])
+        return body
     if isinstance(detail, str):
         return {"message": detail, "code": "E099"}
     return {"message": DEFAULT_UNAVAILABLE, "code": "E099"}
@@ -25,7 +35,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
         body = _normalize_detail(exc)
-        if body["code"] == "E099" and exc.status_code >= 500:
+        if body.get("code") == "E099" and exc.status_code >= 500:
             body["message"] = MESSAGES.get("E099", DEFAULT_UNAVAILABLE)
         return JSONResponse(status_code=exc.status_code, content=body)
 

@@ -9,7 +9,7 @@ import uvicorn
 from bot.api.app import create_app
 from bot.config import settings
 from bot.fsm.sqlite_storage import SqliteStorage
-from bot.handlers import admin, player, start, support
+from bot.handlers import admin, player, start, subscription, support
 from bot.middleware.subscription import SubscriptionMiddleware
 from bot.models.database import init_db
 from bot.services import sync_service
@@ -26,8 +26,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def run_api() -> None:
+async def run_api(bot: Bot) -> None:
     app = create_app()
+    app.state.bot = bot
     config = uvicorn.Config(
         app,
         host=settings.api_host,
@@ -92,12 +93,13 @@ async def main() -> None:
     dp.include_router(player.router)
     dp.include_router(support.router)
     dp.include_router(admin.router)
+    dp.include_router(subscription.router)
 
     stop_event = asyncio.Event()
     sync_task = asyncio.create_task(sync_service.run_periodic(stop_event))
     digest_task = asyncio.create_task(weekly_digest.run_periodic(bot, stop_event))
     meta_task = asyncio.create_task(meta_collector.run_periodic(stop_event))
-    api_task = asyncio.create_task(run_api())
+    api_task = asyncio.create_task(run_api(bot))
     warmup_task: asyncio.Task | None = None
     if settings.startup_warmup_enabled:
         # Не ждём окончания: polling/API поднимаются сразу, кеши догоняют в фоне.

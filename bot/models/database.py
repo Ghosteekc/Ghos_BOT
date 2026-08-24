@@ -65,11 +65,37 @@ class Subscription(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     trial_used: Mapped[bool] = mapped_column(Boolean, default=False)
     payment_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    plan_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="subscription")
+
+
+class ProPayment(Base):
+    """Immutable Ghosteek Pro payment audit trail (Telegram Stars / XTR)."""
+
+    __tablename__ = "pro_payments"
+    __table_args__ = (
+        UniqueConstraint("telegram_payment_charge_id", name="uq_pro_payments_charge"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    plan_id: Mapped[str] = mapped_column(String(32))
+    stars: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(8), default="XTR")
+    telegram_payment_charge_id: Mapped[str] = mapped_column(String(128))
+    provider_payment_charge_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    invoice_payload: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class CardPreference(Base):
@@ -288,7 +314,46 @@ async def init_db() -> None:
     await _migrate_tracked_mine_decks_cards_json()
     await _migrate_battle_cache_dedup()
     await _migrate_users_player_tag_unique()
+    await _migrate_ghosteek_pro_columns()
 
+
+async def _migrate_ghosteek_pro_columns() -> None:
+    """Add Pro columns / payment table; revoke legacy free-forever grants."""
+    log = logging.getLogger(__name__)
+    async with engine.begin() as conn:
+        for col, ddl in (
+            (
+                "started_at",
+                "ALTER TABLE subscriptions ADD COLUMN started_at DATETIME",
+            ),
+            (
+                "plan_id",
+                "ALTER TABLE subscriptions ADD COLUMN plan_id VARCHAR(32)",
+            ),
+        ):
+            result = await conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM pragma_table_info('subscriptions') "
+                    f"WHERE name='{col}'"
+                )
+            )
+            if result.scalar_one_or_none() == 0:
+                await conn.execute(text(ddl))
+                log.info("Added subscriptions.%s", col)
+
+        # Legacy stub granted is_active=1 AND expires_at IS NULL to everyone.
+        # Keep only explicit admin unlimited (plan_id='unlimited').
+        await conn.execute(
+            text(
+                "UPDATE subscriptions SET is_active = 0 "
+                "WHERE expires_at IS NULL AND (plan_id IS NULL OR plan_id != 'unlimited') "
+                "AND is_active = 1"
+            )
+        )
+
+    # create_all already creates pro_payments for new DBs; ensure for old DBs too
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 async def _migrate_battle_cache_user_deck_json() -> None:
     async with engine.begin() as conn:
