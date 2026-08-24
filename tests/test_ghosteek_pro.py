@@ -583,7 +583,6 @@ def test_routes_are_wired_to_the_expected_guards() -> None:
     for method, path in (
         ("POST", "/api/ai/ask"),
         ("GET", "/api/search"),
-        ("GET", "/api/players/{tag}"),
         ("POST", "/api/decks/recommend"),
     ):
         names = _dependency_qualnames(app, path, method)
@@ -593,6 +592,7 @@ def test_routes_are_wired_to_the_expected_guards() -> None:
     for method, path in (
         ("GET", "/api/battles"),
         ("GET", "/api/battles/{index}"),
+        ("GET", "/api/players/{tag}"),
         ("GET", "/api/meta/league"),
         ("GET", "/api/meta/clan-wars"),
     ):
