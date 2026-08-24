@@ -40,6 +40,9 @@ PRO_6M = ProPlan(
     months=6,
 )
 
+TRIAL_PLAN_ID = "trial_7d"
+TRIAL_DAYS = 7
+
 PRO_PLANS: dict[str, ProPlan] = {
     PRO_1M.id: PRO_1M,
     PRO_3M.id: PRO_3M,

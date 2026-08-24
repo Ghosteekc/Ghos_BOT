@@ -14,8 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.api.deps import get_current_user, get_db
 from bot.models.database import User
+from bot.services.pro.activation import activate_pro_trial
 from bot.services.pro.entitlement import get_pro_status
-from bot.services.pro.plans import build_invoice_payload, get_plan, list_plans
+from bot.services.pro.plans import TRIAL_DAYS, TRIAL_PLAN_ID, build_invoice_payload, get_plan, list_plans
 from bot.user_errors import http_error
 
 logger = logging.getLogger(__name__)
@@ -39,8 +40,23 @@ class ProStatusOut(BaseModel):
     days_left: int | None = None
     plan_id: str | None = None
     trial_used: bool = False
+    trial_available: bool = False
+    trial_days: int = TRIAL_DAYS
+    is_trial: bool = False
     expired: bool = False
     plans: list[ProPlanOut] = Field(default_factory=list)
+
+
+class ProTrialOut(BaseModel):
+    ok: bool = True
+    activated: bool
+    message: str
+    is_pro: bool
+    expires_at: str | None = None
+    days_left: int | None = None
+    plan_id: str | None = None
+    trial_used: bool = True
+    is_trial: bool = False
 
 
 class CreateInvoiceIn(BaseModel):
@@ -79,6 +95,7 @@ async def pro_status(
         for p in list_plans()
     ]
     payload = status.to_dict()
+    is_trial = bool(status.is_pro and status.plan_id == TRIAL_PLAN_ID)
     return ProStatusOut(
         is_pro=bool(payload["is_pro"]),
         started_at=payload.get("started_at"),
@@ -86,8 +103,30 @@ async def pro_status(
         days_left=payload.get("days_left"),
         plan_id=payload.get("plan_id"),
         trial_used=bool(payload.get("trial_used")),
+        trial_available=not bool(payload["is_pro"]) and not bool(payload.get("trial_used")),
+        trial_days=TRIAL_DAYS,
+        is_trial=is_trial,
         expired=bool(payload.get("expired")),
         plans=plans,
+    )
+
+
+@router.post("/trial", response_model=ProTrialOut)
+async def start_pro_trial(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> ProTrialOut:
+    result = await activate_pro_trial(session, user)
+    status = result.status
+    return ProTrialOut(
+        activated=result.activated,
+        message=result.message,
+        is_pro=status.is_pro,
+        expires_at=status.expires_at.isoformat() if status.expires_at else None,
+        days_left=status.days_left,
+        plan_id=status.plan_id,
+        trial_used=status.trial_used,
+        is_trial=status.is_pro and status.plan_id == TRIAL_PLAN_ID,
     )
 
 

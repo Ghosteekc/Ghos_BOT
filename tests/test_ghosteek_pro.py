@@ -16,9 +16,10 @@ from bot.api.routes import battles as battles_route
 from bot.api.routes import meta as meta_route
 from bot.api.schemas import MetaLadderResponse, SubscriptionInfo
 from bot.models.database import Base, ProPayment, Subscription, User
-from bot.services.pro.activation import activate_pro_from_payload
+from bot.services.pro.activation import activate_pro_from_payload, activate_pro_trial
 from bot.services.pro.entitlement import get_pro_status, is_user_pro, status_from_subscription
-from bot.services.pro.plans import PRO_PLANS, add_calendar_months
+from bot.services.pro.plans import PRO_PLANS, TRIAL_DAYS, TRIAL_PLAN_ID, add_calendar_months
+from bot.services.pro.reminders import REMINDER_RENEW_2D, REMINDER_TRIAL_LAST
 
 MINUTE = timedelta(minutes=1)
 
@@ -185,6 +186,33 @@ def test_admin_telegram_ids_grant_pro_access() -> None:
 
 def test_non_admin_not_granted_pro_by_admin_list() -> None:
     asyncio.run(_run_non_admin_still_requires_subscription())
+
+
+async def _run_trial_activation() -> None:
+    engine, factory = await _make_db()
+    async with factory() as session:
+        user = await _add_user(session, 962_010)
+        result = await activate_pro_trial(session, user)
+        assert result.activated is True
+        assert result.status.is_pro is True
+        assert result.status.plan_id == TRIAL_PLAN_ID
+        assert result.status.trial_used is True
+        assert result.status.expires_at is not None
+        assert result.status.days_left is not None
+        assert result.status.days_left >= TRIAL_DAYS - 1
+
+        again = await activate_pro_trial(session, user)
+        assert again.activated is False
+        assert "пробн" in again.message.lower()
+    await engine.dispose()
+
+
+def test_pro_trial_grants_seven_days_once() -> None:
+    asyncio.run(_run_trial_activation())
+
+
+def test_reminder_kinds_are_distinct() -> None:
+    assert REMINDER_RENEW_2D != REMINDER_TRIAL_LAST
 
 
 def test_expiration_boundary_is_not_pro() -> None:

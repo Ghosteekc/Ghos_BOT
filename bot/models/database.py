@@ -165,21 +165,34 @@ class TrackedMineDeck(Base):
 
 
 class WeeklyDigestSent(Base):
-    """Идемпотентность понедельничной сводки: одна запись на пользователя и ISO-неделю."""
-
     __tablename__ = "weekly_digest_sent"
-    __table_args__ = (
-        UniqueConstraint("user_id", "week_key", name="uq_weekly_digest_user_week"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "week_key", name="uq_weekly_digest_user_week"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    week_key: Mapped[str] = mapped_column(String(16))  # e.g. 2026-W32
+    week_key: Mapped[str] = mapped_column(String(16))
     sent_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
     user: Mapped["User"] = relationship(back_populates="weekly_digests")
+
+
+class ProReminderSent(Base):
+    """Idempotent Ghosteek Pro expiry / trial reminders."""
+
+    __tablename__ = "pro_reminder_sent"
+    __table_args__ = (
+        UniqueConstraint("user_id", "kind", "period_key", name="uq_pro_reminder_user_kind_period"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    period_key: Mapped[str] = mapped_column(String(32))
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class MetaBattleObservation(Base):

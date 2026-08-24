@@ -14,6 +14,7 @@ from bot.middleware.subscription import SubscriptionMiddleware
 from bot.models.database import init_db
 from bot.services import sync_service
 from bot.services import weekly_digest
+from bot.services.pro import reminders as pro_reminders
 from bot.services import meta_collector
 from bot.services.clash_api import ClashRoyaleClient
 from bot.services.startup_warmup import warmup_caches
@@ -98,6 +99,7 @@ async def main() -> None:
     stop_event = asyncio.Event()
     sync_task = asyncio.create_task(sync_service.run_periodic(stop_event))
     digest_task = asyncio.create_task(weekly_digest.run_periodic(bot, stop_event))
+    pro_reminder_task = asyncio.create_task(pro_reminders.run_periodic(bot, stop_event))
     meta_task = asyncio.create_task(meta_collector.run_periodic(stop_event))
     api_task = asyncio.create_task(run_api(bot))
     warmup_task: asyncio.Task | None = None
@@ -134,6 +136,7 @@ async def main() -> None:
         api_task.cancel()
         sync_task.cancel()
         digest_task.cancel()
+        pro_reminder_task.cancel()
         meta_task.cancel()
         if warmup_task and not warmup_task.done():
             warmup_task.cancel()
@@ -145,6 +148,10 @@ async def main() -> None:
             await asyncio.wait_for(digest_task, timeout=10)
         except (asyncio.CancelledError, asyncio.TimeoutError):
             logger.warning("Weekly digest task did not stop within timeout")
+        try:
+            await asyncio.wait_for(pro_reminder_task, timeout=10)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            logger.warning("Pro reminder task did not stop within timeout")
         try:
             await asyncio.wait_for(meta_task, timeout=15)
         except (asyncio.CancelledError, asyncio.TimeoutError):

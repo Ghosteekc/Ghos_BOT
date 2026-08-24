@@ -471,20 +471,10 @@ class SubscriptionService:
         return await is_user_pro(self.session, user)
 
     async def activate_trial(self, user: User) -> tuple[bool, str]:
-        from bot.services.pro.plans import add_calendar_months
+        from bot.services.pro.activation import activate_pro_trial
 
-        sub = await self._ensure_subscription_row(user)
-        if sub.trial_used:
-            return False, "Пробный период уже использован."
-
-        now = datetime.now(timezone.utc)
-        sub.is_active = True
-        sub.trial_used = True
-        sub.started_at = now
-        sub.expires_at = add_calendar_months(now, 1)
-        sub.plan_id = "trial_1m"
-        await self.session.commit()
-        return True, "Пробный период Ghosteek Pro активирован на 1 месяц!"
+        result = await activate_pro_trial(self.session, user)
+        return result.activated, result.message
 
     async def activate_subscription(self, user: User, days: int = 30) -> None:
         """Legacy day-based activation (admin / old handlers). Prefer plan activation."""

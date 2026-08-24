@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.database import ProPayment, Subscription, User
 from bot.services.pro.entitlement import ProStatus, get_pro_status, status_from_subscription
-from bot.services.pro.plans import ProPlan, add_calendar_months, get_plan
+from bot.services.pro.plans import TRIAL_DAYS, TRIAL_PLAN_ID, ProPlan, add_calendar_months, get_plan
 
 logger = logging.getLogger(__name__)
 
@@ -157,4 +157,50 @@ async def activate_pro_from_payload(
         currency=currency,
         amount_stars=plan.stars,
         invoice_payload=invoice_payload,
+    )
+
+
+async def activate_pro_trial(session: AsyncSession, user: User) -> ProActivationResult:
+    """One-time free trial — full Pro access for TRIAL_DAYS."""
+    sub = await _get_or_create_subscription(session, user)
+    if sub.trial_used:
+        status = await get_pro_status(session, user)
+        return ProActivationResult(
+            activated=False,
+            duplicate=True,
+            status=status,
+            message="Пробный период уже использован.",
+        )
+
+    current = status_from_subscription(sub)
+    if current.is_pro:
+        status = await get_pro_status(session, user)
+        return ProActivationResult(
+            activated=False,
+            duplicate=False,
+            status=status,
+            message="Ghosteek Pro уже активен.",
+        )
+
+    now = _utc_now()
+    expires = now + timedelta(days=TRIAL_DAYS)
+    sub.is_active = True
+    sub.trial_used = True
+    sub.started_at = now
+    sub.expires_at = expires
+    sub.plan_id = TRIAL_PLAN_ID
+    sub.payment_id = None
+    await session.commit()
+
+    status = status_from_subscription(sub, now=now)
+    logger.info(
+        "Ghosteek Pro trial started: user=%s expires=%s",
+        user.telegram_id,
+        expires.isoformat(),
+    )
+    return ProActivationResult(
+        activated=True,
+        duplicate=False,
+        status=status,
+        message=f"Пробный Ghosteek Pro активирован на {TRIAL_DAYS} дней.",
     )
