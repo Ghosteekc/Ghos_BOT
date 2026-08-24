@@ -4,7 +4,7 @@ from bot.services.battle_day_stats import build_last_results, build_most_used_ca
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from bot.api.deps import get_db, require_linked_player, require_pro_linked, require_subscription
+from bot.api.deps import get_db, require_linked_player, require_pro_linked
 from bot.user_errors import http_error
 from bot.api.schemas import (
     ArenaDecksResponse,
@@ -645,7 +645,7 @@ async def random_deck(
 
 
 @router.get("/insights", response_model=InsightsResponse)
-async def battle_insights(user: User = Depends(require_subscription)) -> InsightsResponse:
+async def battle_insights(user: User = Depends(require_linked_player)) -> InsightsResponse:
     battles = await _get_battles(user)
     if not battles:
         return InsightsResponse(insights=[], patterns=[], sample_size=0, wins=0, losses=0)
@@ -664,7 +664,7 @@ async def battle_insights(user: User = Depends(require_subscription)) -> Insight
 
 
 @router.get("/winrates", response_model=list[WinrateEntry])
-async def deck_winrates(user: User = Depends(require_subscription)) -> list[WinrateEntry]:
+async def deck_winrates(user: User = Depends(require_linked_player)) -> list[WinrateEntry]:
     await ensure_cards_loaded()
     battles = await _get_battles(user)
     profile_deck = await _fetch_profile_current_deck(user.player_tag or "")
@@ -694,7 +694,7 @@ async def deck_winrates(user: User = Depends(require_subscription)) -> list[Winr
 
 
 @router.get("/opponents", response_model=list[OpponentEntry])
-async def list_opponents(user: User = Depends(require_subscription)) -> list[OpponentEntry]:
+async def list_opponents(user: User = Depends(require_linked_player)) -> list[OpponentEntry]:
     battles = await _get_battles(user)
     opponents = analyze_opponent_deck_from_battles(battles, normalize_tag(user.player_tag))
     _opponents_cache[user.telegram_id] = opponents
@@ -713,7 +713,7 @@ async def list_opponents(user: User = Depends(require_subscription)) -> list[Opp
 
 
 @router.get("/opponents/{index}/counter", response_model=CounterDeckResponse)
-async def counter_deck(index: int, user: User = Depends(require_subscription)) -> CounterDeckResponse:
+async def counter_deck(index: int, user: User = Depends(require_linked_player)) -> CounterDeckResponse:
     opponents = _opponents_cache.get(user.telegram_id)
     if opponents is None:
         battles = await _get_battles(user)
@@ -744,7 +744,9 @@ async def counter_deck(index: int, user: User = Depends(require_subscription)) -
 
 
 @router.get("/customize", response_model=CustomizeResponse)
-async def customize_deck(user: User = Depends(require_subscription)) -> CustomizeResponse:
+async def customize_deck(
+    user: User = Depends(require_pro_linked("deck_improve")),
+) -> CustomizeResponse:
     from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
     from bot.services.deck_level_advisor import enrich_customize_result
     from bot.services.counter_engine import _get_arena_pool
@@ -810,7 +812,9 @@ async def customize_deck(user: User = Depends(require_subscription)) -> Customiz
 
 
 @router.get("/synergy", response_model=SynergyResponse)
-async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyResponse:
+async def synergy_deck(
+    user: User = Depends(require_pro_linked("deck_improve")),
+) -> SynergyResponse:
     battles = await _get_battles(user)
     tag = normalize_tag(user.player_tag)
     preferred = [c for c, _ in get_most_played_cards(battles, tag)]
@@ -840,7 +844,7 @@ async def synergy_deck(user: User = Depends(require_subscription)) -> SynergyRes
 
 
 @router.get("/stats", response_model=StatsOverviewResponse)
-async def extended_stats(user: User = Depends(require_subscription)) -> StatsOverviewResponse:
+async def extended_stats(user: User = Depends(require_linked_player)) -> StatsOverviewResponse:
     battles = await load_and_persist(user)
     if battles is None:
         raise http_error("E020", status=502)
@@ -869,7 +873,7 @@ async def extended_stats(user: User = Depends(require_subscription)) -> StatsOve
 
 
 @router.get("/recommendations", response_model=RecommendationsResponse)
-async def recommendations(user: User = Depends(require_subscription)) -> RecommendationsResponse:
+async def recommendations(user: User = Depends(require_linked_player)) -> RecommendationsResponse:
     from bot.services.recommendation_engine import RecommendationEngine
 
     battles = await _get_battles(user)
