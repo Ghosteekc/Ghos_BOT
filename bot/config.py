@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     cr_api_retry_base_delay_sec: float = 1.0
     admin_telegram_id: int | None = None
     admin_telegram_ids: str = ""
+    # Public @username without @ — used for referral deep links (t.me/<bot>?start=ref_…)
+    bot_username: str = ""
     webapp_url: str = "https://your-domain.com"
     support_username: str | None = None
     api_host: str = "0.0.0.0"

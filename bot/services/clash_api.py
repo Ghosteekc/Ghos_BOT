@@ -354,20 +354,26 @@ class SubscriptionService:
         self.session = session
 
     async def get_or_create_user(self, telegram_id: int) -> User:
+        user, _created = await self.get_or_create_user_ex(telegram_id)
+        return user
+
+    async def get_or_create_user_ex(self, telegram_id: int) -> tuple[User, bool]:
+        """Return ``(user, created)`` — ``created=True`` only on first registration."""
         result = await self.session.execute(select(User).where(User.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
         if user is None:
             user = User(telegram_id=telegram_id)
             self.session.add(user)
             await self.session.flush()
-            # New users start FREE — Pro only after confirmed Stars payment.
+            # New users start FREE — Pro only after confirmed Stars payment / trial / referral.
             sub = Subscription(user_id=user.id, is_active=False, expires_at=None)
             self.session.add(sub)
             await self.session.commit()
             await self.session.refresh(user)
-        else:
-            await self._ensure_subscription_row(user)
-        return user
+            return user, True
+
+        await self._ensure_subscription_row(user)
+        return user, False
 
     async def _ensure_subscription_row(self, user: User) -> Subscription:
         result = await self.session.execute(select(Subscription).where(Subscription.user_id == user.id))

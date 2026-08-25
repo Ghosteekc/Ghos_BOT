@@ -1,11 +1,12 @@
 import logging
 from aiogram import Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import Message
 
 from bot.keyboards.menus import main_menu
 from bot.models.database import async_session
 from bot.services.clash_api import SubscriptionService
+from bot.services.referral.service import parse_referral_payload, process_referral_conversion
 from bot.services.weekly_digest import send_digest_preview
 
 logger = logging.getLogger(__name__)
@@ -14,11 +15,35 @@ router = Router()
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    logger.info(f"User {message.from_user.id} started the bot")
+async def cmd_start(message: Message, command: CommandObject) -> None:
+    if message.from_user is None:
+        return
+    logger.info("User %s started the bot (args=%r)", message.from_user.id, command.args)
+
+    referrer_tg = parse_referral_payload(command.args)
     async with async_session() as session:
         sub_service = SubscriptionService(session)
-        user = await sub_service.get_or_create_user(message.from_user.id)
+        user, created = await sub_service.get_or_create_user_ex(message.from_user.id)
+
+    if referrer_tg is not None:
+        async with async_session() as session:
+            # Re-load user in this session for conversion write.
+            sub_service = SubscriptionService(session)
+            referred, _ = await sub_service.get_or_create_user_ex(message.from_user.id)
+            result = await process_referral_conversion(
+                session,
+                referred_user=referred,
+                referrer_telegram_id=referrer_tg,
+                is_new_user=created,
+            )
+            logger.info(
+                "Referral conversion: referred=%s referrer_tg=%s created=%s result=%s rewards=%s",
+                message.from_user.id,
+                referrer_tg,
+                created,
+                result.reason,
+                result.rewards_granted,
+            )
 
     text = (
         "👑 <b>Ghosteek CR Assistant</b>\n\n"

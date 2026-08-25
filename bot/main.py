@@ -30,6 +30,16 @@ logger = logging.getLogger(__name__)
 async def run_api(bot: Bot) -> None:
     app = create_app()
     app.state.bot = bot
+    username = (settings.bot_username or "").strip().lstrip("@")
+    if not username:
+        try:
+            me = await bot.get_me()
+            username = (me.username or "").strip()
+        except Exception as exc:
+            logger.warning("Failed to resolve bot username for referrals: %s", exc)
+    app.state.bot_username = username
+    if username:
+        logger.info("Referral deep links use bot @%s", username)
     config = uvicorn.Config(
         app,
         host=settings.api_host,

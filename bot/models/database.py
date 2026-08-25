@@ -195,6 +195,40 @@ class ProReminderSent(Base):
     )
 
 
+class ReferralReward(Base):
+    """Batch of 5 referrals → +N days Ghosteek Pro (idempotent grant ledger)."""
+
+    __tablename__ = "referral_rewards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    referrer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    days_granted: Mapped[int] = mapped_column(Integer, default=20)
+    referrals_consumed: Mapped[int] = mapped_column(Integer, default=5)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    expires_at_after: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class Referral(Base):
+    """One successful referral conversion: new user registered via deep link."""
+
+    __tablename__ = "referrals"
+    __table_args__ = (UniqueConstraint("referred_user_id", name="uq_referral_referred"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    referrer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    reward_id: Mapped[int | None] = mapped_column(
+        ForeignKey("referral_rewards.id"), nullable=True, index=True
+    )
+
+
 class MetaBattleObservation(Base):
     """One unique ladder battle observation from a scanned player's battlelog."""
 

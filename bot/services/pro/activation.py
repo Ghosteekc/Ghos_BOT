@@ -204,3 +204,58 @@ async def activate_pro_trial(session: AsyncSession, user: User) -> ProActivation
         status=status,
         message=f"Пробный Ghosteek Pro активирован на {TRIAL_DAYS} дней.",
     )
+
+
+async def extend_pro_days(
+    session: AsyncSession,
+    user: User,
+    *,
+    days: int,
+    plan_id: str = "referral_20d",
+    commit: bool = True,
+) -> ProActivationResult:
+    """Extend or start Ghosteek Pro by calendar days (referral / admin grants)."""
+    if days <= 0:
+        raise ValueError("days must be positive")
+
+    now = _utc_now()
+    sub = await _get_or_create_subscription(session, user)
+    current = status_from_subscription(sub, now=now)
+
+    if current.is_pro and current.expires_at is None:
+        # Unlimited — leave as-is, still record plan for audit.
+        started = _aware(getattr(sub, "started_at", None)) or now
+        expires = None
+    elif current.is_pro and current.expires_at is not None:
+        base = max(now, _aware(current.expires_at) or now)
+        started = _aware(getattr(sub, "started_at", None)) or now
+        expires = base + timedelta(days=days)
+    else:
+        started = now
+        expires = now + timedelta(days=days)
+
+    sub.is_active = True
+    sub.started_at = started
+    sub.expires_at = expires
+    if not (current.is_pro and current.expires_at is None and current.plan_id == "unlimited"):
+        sub.plan_id = plan_id
+
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
+
+    status = status_from_subscription(sub, now=now)
+    logger.info(
+        "Ghosteek Pro extended: user=%s days=%s plan=%s expires=%s",
+        user.telegram_id,
+        days,
+        plan_id,
+        expires.isoformat() if expires else "unlimited",
+    )
+    return ProActivationResult(
+        activated=True,
+        duplicate=False,
+        status=status,
+        message=f"Ghosteek Pro продлён на {days} дн.",
+    )
