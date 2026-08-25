@@ -196,7 +196,7 @@ class ProReminderSent(Base):
 
 
 class ReferralReward(Base):
-    """Batch of 5 referrals → +N days Ghosteek Pro (idempotent grant ledger)."""
+    """Legacy ledger: 5 referrals → +N days Pro (kept for history; unused by Credits v2)."""
 
     __tablename__ = "referral_rewards"
 
@@ -226,6 +226,29 @@ class Referral(Base):
     )
     reward_id: Mapped[int | None] = mapped_column(
         ForeignKey("referral_rewards.id"), nullable=True, index=True
+    )
+    # Credits v2: set when invitee completes first successful Pro purchase.
+    first_purchase_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class CreditTransaction(Base):
+    """Append-only Ghosteek Credits ledger. Balance = sum(amount)."""
+
+    __tablename__ = "credit_transactions"
+    __table_args__ = (
+        UniqueConstraint("reference_id", name="uq_credit_tx_reference"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    amount: Mapped[int] = mapped_column(Integer)  # +credit / −spend
+    type: Mapped[str] = mapped_column(String(40), index=True)
+    source_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reference_id: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
 
 
@@ -362,6 +385,25 @@ async def init_db() -> None:
     await _migrate_battle_cache_dedup()
     await _migrate_users_player_tag_unique()
     await _migrate_ghosteek_pro_columns()
+    await _migrate_referral_credits_v2()
+
+
+async def _migrate_referral_credits_v2() -> None:
+    """Credits ledger table + referrals.first_purchase_at for Credits v2."""
+    log = logging.getLogger(__name__)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        result = await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM pragma_table_info('referrals') "
+                "WHERE name='first_purchase_at'"
+            )
+        )
+        if int(result.scalar_one_or_none() or 0) == 0:
+            await conn.execute(
+                text("ALTER TABLE referrals ADD COLUMN first_purchase_at DATETIME")
+            )
+            log.info("Added referrals.first_purchase_at")
 
 
 async def _migrate_ghosteek_pro_columns() -> None:

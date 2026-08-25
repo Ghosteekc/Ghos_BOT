@@ -16,15 +16,20 @@ router = APIRouter(prefix="/api/referral", tags=["referral"])
 
 class ReferralStatusOut(BaseModel):
     referral_link: str
-    successful_referrals: int
-    current_progress: int
-    required_referrals: int
-    rewards_earned: int
-    reward_days: int
-    next_reward_in: int
-    days_earned_total: int
+    friends_purchased: int = 0
+    credits_earned_from_referrals: int = 0
+    credits_balance: int = 0
+    credits_reward_amount: int = 10
     is_pro: bool
     pro_expires_at: str | None = None
+    # Legacy fields (unused by Credits v2 UI)
+    successful_referrals: int = 0
+    current_progress: int = 0
+    required_referrals: int = 0
+    rewards_earned: int = 0
+    reward_days: int = 0
+    next_reward_in: int = 0
+    days_earned_total: int = 0
 
 
 def _bot_username(request: Request) -> str | None:
@@ -47,6 +52,12 @@ async def get_referral_status(
     )
     return ReferralStatusOut(
         referral_link=stats.referral_link,
+        friends_purchased=stats.friends_purchased,
+        credits_earned_from_referrals=stats.credits_earned_from_referrals,
+        credits_balance=stats.credits_balance,
+        credits_reward_amount=stats.credits_reward_amount,
+        is_pro=stats.is_pro,
+        pro_expires_at=stats.pro_expires_at,
         successful_referrals=stats.successful_referrals,
         current_progress=stats.current_progress,
         required_referrals=stats.required_referrals,
@@ -54,6 +65,4 @@ async def get_referral_status(
         reward_days=stats.reward_days,
         next_reward_in=stats.next_reward_in,
         days_earned_total=stats.days_earned_total,
-        is_pro=stats.is_pro,
-        pro_expires_at=stats.pro_expires_at,
     )

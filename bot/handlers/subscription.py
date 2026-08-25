@@ -14,10 +14,9 @@ from bot.services.pro.activation import activate_pro_from_payload
 from bot.services.pro.plans import (
     build_invoice_payload,
     get_plan,
-    get_plan_stars,
     parse_invoice_payload,
 )
-from bot.services.referral.service import get_invitee_discount
+from bot.services.referral.service import quote_plan_purchase
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,7 @@ async def pre_checkout(query: PreCheckoutQuery) -> None:
         await query.answer(ok=False, error_message="Неизвестный тариф Ghosteek Pro.")
         return
 
-    plan_id, telegram_id = parsed
+    plan_id, telegram_id, credits_used = parsed
     plan = get_plan(plan_id)
     if plan is None:
         await query.answer(ok=False, error_message="Тариф недоступен.")
@@ -47,16 +46,30 @@ async def pre_checkout(query: PreCheckoutQuery) -> None:
         return
 
     amount = int(query.total_amount or 0)
-    catalog = plan.stars
-    allowed = {catalog}
     async with async_session() as session:
         sub_service = SubscriptionService(session)
         user = await sub_service.get_or_create_user(telegram_id)
-        discount = await get_invitee_discount(session, user)
-        if discount.active:
-            discounted = get_plan_stars(plan.id, referral_discount=True)
-            if discounted is not None:
-                allowed.add(discounted)
+        quote = await quote_plan_purchase(session, user, plan.id)
+        if quote is None:
+            await query.answer(ok=False, error_message="Тариф недоступен.")
+            return
+        # Accept the invoice amount if it matches a valid quote for this user.
+        # Credits in payload must not exceed what the quote allows.
+        claimed = max(0, int(credits_used))
+        if claimed > quote.max_credits or claimed > quote.available_credits:
+            logger.warning(
+                "Pre-checkout credits claim too high: claimed=%s max=%s bal=%s",
+                claimed,
+                quote.max_credits,
+                quote.available_credits,
+            )
+            await query.answer(ok=False, error_message="Некорректная сумма счёта.")
+            return
+        expected_stars = quote.final_price - claimed
+        if expected_stars < 1:
+            await query.answer(ok=False, error_message="Некорректная сумма счёта.")
+            return
+        allowed = {expected_stars, quote.stars_to_pay, plan.stars, quote.final_price}
 
     if amount not in allowed:
         logger.warning(
@@ -83,7 +96,7 @@ async def successful_payment(message: Message) -> None:
         logger.warning("Successful payment with non-Pro payload=%s — ignored", payload)
         return
 
-    plan_id, telegram_id = parsed
+    plan_id, telegram_id, credits_used = parsed
     if message.from_user.id != telegram_id:
         logger.error(
             "Payment user mismatch: from=%s payload_tg=%s charge=%s",
@@ -110,6 +123,7 @@ async def successful_payment(message: Message) -> None:
                 currency=payment.currency or "XTR",
                 amount_stars=int(payment.total_amount or 0),
                 invoice_payload=payload,
+                credits_used=credits_used,
             )
         except Exception:
             logger.exception("Failed to activate Pro after payment charge=%s", charge_id)
@@ -136,7 +150,7 @@ async def successful_payment(message: Message) -> None:
 
 @router.message(F.text == "/pro")
 async def cmd_pro(message: Message) -> None:
-    """Quick Stars invoice for 1 month (chat fallback)."""
+    """Quick Stars invoice for 1 month (chat fallback — full catalog price)."""
     plan = get_plan("pro_1m")
     if plan is None or message.from_user is None:
         return
@@ -144,6 +158,7 @@ async def cmd_pro(message: Message) -> None:
         plan_id=plan.id,
         telegram_id=message.from_user.id,
         nonce=secrets.token_hex(6),
+        credits_used=0,
     )
     await message.answer_invoice(
         title="Ghosteek Pro",

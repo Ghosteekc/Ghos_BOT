@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     admin_telegram_ids: str = ""
     # Public @username without @ — used for referral deep links (t.me/<bot>?start=ref_…)
     bot_username: str = ""
+    # Referral Credits v2
+    referral_discount_percent: int = 15  # 10–15 recommended; invitee first-purchase discount
+    referral_discount_window_days: int = 30
+    referral_credits_reward: int = 10
+    credits_max_share_percent: int = 50  # never cover more than this % with Credits
     webapp_url: str = "https://your-domain.com"
     support_username: str | None = None
     api_host: str = "0.0.0.0"

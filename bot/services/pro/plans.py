@@ -6,6 +6,9 @@ from calendar import monthrange
 from dataclasses import dataclass
 from datetime import datetime
 
+from bot.config import settings
+from bot.services.pro.pricing import apply_percent_discount, discount_percent_config
+
 
 @dataclass(frozen=True)
 class ProPlan:
@@ -43,14 +46,6 @@ PRO_6M = ProPlan(
 TRIAL_PLAN_ID = "trial_7d"
 TRIAL_DAYS = 7
 
-# Invitee discount (after registering via referral deep link).
-REFERRAL_DISCOUNT_WINDOW_DAYS = 30
-REFERRAL_DISCOUNT_STARS: dict[str, int] = {
-    PRO_1M.id: 80,
-    PRO_3M.id: 200,
-    PRO_6M.id: 440,
-}
-
 PRO_PLANS: dict[str, ProPlan] = {
     PRO_1M.id: PRO_1M,
     PRO_3M.id: PRO_3M,
@@ -58,6 +53,10 @@ PRO_PLANS: dict[str, ProPlan] = {
 }
 
 PAYLOAD_PREFIX = "ghosteek_pro:"
+
+
+def referral_discount_window_days() -> int:
+    return max(1, int(getattr(settings, "referral_discount_window_days", 30) or 30))
 
 
 def get_plan(plan_id: str) -> ProPlan | None:
@@ -69,13 +68,14 @@ def list_plans() -> list[ProPlan]:
 
 
 def get_plan_stars(plan_id: str, *, referral_discount: bool = False) -> int | None:
-    """Catalog or referral-discount Stars price for a plan."""
+    """Catalog or referral-discount Stars price (before Credits)."""
     plan = get_plan(plan_id)
     if plan is None:
         return None
-    if referral_discount:
-        return REFERRAL_DISCOUNT_STARS.get(plan_id, plan.stars)
-    return plan.stars
+    if not referral_discount:
+        return plan.stars
+    _, final = apply_percent_discount(plan.stars, discount_percent_config())
+    return final
 
 
 def add_calendar_months(dt: datetime, months: int) -> datetime:
@@ -88,12 +88,19 @@ def add_calendar_months(dt: datetime, months: int) -> datetime:
     return dt.replace(year=year, month=month, day=day)
 
 
-def build_invoice_payload(*, plan_id: str, telegram_id: int, nonce: str) -> str:
-    return f"{PAYLOAD_PREFIX}{plan_id}:{telegram_id}:{nonce}"
+def build_invoice_payload(
+    *,
+    plan_id: str,
+    telegram_id: int,
+    nonce: str,
+    credits_used: int = 0,
+) -> str:
+    credits = max(0, int(credits_used))
+    return f"{PAYLOAD_PREFIX}{plan_id}:{telegram_id}:{nonce}:{credits}"
 
 
-def parse_invoice_payload(payload: str) -> tuple[str, int] | None:
-    """Return (plan_id, telegram_id) or None if payload is not a Pro invoice."""
+def parse_invoice_payload(payload: str) -> tuple[str, int, int] | None:
+    """Return (plan_id, telegram_id, credits_used) or None."""
     if not payload or not payload.startswith(PAYLOAD_PREFIX):
         return None
     rest = payload[len(PAYLOAD_PREFIX) :]
@@ -107,4 +114,10 @@ def parse_invoice_payload(payload: str) -> tuple[str, int] | None:
         telegram_id = int(tg_raw)
     except ValueError:
         return None
-    return plan_id, telegram_id
+    credits_used = 0
+    if len(parts) >= 4:
+        try:
+            credits_used = max(0, int(parts[3]))
+        except ValueError:
+            credits_used = 0
+    return plan_id, telegram_id, credits_used

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import secrets
-from typing import Any
 
 from aiogram import Bot
 from aiogram.types import LabeledPrice
@@ -14,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.api.deps import get_current_user, get_db
 from bot.models.database import User
+from bot.services.credits import get_credits_balance
 from bot.services.pro.activation import activate_pro_trial
 from bot.services.pro.entitlement import get_pro_status
 from bot.services.pro.plans import TRIAL_DAYS, TRIAL_PLAN_ID, build_invoice_payload, get_plan, list_plans
-from bot.services.referral.service import get_invitee_discount, resolve_plan_stars
+from bot.services.pro.pricing import discount_percent_config
+from bot.services.referral.service import get_invitee_discount, quote_plan_purchase
 from bot.user_errors import http_error
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,11 @@ class ProPlanOut(BaseModel):
     months: int
     badge: str | None = None
     original_stars: int | None = None
+    discount_percent: int = 0
+    final_price: int | None = None
+    max_credits: int = 0
+    credits_to_use: int = 0
+    stars_to_pay: int | None = None
 
 
 class ProStatusOut(BaseModel):
@@ -49,6 +55,9 @@ class ProStatusOut(BaseModel):
     plans: list[ProPlanOut] = Field(default_factory=list)
     referral_discount_active: bool = False
     referral_discount_expires_at: str | None = None
+    referral_discount_percent: int = 0
+    credits_balance: int = 0
+    credits_max_share_percent: int = 50
 
 
 class ProTrialOut(BaseModel):
@@ -72,6 +81,14 @@ class CreateInvoiceOut(BaseModel):
     plan_id: str
     stars: int
     invoice_link: str
+    base_price: int = 0
+    discount_percent: int = 0
+    discount_stars: int = 0
+    final_price: int = 0
+    available_credits: int = 0
+    max_credits: int = 0
+    credits_to_use: int = 0
+    stars_to_pay: int = 0
 
 
 def _bot_from_request(request: Request) -> Bot:
@@ -88,20 +105,32 @@ async def pro_status(
 ) -> ProStatusOut:
     status = await get_pro_status(session, user)
     discount = await get_invitee_discount(session, user)
-    plans = [
-        ProPlanOut(
-            id=p.id,
-            title=p.title,
-            description=p.description,
-            stars=discount.prices.get(p.id, p.stars) if discount.active else p.stars,
-            months=p.months,
-            badge=p.badge,
-            original_stars=p.stars if discount.active else None,
+    balance = await get_credits_balance(session, user.id)
+    plans: list[ProPlanOut] = []
+    for p in list_plans():
+        quote = await quote_plan_purchase(session, user, p.id)
+        if quote is None:
+            continue
+        plans.append(
+            ProPlanOut(
+                id=p.id,
+                title=p.title,
+                description=p.description,
+                stars=quote.stars_to_pay,
+                months=p.months,
+                badge=p.badge,
+                original_stars=quote.base_price if quote.stars_to_pay != quote.base_price else None,
+                discount_percent=quote.discount_percent,
+                final_price=quote.final_price,
+                max_credits=quote.max_credits,
+                credits_to_use=quote.credits_to_use,
+                stars_to_pay=quote.stars_to_pay,
+            )
         )
-        for p in list_plans()
-    ]
     payload = status.to_dict()
     is_trial = bool(status.is_pro and status.plan_id == TRIAL_PLAN_ID)
+    from bot.services.pro.pricing import credits_max_share_percent
+
     return ProStatusOut(
         is_pro=bool(payload["is_pro"]),
         started_at=payload.get("started_at"),
@@ -118,6 +147,9 @@ async def pro_status(
         referral_discount_expires_at=(
             discount.expires_at.isoformat() if discount.expires_at and discount.active else None
         ),
+        referral_discount_percent=discount.percent if discount.active else discount_percent_config(),
+        credits_balance=balance,
+        credits_max_share_percent=credits_max_share_percent(),
     )
 
 
@@ -151,9 +183,9 @@ async def create_pro_invoice(
     if plan is None:
         raise http_error("E001", status=400, message="Неизвестный тариф Ghosteek Pro.")
 
-    stars = await resolve_plan_stars(session, user, plan.id)
-    if stars is None:
-        raise http_error("E001", status=400, message="Неизвестный тариф Ghosteek Pro.")
+    quote = await quote_plan_purchase(session, user, plan.id)
+    if quote is None or quote.stars_to_pay < 1:
+        raise http_error("E001", status=400, message="Не удалось рассчитать стоимость тарифа.")
 
     bot = _bot_from_request(request)
     nonce = secrets.token_hex(8)
@@ -161,6 +193,7 @@ async def create_pro_invoice(
         plan_id=plan.id,
         telegram_id=user.telegram_id,
         nonce=nonce,
+        credits_used=quote.credits_to_use,
     )
     try:
         link = await bot.create_invoice_link(
@@ -168,7 +201,7 @@ async def create_pro_invoice(
             description=plan.description,
             payload=payload,
             currency="XTR",
-            prices=[LabeledPrice(label=plan.title, amount=stars)],
+            prices=[LabeledPrice(label=plan.title, amount=quote.stars_to_pay)],
         )
     except Exception as exc:
         logger.exception("Failed to create Stars invoice for user=%s", user.telegram_id)
@@ -178,4 +211,16 @@ async def create_pro_invoice(
             message="Не удалось создать счёт Telegram Stars. Попробуйте позже.",
         ) from exc
 
-    return CreateInvoiceOut(plan_id=plan.id, stars=stars, invoice_link=str(link))
+    return CreateInvoiceOut(
+        plan_id=plan.id,
+        stars=quote.stars_to_pay,
+        invoice_link=str(link),
+        base_price=quote.base_price,
+        discount_percent=quote.discount_percent,
+        discount_stars=quote.discount_stars,
+        final_price=quote.final_price,
+        available_credits=quote.available_credits,
+        max_credits=quote.max_credits,
+        credits_to_use=quote.credits_to_use,
+        stars_to_pay=quote.stars_to_pay,
+    )

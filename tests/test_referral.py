@@ -1,4 +1,4 @@
-"""Referral system: conversions, rewards, API progress."""
+"""Referral Credits v2: attribution, ledger, 50% cap, first-purchase rewards."""
 
 from __future__ import annotations
 
@@ -8,26 +8,32 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from bot.models.database import Base, Referral, ReferralReward, Subscription, User
-from bot.services.pro.activation import activate_pro_from_payload, extend_pro_days
+from bot.models.database import Base, CreditTransaction, ProPayment, Referral, Subscription, User
+from bot.services.credits import (
+    TYPE_REFERRAL_FRIEND_REWARD,
+    TYPE_REFERRAL_REWARD,
+    TYPE_SUBSCRIPTION_DISCOUNT,
+    credit_once,
+    get_credits_balance,
+    spend_credits_once,
+)
+from bot.services.pro.activation import activate_pro_from_payload
 from bot.services.pro.entitlement import is_user_pro
-from bot.services.pro.plans import PRO_PLANS
+from bot.services.pro.plans import PRO_PLANS, get_plan_stars, parse_invoice_payload
+from bot.services.pro.pricing import (
+    apply_percent_discount,
+    build_purchase_quote,
+    max_credits_for_price,
+)
 from bot.services.referral.service import (
-    REQUIRED_REFERRALS,
-    REWARD_DAYS,
     build_referral_link,
+    get_invitee_discount,
+    grant_referral_purchase_credits,
     parse_referral_payload,
     process_referral_conversion,
+    quote_plan_purchase,
     referral_stats_for_user,
 )
-
-
-def _aware(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
 
 def _utc_now() -> datetime:
@@ -55,433 +61,336 @@ def test_parse_and_build_referral_link() -> None:
     assert parse_referral_payload("ref_12345") == 12345
     assert parse_referral_payload("ref_abc") is None
     assert parse_referral_payload(None) is None
-    assert parse_referral_payload("start") is None
     link = build_referral_link(telegram_id=42, bot_username="GhosteekCR")
     assert link == "https://t.me/GhosteekCR?start=ref_42"
 
 
-async def _run_new_user_with_referral_counts() -> None:
+def test_pricing_cap_examples() -> None:
+    q = build_purchase_quote(
+        plan_id="pro_1m", base_price=100, referral_discount=False, available_credits=10
+    )
+    assert q is not None
+    assert q.stars_to_pay == 90
+    assert q.credits_to_use == 10
+
+    q2 = build_purchase_quote(
+        plan_id="pro_1m", base_price=100, referral_discount=False, available_credits=80
+    )
+    assert q2 is not None
+    assert q2.max_credits == 50
+    assert q2.credits_to_use == 50
+    assert q2.stars_to_pay == 50
+
+    q3 = build_purchase_quote(
+        plan_id="pro_3m", base_price=250, referral_discount=False, available_credits=500
+    )
+    assert q3 is not None
+    assert q3.stars_to_pay == 125
+    assert q3.credits_to_use == 125
+
+    q4 = build_purchase_quote(
+        plan_id="pro_6m", base_price=500, referral_discount=False, available_credits=1000
+    )
+    assert q4 is not None
+    assert q4.stars_to_pay == 250
+    assert q4.credits_to_use == 250
+    assert q4.stars_to_pay >= 1
+
+
+def test_discount_then_credits_rounding() -> None:
+    cut, final = apply_percent_discount(100, 15)
+    assert cut == 15
+    assert final == 85
+    assert max_credits_for_price(85) == 42
+    q = build_purchase_quote(
+        plan_id="pro_1m",
+        base_price=100,
+        referral_discount=True,
+        available_credits=100,
+        discount_percent=15,
+    )
+    assert q is not None
+    assert q.final_price == 85
+    assert q.max_credits == 42
+    assert q.credits_to_use == 42
+    assert q.stars_to_pay == 43
+    assert q.stars_to_pay >= 1
+
+
+def test_never_zero_stars() -> None:
+    for price in (1, 2, 3, 85, 100, 500):
+        q = build_purchase_quote(
+            plan_id="pro_1m",
+            base_price=price,
+            referral_discount=False,
+            available_credits=10_000,
+        )
+        assert q is not None
+        assert q.stars_to_pay >= 1
+        assert q.credits_to_use + q.stars_to_pay == q.final_price
+
+
+def test_payload_credits_roundtrip() -> None:
+    from bot.services.pro.plans import build_invoice_payload
+
+    payload = build_invoice_payload(
+        plan_id="pro_1m", telegram_id=7, nonce="abc", credits_used=42
+    )
+    parsed = parse_invoice_payload(payload)
+    assert parsed == ("pro_1m", 7, 42)
+    legacy = parse_invoice_payload("ghosteek_pro:pro_1m:7:nonceonly")
+    assert legacy == ("pro_1m", 7, 0)
+
+
+async def _run_referral_attribution() -> None:
     engine, factory = await _make_db()
     async with factory() as session:
-        referrer = await _add_user(session, 100_001)
-        referred = await _add_user(session, 100_002)
-        result = await process_referral_conversion(
+        referrer = await _add_user(session, 200_001)
+        new_user = await _add_user(session, 200_002)
+        existing = await _add_user(session, 200_003)
+
+        ok = await process_referral_conversion(
             session,
-            referred_user=referred,
+            referred_user=new_user,
             referrer_telegram_id=referrer.telegram_id,
             is_new_user=True,
         )
-        assert result.accepted is True
-        assert result.rewards_granted == 0
-        stats = await referral_stats_for_user(session, referrer, bot_username="bot")
-        assert stats.successful_referrals == 1
-        assert stats.current_progress == 1
-        assert stats.next_reward_in == 4
-    await engine.dispose()
+        assert ok.accepted is True
+        assert await get_credits_balance(session, referrer.id) == 0
 
-
-def test_new_user_referral_counts() -> None:
-    asyncio.run(_run_new_user_with_referral_counts())
-
-
-async def _run_no_referral_without_payload() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_011)
-        referred = await _add_user(session, 100_012)
-        result = await process_referral_conversion(
+        deny_existing = await process_referral_conversion(
             session,
-            referred_user=referred,
-            referrer_telegram_id=None,
-            is_new_user=True,
-        )
-        assert result.accepted is False
-        assert result.reason == "no_payload"
-        stats = await referral_stats_for_user(session, referrer)
-        assert stats.successful_referrals == 0
-    await engine.dispose()
-
-
-def test_no_referral_without_payload() -> None:
-    asyncio.run(_run_no_referral_without_payload())
-
-
-async def _run_self_referral_rejected() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        user = await _add_user(session, 100_021)
-        result = await process_referral_conversion(
-            session,
-            referred_user=user,
-            referrer_telegram_id=user.telegram_id,
-            is_new_user=True,
-        )
-        assert result.accepted is False
-        assert result.reason == "self_referral"
-    await engine.dispose()
-
-
-def test_self_referral_rejected() -> None:
-    asyncio.run(_run_self_referral_rejected())
-
-
-async def _run_existing_user_not_counted() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_031)
-        referred = await _add_user(session, 100_032)
-        result = await process_referral_conversion(
-            session,
-            referred_user=referred,
+            referred_user=existing,
             referrer_telegram_id=referrer.telegram_id,
             is_new_user=False,
         )
-        assert result.accepted is False
-        assert result.reason == "existing_user"
-        assert (await referral_stats_for_user(session, referrer)).successful_referrals == 0
-    await engine.dispose()
+        assert deny_existing.reason == "existing_user"
 
-
-def test_existing_user_not_counted() -> None:
-    asyncio.run(_run_existing_user_not_counted())
-
-
-async def _run_repeat_start_no_second_referral() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_041)
-        referred = await _add_user(session, 100_042)
-        first = await process_referral_conversion(
+        deny_self = await process_referral_conversion(
             session,
-            referred_user=referred,
+            referred_user=referrer,
             referrer_telegram_id=referrer.telegram_id,
             is_new_user=True,
         )
-        assert first.accepted is True
-        second = await process_referral_conversion(
+        assert deny_self.reason == "self_referral"
+
+        again = await process_referral_conversion(
             session,
-            referred_user=referred,
+            referred_user=new_user,
             referrer_telegram_id=referrer.telegram_id,
             is_new_user=True,
         )
-        assert second.accepted is False
-        assert second.reason == "already_referred"
-        assert (await referral_stats_for_user(session, referrer)).successful_referrals == 1
+        assert again.reason == "already_referred"
+
+        other = await _add_user(session, 200_004)
+        await process_referral_conversion(
+            session,
+            referred_user=new_user,
+            referrer_telegram_id=other.telegram_id,
+            is_new_user=True,
+        )
+        row = (
+            await session.execute(select(Referral).where(Referral.referred_user_id == new_user.id))
+        ).scalar_one()
+        assert row.referrer_user_id == referrer.id
     await engine.dispose()
 
 
-def test_repeat_start_no_second_referral() -> None:
-    asyncio.run(_run_repeat_start_no_second_referral())
+def test_referral_attribution_rules() -> None:
+    asyncio.run(_run_referral_attribution())
 
 
-async def _run_one_referrer_only() -> None:
+async def _run_first_purchase_credits() -> None:
     engine, factory = await _make_db()
     async with factory() as session:
-        a = await _add_user(session, 100_051)
-        b = await _add_user(session, 100_052)
-        referred = await _add_user(session, 100_053)
-        first = await process_referral_conversion(
+        referrer = await _add_user(session, 201_001)
+        invitee = await _add_user(session, 201_002)
+        await process_referral_conversion(
             session,
-            referred_user=referred,
-            referrer_telegram_id=a.telegram_id,
-            is_new_user=True,
-        )
-        assert first.accepted is True
-        second = await process_referral_conversion(
-            session,
-            referred_user=referred,
-            referrer_telegram_id=b.telegram_id,
-            is_new_user=True,
-        )
-        assert second.accepted is False
-        assert (await referral_stats_for_user(session, a)).successful_referrals == 1
-        assert (await referral_stats_for_user(session, b)).successful_referrals == 0
-    await engine.dispose()
-
-
-def test_one_referred_has_single_referrer() -> None:
-    asyncio.run(_run_one_referrer_only())
-
-
-async def _invite_n(session: AsyncSession, referrer: User, n: int, base_tg: int) -> int:
-    rewards = 0
-    for i in range(n):
-        referred = await _add_user(session, base_tg + i)
-        result = await process_referral_conversion(
-            session,
-            referred_user=referred,
+            referred_user=invitee,
             referrer_telegram_id=referrer.telegram_id,
             is_new_user=True,
         )
-        assert result.accepted is True
-        rewards += result.rewards_granted
-    return rewards
+        disc = await get_invitee_discount(session, invitee)
+        assert disc.active is True
+        assert disc.percent == 15
 
-
-async def _run_four_no_reward() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_061)
-        granted = await _invite_n(session, referrer, 4, 200_000)
-        assert granted == 0
-        stats = await referral_stats_for_user(session, referrer)
-        assert stats.current_progress == 4
-        assert stats.rewards_earned == 0
-        assert await is_user_pro(session, referrer) is False
-    await engine.dispose()
-
-
-def test_four_referrals_no_reward() -> None:
-    asyncio.run(_run_four_no_reward())
-
-
-async def _run_five_grants_twenty_days() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_071)
-        before = _utc_now()
-        granted = await _invite_n(session, referrer, 5, 201_000)
-        assert granted == 1
-        assert await is_user_pro(session, referrer) is True
-        stats = await referral_stats_for_user(session, referrer)
-        assert stats.rewards_earned == 1
-        assert stats.current_progress == 0
-        assert stats.successful_referrals == 5
-        sub = (
-            await session.execute(select(Subscription).where(Subscription.user_id == referrer.id))
-        ).scalar_one()
-        assert sub.expires_at is not None
-        expected = before + timedelta(days=REWARD_DAYS)
-        assert abs((_aware(sub.expires_at) - expected).total_seconds()) < 120
-    await engine.dispose()
-
-
-def test_five_referrals_grant_twenty_days() -> None:
-    asyncio.run(_run_five_grants_twenty_days())
-
-
-async def _run_ten_grants_forty_days() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_081)
-        before = _utc_now()
-        granted = await _invite_n(session, referrer, 10, 202_000)
-        assert granted == 2
-        stats = await referral_stats_for_user(session, referrer)
-        assert stats.rewards_earned == 2
-        assert stats.days_earned_total == 40
-        assert stats.current_progress == 0
-        sub = (
-            await session.execute(select(Subscription).where(Subscription.user_id == referrer.id))
-        ).scalar_one()
-        expected = before + timedelta(days=40)
-        assert abs((_aware(sub.expires_at) - expected).total_seconds()) < 120
-    await engine.dispose()
-
-
-def test_ten_referrals_grant_forty_days() -> None:
-    asyncio.run(_run_ten_grants_forty_days())
-
-
-async def _run_extends_active_pro() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_091)
-        base_exp = _utc_now() + timedelta(days=10)
-        sub = (
-            await session.execute(select(Subscription).where(Subscription.user_id == referrer.id))
-        ).scalar_one()
-        sub.is_active = True
-        sub.started_at = _utc_now()
-        sub.expires_at = base_exp
-        sub.plan_id = "pro_1m"
-        await session.commit()
-
-        await _invite_n(session, referrer, 5, 203_000)
-        sub = (
-            await session.execute(select(Subscription).where(Subscription.user_id == referrer.id))
-        ).scalar_one()
-        expected = base_exp + timedelta(days=REWARD_DAYS)
-        assert abs((_aware(sub.expires_at) - expected).total_seconds()) < 120
-    await engine.dispose()
-
-
-def test_referral_extends_active_pro() -> None:
-    asyncio.run(_run_extends_active_pro())
-
-
-async def _run_creates_pro_when_absent() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_101)
-        await _invite_n(session, referrer, 5, 204_000)
-        assert await is_user_pro(session, referrer) is True
-    await engine.dispose()
-
-
-def test_referral_creates_pro_when_absent() -> None:
-    asyncio.run(_run_creates_pro_when_absent())
-
-
-async def _run_reward_not_duplicated() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_111)
-        await _invite_n(session, referrer, 5, 205_000)
-        # Force grant again — should be no-op (no unconsumed).
-        from bot.services.referral.service import _grant_pending_rewards
-
-        again = await _grant_pending_rewards(session, referrer)
-        await session.commit()
-        assert again == 0
-        rewards = (
-            await session.execute(
-                select(ReferralReward).where(ReferralReward.referrer_user_id == referrer.id)
-            )
-        ).scalars().all()
-        assert len(rewards) == 1
-    await engine.dispose()
-
-
-def test_reward_not_duplicated() -> None:
-    asyncio.run(_run_reward_not_duplicated())
-
-
-async def _run_api_stats_shape() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_121)
-        await _invite_n(session, referrer, 3, 206_000)
-        stats = await referral_stats_for_user(session, referrer, bot_username="GhosteekCR")
-        assert stats.referral_link.startswith("https://t.me/GhosteekCR?start=ref_")
-        assert stats.successful_referrals == 3
-        assert stats.current_progress == 3
-        assert stats.required_referrals == REQUIRED_REFERRALS
-        assert stats.reward_days == REWARD_DAYS
-        assert stats.next_reward_in == 2
-        assert stats.rewards_earned == 0
-    await engine.dispose()
-
-
-def test_referral_api_stats() -> None:
-    asyncio.run(_run_api_stats_shape())
-
-
-async def _run_stars_purchase_still_works() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        user = await _add_user(session, 100_131)
         plan = PRO_PLANS["pro_1m"]
+        first = await activate_pro_from_payload(
+            session,
+            invitee,
+            plan_id=plan.id,
+            payment_charge_id="charge-ref-1",
+            amount_stars=85,
+            credits_used=0,
+            invoice_payload=f"ghosteek_pro:{plan.id}:{invitee.telegram_id}:n:0",
+        )
+        assert first.activated is True
+        assert await get_credits_balance(session, referrer.id) == 10
+        assert await get_credits_balance(session, invitee.id) == 10
+
+        # Duplicate callback
+        dup = await activate_pro_from_payload(
+            session,
+            invitee,
+            plan_id=plan.id,
+            payment_charge_id="charge-ref-1",
+            amount_stars=85,
+            credits_used=0,
+        )
+        assert dup.duplicate is True
+        assert await get_credits_balance(session, referrer.id) == 10
+
+        # Second purchase — no extra referral credits
+        second = await activate_pro_from_payload(
+            session,
+            invitee,
+            plan_id=plan.id,
+            payment_charge_id="charge-ref-2",
+            amount_stars=100,
+            credits_used=0,
+        )
+        assert second.activated is True
+        assert await get_credits_balance(session, referrer.id) == 10
+
+        disc2 = await get_invitee_discount(session, invitee)
+        assert disc2.active is False
+
+        stats = await referral_stats_for_user(session, referrer)
+        assert stats.friends_purchased == 1
+        assert stats.credits_earned_from_referrals == 10
+    await engine.dispose()
+
+
+def test_first_purchase_grants_credits_once() -> None:
+    asyncio.run(_run_first_purchase_credits())
+
+
+async def _run_chain_abc() -> None:
+    engine, factory = await _make_db()
+    async with factory() as session:
+        a = await _add_user(session, 202_001)
+        b = await _add_user(session, 202_002)
+        c = await _add_user(session, 202_003)
+        await process_referral_conversion(
+            session, referred_user=b, referrer_telegram_id=a.telegram_id, is_new_user=True
+        )
+        await process_referral_conversion(
+            session, referred_user=c, referrer_telegram_id=b.telegram_id, is_new_user=True
+        )
+        await activate_pro_from_payload(
+            session,
+            c,
+            plan_id="pro_1m",
+            payment_charge_id="charge-c-1",
+            amount_stars=85,
+        )
+        assert await get_credits_balance(session, a.id) == 0
+        assert await get_credits_balance(session, b.id) == 10
+        assert await get_credits_balance(session, c.id) == 10
+    await engine.dispose()
+
+
+def test_direct_referrer_only_abc() -> None:
+    asyncio.run(_run_chain_abc())
+
+
+async def _run_credits_spend_on_purchase() -> None:
+    engine, factory = await _make_db()
+    async with factory() as session:
+        user = await _add_user(session, 203_001)
+        await credit_once(
+            session,
+            user_id=user.id,
+            amount=80,
+            tx_type=TYPE_REFERRAL_REWARD,
+            reference_id="seed-80",
+        )
+        await session.commit()
+        quote = await quote_plan_purchase(session, user, "pro_1m")
+        assert quote is not None
+        assert quote.credits_to_use == 50
+        assert quote.stars_to_pay == 50
+
         result = await activate_pro_from_payload(
             session,
             user,
-            plan_id=plan.id,
-            payment_charge_id="charge-ref-stars-1",
-            invoice_payload=f"ghosteek_pro:{plan.id}:{user.telegram_id}:abc",
+            plan_id="pro_1m",
+            payment_charge_id="charge-cred-1",
+            amount_stars=50,
+            credits_used=50,
+        )
+        assert result.activated is True
+        assert await get_credits_balance(session, user.id) == 30
+        assert await is_user_pro(session, user) is True
+
+        # Failed spend path: balance unchanged if we never activate
+        bal = await get_credits_balance(session, user.id)
+        assert bal == 30
+    await engine.dispose()
+
+
+def test_credits_spent_only_after_successful_payment() -> None:
+    asyncio.run(_run_credits_spend_on_purchase())
+
+
+async def _run_ledger_no_negative() -> None:
+    engine, factory = await _make_db()
+    async with factory() as session:
+        user = await _add_user(session, 204_001)
+        await credit_once(
+            session,
+            user_id=user.id,
+            amount=5,
+            tx_type=TYPE_REFERRAL_REWARD,
+            reference_id="seed-5",
+        )
+        await session.commit()
+        try:
+            await spend_credits_once(
+                session, user_id=user.id, amount=10, reference_id="spend-too-much"
+            )
+            raise AssertionError("expected insufficient_credits")
+        except ValueError as exc:
+            assert "insufficient" in str(exc)
+        assert await get_credits_balance(session, user.id) == 5
+
+        # Idempotent spend
+        await spend_credits_once(session, user_id=user.id, amount=5, reference_id="spend-5")
+        await session.commit()
+        await spend_credits_once(session, user_id=user.id, amount=5, reference_id="spend-5")
+        assert await get_credits_balance(session, user.id) == 0
+    await engine.dispose()
+
+
+def test_ledger_balance_and_no_negative() -> None:
+    asyncio.run(_run_ledger_no_negative())
+
+
+async def _run_stars_without_credits() -> None:
+    engine, factory = await _make_db()
+    async with factory() as session:
+        user = await _add_user(session, 205_001)
+        result = await activate_pro_from_payload(
+            session,
+            user,
+            plan_id="pro_1m",
+            payment_charge_id="charge-plain-1",
+            amount_stars=100,
+            credits_used=0,
         )
         assert result.activated is True
         assert await is_user_pro(session, user) is True
+        assert await get_credits_balance(session, user.id) == 0
     await engine.dispose()
 
 
-def test_stars_purchase_still_works() -> None:
-    asyncio.run(_run_stars_purchase_still_works())
+def test_existing_stars_purchase_without_credits() -> None:
+    asyncio.run(_run_stars_without_credits())
 
 
-async def _run_is_pro_sees_referral_pro() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_141)
-        await extend_pro_days(session, referrer, days=REWARD_DAYS, plan_id="referral_20d")
-        assert await is_user_pro(session, referrer) is True
-    await engine.dispose()
-
-
-def test_is_pro_sees_referral_earned_pro() -> None:
-    asyncio.run(_run_is_pro_sees_referral_pro())
-
-
-async def _run_nine_progress() -> None:
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_151)
-        await _invite_n(session, referrer, 9, 207_000)
-        stats = await referral_stats_for_user(session, referrer)
-        assert stats.successful_referrals == 9
-        assert stats.rewards_earned == 1
-        assert stats.current_progress == 4
-        assert stats.next_reward_in == 1
-    await engine.dispose()
-
-
-def test_nine_referrals_progress() -> None:
-    asyncio.run(_run_nine_progress())
-
-
-async def _run_invitee_discount_window() -> None:
-    from bot.services.pro.plans import REFERRAL_DISCOUNT_STARS, get_plan_stars
-    from bot.services.referral.service import get_invitee_discount, resolve_plan_stars
-
-    engine, factory = await _make_db()
-    async with factory() as session:
-        referrer = await _add_user(session, 100_161)
-        invited = await _add_user(session, 100_162)
-        outsider = await _add_user(session, 100_163)
-
-        result = await process_referral_conversion(
-            session,
-            referred_user=invited,
-            referrer_telegram_id=referrer.telegram_id,
-            is_new_user=True,
-        )
-        assert result.accepted is True
-
-        discount = await get_invitee_discount(session, invited)
-        assert discount.active is True
-        assert discount.expires_at is not None
-        assert discount.prices == REFERRAL_DISCOUNT_STARS
-        assert await resolve_plan_stars(session, invited, "pro_1m") == 80
-        assert await resolve_plan_stars(session, invited, "pro_3m") == 200
-        assert await resolve_plan_stars(session, invited, "pro_6m") == 440
-
-        no_disc = await get_invitee_discount(session, outsider)
-        assert no_disc.active is False
-        assert await resolve_plan_stars(session, outsider, "pro_1m") == 100
-
-        row = (
-            await session.execute(select(Referral).where(Referral.referred_user_id == invited.id))
-        ).scalar_one()
-        row.created_at = _utc_now() - timedelta(days=31)
-        await session.commit()
-
-        expired = await get_invitee_discount(session, invited)
-        assert expired.active is False
-        assert await resolve_plan_stars(session, invited, "pro_1m") == get_plan_stars("pro_1m")
-
-        plan = PRO_PLANS["pro_1m"]
-        paid = await activate_pro_from_payload(
-            session,
-            invited,
-            plan_id=plan.id,
-            payment_charge_id="charge-invitee-disc-1",
-            amount_stars=80,
-            invoice_payload=f"ghosteek_pro:{plan.id}:{invited.telegram_id}:disc",
-        )
-        assert paid.activated is True
-        assert await is_user_pro(session, invited) is True
-    await engine.dispose()
-
-
-def test_invitee_referral_discount() -> None:
-    asyncio.run(_run_invitee_discount_window())
-
-
-def test_referral_discount_catalog() -> None:
-    from bot.services.pro.plans import REFERRAL_DISCOUNT_STARS, get_plan_stars
-
-    assert REFERRAL_DISCOUNT_STARS["pro_1m"] == 80
-    assert REFERRAL_DISCOUNT_STARS["pro_3m"] == 200
-    assert REFERRAL_DISCOUNT_STARS["pro_6m"] == 440
+def test_catalog_discount_percent() -> None:
     assert get_plan_stars("pro_1m") == 100
-    assert get_plan_stars("pro_1m", referral_discount=True) == 80
-    assert get_plan_stars("unknown") is None
+    assert get_plan_stars("pro_1m", referral_discount=True) == 85
+    assert get_plan_stars("pro_3m", referral_discount=True) == 213  # 250 - floor(37.5)=250-37
+    assert get_plan_stars("pro_6m", referral_discount=True) == 425

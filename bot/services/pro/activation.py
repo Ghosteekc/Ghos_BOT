@@ -62,6 +62,7 @@ async def activate_pro_plan(
     currency: str = "XTR",
     amount_stars: int | None = None,
     invoice_payload: str | None = None,
+    credits_used: int = 0,
 ) -> ProActivationResult:
     """Grant/extend Pro from a confirmed Stars payment. Idempotent on charge id."""
     charge_id = (payment_charge_id or "").strip()
@@ -115,14 +116,52 @@ async def activate_pro_plan(
         created_at=now,
     )
     session.add(payment)
+    await session.flush()
+
+    # Credits spend + referral rewards (idempotent by reference_id / first_purchase).
+    from bot.services.credits import spend_credits_once
+    from bot.services.referral.service import grant_referral_purchase_credits
+
+    credits = max(0, int(credits_used or 0))
+    if credits > 0:
+        try:
+            await spend_credits_once(
+                session,
+                user_id=user.id,
+                amount=credits,
+                reference_id=f"sub_discount:{charge_id}",
+            )
+        except ValueError:
+            logger.exception(
+                "Credits spend failed after Stars payment user=%s charge=%s amount=%s",
+                user.telegram_id,
+                charge_id,
+                credits,
+            )
+            # Keep Pro entitlement — Stars already paid; log for manual compensation.
+
+    try:
+        await grant_referral_purchase_credits(
+            session,
+            user,
+            payment_charge_id=charge_id,
+        )
+    except Exception:
+        logger.exception(
+            "Referral credits grant failed user=%s charge=%s",
+            user.telegram_id,
+            charge_id,
+        )
+
     await session.commit()
 
     status = status_from_subscription(sub, now=now)
     logger.info(
-        "Ghosteek Pro activated: user=%s plan=%s charge=%s expires=%s",
+        "Ghosteek Pro activated: user=%s plan=%s charge=%s credits=%s expires=%s",
         user.telegram_id,
         plan.id,
         charge_id,
+        credits,
         expires.isoformat() if expires else "unlimited",
     )
     return ProActivationResult(
@@ -143,11 +182,11 @@ async def activate_pro_from_payload(
     currency: str = "XTR",
     amount_stars: int | None = None,
     invoice_payload: str | None = None,
+    credits_used: int = 0,
 ) -> ProActivationResult:
     plan = get_plan(plan_id)
     if plan is None:
         raise ValueError(f"Unknown plan_id: {plan_id}")
-    # Never trust client amount for entitlement length; store what Telegram charged.
     return await activate_pro_plan(
         session,
         user,
@@ -157,6 +196,7 @@ async def activate_pro_from_payload(
         currency=currency,
         amount_stars=amount_stars if amount_stars is not None else plan.stars,
         invoice_payload=invoice_payload,
+        credits_used=credits_used,
     )
 
 
