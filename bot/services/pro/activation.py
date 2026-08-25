@@ -125,20 +125,33 @@ async def activate_pro_plan(
     credits = max(0, int(credits_used or 0))
     if credits > 0:
         try:
-            await spend_credits_once(
+            spent = await spend_credits_once(
                 session,
                 user_id=user.id,
                 amount=credits,
                 reference_id=f"sub_discount:{charge_id}",
             )
         except ValueError:
-            logger.exception(
-                "Credits spend failed after Stars payment user=%s charge=%s amount=%s",
-                user.telegram_id,
+            tg_id = user.telegram_id
+            user_id = user.id
+            await session.rollback()
+            reloaded = await session.get(User, user_id)
+            status = await get_pro_status(session, reloaded) if reloaded else status_from_subscription(None)
+            logger.error(
+                "Credits spend failed — Pro activation rolled back user=%s charge=%s amount=%s",
+                tg_id,
                 charge_id,
                 credits,
             )
-            # Keep Pro entitlement — Stars already paid; log for manual compensation.
+            return ProActivationResult(
+                activated=False,
+                duplicate=False,
+                status=status,
+                message="Недостаточно Credits для этой покупки. Обратитесь в поддержку.",
+            )
+        if not spent:
+            # Idempotent retry of same charge — payment row already exists from duplicate path above.
+            pass
 
     try:
         await grant_referral_purchase_credits(

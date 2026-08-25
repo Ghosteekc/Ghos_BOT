@@ -67,8 +67,8 @@ class RecommendationTool(BaseTool):
             tool=self.name,
             ok=True,
             data={
-                # Итоговая колода рекомендации (= evaluation.deck), не исходный ввод.
-                "deck": improved if len(improved) == 8 else deck,
+                # User's actual deck — source of truth for session/context/CARDS.
+                "deck": deck,
                 "original_deck": deck,
                 "improved_deck": improved,
                 "recommendation": rec.to_public_dict(),

@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
-from bot.models.database import ProPayment, Referral, User
+from bot.models.database import CreditTransaction, ProPayment, Referral, User
 from bot.services.credits import (
     TYPE_REFERRAL_FRIEND_REWARD,
     TYPE_REFERRAL_REWARD,
@@ -267,6 +267,13 @@ async def referral_stats_for_user(
     )
     friends_purchased = int(purchased_res.scalar_one() or 0)
     reward = referral_credits_reward()
+    earned_res = await session.execute(
+        select(func.coalesce(func.sum(CreditTransaction.amount), 0)).where(
+            CreditTransaction.user_id == user.id,
+            CreditTransaction.type == TYPE_REFERRAL_REWARD,
+        )
+    )
+    credits_earned = max(0, int(earned_res.scalar_one() or 0))
     balance = await get_credits_balance(session, user.id)
     status = await get_pro_status(session, user)
 
@@ -276,7 +283,7 @@ async def referral_stats_for_user(
             bot_username=bot_username,
         ),
         friends_purchased=friends_purchased,
-        credits_earned_from_referrals=friends_purchased * reward,
+        credits_earned_from_referrals=credits_earned,
         credits_balance=balance,
         credits_reward_amount=reward,
         is_pro=status.is_pro,

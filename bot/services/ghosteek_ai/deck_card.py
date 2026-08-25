@@ -12,7 +12,7 @@ from bot.services.deck_analyzer import analyze_deck
 
 
 def extract_deck_names(entry: dict[str, Any]) -> list[str]:
-    cards = entry.get("cards") or entry.get("card_names") or []
+    cards = entry.get("cards") or entry.get("card_names") or entry.get("deck") or []
     if not isinstance(cards, list):
         return []
     names: list[str] = []

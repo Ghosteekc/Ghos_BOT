@@ -27,11 +27,20 @@ _REPLAY_COACHING_RE = re.compile(
     re.IGNORECASE,
 )
 
+# «разбери колоду» / «анализ колоды» — deck tools, not replay coaching.
+_DECK_ONLY_RE = re.compile(r"колод|дек\b", re.IGNORECASE)
+_REPLAY_CONTEXT_RE = re.compile(r"репле|видео|запис|матч", re.IGNORECASE)
+
 _ACCEPTED = frozenset({"cr_replay", "uncertain"})
 
 
 def is_replay_coaching_request(message: str) -> bool:
-    return bool(_REPLAY_COACHING_RE.search(message or ""))
+    text = message or ""
+    if not _REPLAY_COACHING_RE.search(text):
+        return False
+    if _DECK_ONLY_RE.search(text) and not _REPLAY_CONTEXT_RE.search(text):
+        return False
+    return True
 
 
 def normalize_replay_meta(raw: Any) -> dict[str, Any] | None:

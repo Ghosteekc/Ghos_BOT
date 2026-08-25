@@ -810,8 +810,8 @@ def attach_render_facts(ctx: AIContext) -> dict[str, Any]:
     facts = list(data.get("facts") or []) if isinstance(data, dict) else []
     cards = list(data.get("allowed_card_ids") or []) if isinstance(data, dict) else []
     thin = not facts and not cards
-    if kind and prev and (thin or kind in {"detail", "why"}):
-        # Keep validator allowlists from previous successful ToolResult.
+    if kind and prev and thin:
+        # Reuse previous facts only when the current tool returned nothing usable.
         envelope = dict(prev)
         envelope["ok"] = True
     ctx.render_facts = envelope

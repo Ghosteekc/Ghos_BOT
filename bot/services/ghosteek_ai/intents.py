@@ -1218,7 +1218,7 @@ def detect_intent(message: str, *, context_cards: list[str] | None = None) -> De
 
     # --- Builder (формальные + разговорные формулировки) ---
     if _is_build_deck_request(low) or _is_build_deck_with_cards(low, extracted):
-        core = extracted[:4] or ctx[:4]
+        core = extracted[:4]
         return _out(INTENT_BUILD_DECK, cards=core)
 
     # --- Recommendation ---

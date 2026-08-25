@@ -14,6 +14,7 @@ def test_is_replay_coaching_request() -> None:
     assert is_replay_coaching_request("Какие мои ошибки в этом видео?")
     assert is_replay_coaching_request("разбери этот реплей")
     assert not is_replay_coaching_request("собери колоду hog")
+    assert not is_replay_coaching_request("разбери колоду")
 
 
 def test_reply_mentions_seen_replay_not_missing() -> None:

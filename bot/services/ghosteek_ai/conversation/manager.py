@@ -35,7 +35,7 @@ def _compact_recommendation(data: dict[str, Any]) -> dict[str, Any]:
         "how_to_win": gp.get("how_to_win"),
         "improvement_needed": plan.get("needed"),
         "steps": (plan.get("steps") or [])[:3],
-        "deck": list(data.get("deck") or [])[:8],
+        "deck": list(data.get("original_deck") or data.get("deck") or [])[:8],
     }
 
 
@@ -384,9 +384,9 @@ class ConversationManager:
     ) -> None:
         session.last_intent = intent
         session.last_service = service
-        if active_topic:
+        if active_topic is not None:
             session.active_topic = active_topic
-        elif intent:
+        elif intent and intent != "chat":
             session.active_topic = intent
 
         if tools:
@@ -398,6 +398,10 @@ class ConversationManager:
             return
 
         deck = data.get("deck")
+        if intent in {"improve_deck", "recommendation"}:
+            original = data.get("original_deck")
+            if isinstance(original, list) and len(original) >= 8:
+                deck = original
         if isinstance(deck, list) and len(deck) >= 8:
             session.last_deck = [c for c in deck if isinstance(c, str)][:8]
 

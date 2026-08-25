@@ -656,13 +656,14 @@ async def ask_ghosteek_ai(
     answer = SafetyLayer.apply(raw_answer, ai_context)
 
     intent_name = ai_context.intent.request
+    topic_update = intent_name if intent_name != "chat" else None
     ConversationManager.update_from_ai_context(
         session,
         intent=intent_name,
         service=ai_context.intent.service,
         data=ai_context.data,
         ok=ai_context.ok,
-        active_topic=intent_name,
+        active_topic=topic_update,
         tools=tool_names,
     )
     # Persist compact facts for next local follow-up («подробнее» / «а почему?»).

@@ -119,7 +119,7 @@ async def pro_status(
                 stars=quote.stars_to_pay,
                 months=p.months,
                 badge=p.badge,
-                original_stars=quote.base_price if quote.stars_to_pay != quote.base_price else None,
+                original_stars=quote.base_price if quote.discount_percent > 0 else None,
                 discount_percent=quote.discount_percent,
                 final_price=quote.final_price,
                 max_credits=quote.max_credits,
