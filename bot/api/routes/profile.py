@@ -164,7 +164,7 @@ async def _daily_trophy_for_user(user: User) -> int | None:
     if not user.player_tag:
         return None
     tag = user.player_tag
-    session_battles = get_session_battles(user.telegram_id)
+    session_battles = get_session_battles(user.telegram_id, expected_tag=tag)
     if session_battles and is_fresh(tag):
         pvp = filter_pvp_battles(session_battles, tag)
         if pvp:

@@ -10,7 +10,7 @@ import asyncio
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from bot.models.database import TrackedMineDeck, User, async_session
@@ -391,3 +391,16 @@ async def sync_tracked_mine_decks(
             out = pinned + rest
 
     return out[:MAX_MINE_DECKS]
+
+
+async def clear_tracked_mine_decks_for_user(user_id: int) -> int:
+    """Remove all tracked «Мои колоды» slots for a user (e.g. after CR tag rebind)."""
+    async with async_session() as session:
+        res = await session.execute(
+            delete(TrackedMineDeck).where(TrackedMineDeck.user_id == user_id)
+        )
+        await session.commit()
+        deleted = int(res.rowcount or 0)
+        if deleted:
+            logger.info("Cleared %s tracked mine decks for user_id=%s", deleted, user_id)
+        return deleted

@@ -58,6 +58,18 @@ async def _run_link_scenarios() -> None:
         linked2 = await service.link_player(user2, "#XYZ999", _player_data("Beta"))
         assert linked2.player_tag == "#XYZ999"
 
+    # Rebind same Telegram user to another free tag — session cache for old tag must drop.
+    from bot.services.battle_session_cache import get_session_battles, set_session_battles
+
+    set_session_battles(800001, "#ABC123", [{"id": "old-log"}])
+    async with session_factory() as session:
+        service = SubscriptionService(session)
+        user1 = await session.get(User, user1.id)
+        retagged = await service.link_player(user1, "#NEW777", _player_data("Gamma"))
+        assert retagged.player_tag == "#NEW777"
+    assert get_session_battles(800001, expected_tag="#ABC123") is None
+    assert get_session_battles(800001, expected_tag="#NEW777") is None
+
     await engine.dispose()
 
 

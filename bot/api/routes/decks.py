@@ -72,6 +72,10 @@ router = APIRouter(prefix="/api", tags=["decks"])
 _opponents_cache: dict[int, list] = {}
 
 
+def clear_opponents_cache_for_user(telegram_id: int) -> None:
+    _opponents_cache.pop(telegram_id, None)
+
+
 async def _get_battles(user: User) -> list:
     battles = await load_and_persist(user)
     if battles is None:

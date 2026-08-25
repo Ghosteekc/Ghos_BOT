@@ -382,7 +382,7 @@ async def load_and_persist(user: User, *, force_refresh: bool = False) -> list |
     tag = normalize_tag(user.player_tag)
 
     if not force_refresh:
-        session_battles = get_session_battles(user.telegram_id)
+        session_battles = get_session_battles(user.telegram_id, expected_tag=tag)
         if (
             session_battles is not None
             and is_fresh(tag)
@@ -393,7 +393,7 @@ async def load_and_persist(user: User, *, force_refresh: bool = False) -> list |
     # Always hit CR when session is stale/missing — never treat DB stubs as a fresh log.
     battles = await load_pvp_battles(user.player_tag, bypass_ttl=True)
     if battles is None:
-        session_battles = get_session_battles(user.telegram_id)
+        session_battles = get_session_battles(user.telegram_id, expected_tag=tag)
         if session_battles is not None and _is_live_battlelog(session_battles):
             return session_battles
         cached = await get_battles_from_cache(user.player_tag)
@@ -404,7 +404,7 @@ async def load_and_persist(user: User, *, force_refresh: bool = False) -> list |
         set_session_battles(user.telegram_id, tag, battles)
         return battles
 
-    session_battles = get_session_battles(user.telegram_id)
+    session_battles = get_session_battles(user.telegram_id, expected_tag=tag)
     if session_battles is not None and _is_live_battlelog(session_battles):
         return session_battles
     cached = await get_battles_from_cache(user.player_tag)

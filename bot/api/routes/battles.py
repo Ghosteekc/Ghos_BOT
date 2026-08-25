@@ -55,7 +55,9 @@ async def clear_battle_history(user: User = Depends(require_linked_player)) -> B
 def _get_battle_cache(user: User) -> list | None:
     from bot.services.battle_session_cache import get_session_battles
 
-    return get_session_battles(user.telegram_id)
+    if not user.player_tag:
+        return None
+    return get_session_battles(user.telegram_id, expected_tag=user.player_tag)
 
 
 def _set_battle_cache(user: User, battles: list) -> None:

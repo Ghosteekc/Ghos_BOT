@@ -403,7 +403,10 @@ class SubscriptionService:
 
     async def link_player(self, user: User, tag: str, player_data: dict) -> User:
         normalized = normalize_tag(tag)
-        if user.player_tag and normalize_tag(user.player_tag) == normalized:
+        previous = user.player_tag
+        previous_norm = normalize_tag(previous) if previous else None
+
+        if previous_norm and previous_norm == normalized:
             user.player_name = player_data.get("name")
             arena = player_data.get("arena", {})
             user.arena_id = arena.get("id")
@@ -423,6 +426,26 @@ class SubscriptionService:
             )
             raise PlayerTagAlreadyLinkedError(normalized)
 
+        # Drop in-memory battle/opponent caches and tracked "mine" decks from the old tag.
+        if previous_norm:
+            from bot.services.battle_session_cache import clear_user
+            from bot.services.mine_decks import clear_tracked_mine_decks_for_user
+
+            clear_user(user.telegram_id, previous_norm)
+            try:
+                from bot.api.routes.decks import clear_opponents_cache_for_user
+
+                clear_opponents_cache_for_user(user.telegram_id)
+            except Exception:
+                logger.debug("opponents cache clear skipped", exc_info=True)
+            try:
+                await clear_tracked_mine_decks_for_user(user.id)
+            except Exception:
+                logger.exception(
+                    "Failed clearing tracked mine decks on retag user_id=%s",
+                    user.id,
+                )
+
         user.player_tag = normalized
         user.player_name = player_data.get("name")
         arena = player_data.get("arena", {})
@@ -439,7 +462,12 @@ class SubscriptionService:
                 user.telegram_id,
             )
             raise PlayerTagAlreadyLinkedError(normalized) from exc
-        logger.info("Linked player %s to telegram_id=%s", normalized, user.telegram_id)
+        logger.info(
+            "Linked player %s to telegram_id=%s (previous=%s)",
+            normalized,
+            user.telegram_id,
+            previous_norm,
+        )
         return user
 
     async def unlink_player(self, user: User) -> str | None:
