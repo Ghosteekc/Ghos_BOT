@@ -416,3 +416,72 @@ async def _run_nine_progress() -> None:
 
 def test_nine_referrals_progress() -> None:
     asyncio.run(_run_nine_progress())
+
+
+async def _run_invitee_discount_window() -> None:
+    from bot.services.pro.plans import REFERRAL_DISCOUNT_STARS, get_plan_stars
+    from bot.services.referral.service import get_invitee_discount, resolve_plan_stars
+
+    engine, factory = await _make_db()
+    async with factory() as session:
+        referrer = await _add_user(session, 100_161)
+        invited = await _add_user(session, 100_162)
+        outsider = await _add_user(session, 100_163)
+
+        result = await process_referral_conversion(
+            session,
+            referred_user=invited,
+            referrer_telegram_id=referrer.telegram_id,
+            is_new_user=True,
+        )
+        assert result.accepted is True
+
+        discount = await get_invitee_discount(session, invited)
+        assert discount.active is True
+        assert discount.expires_at is not None
+        assert discount.prices == REFERRAL_DISCOUNT_STARS
+        assert await resolve_plan_stars(session, invited, "pro_1m") == 80
+        assert await resolve_plan_stars(session, invited, "pro_3m") == 200
+        assert await resolve_plan_stars(session, invited, "pro_6m") == 440
+
+        no_disc = await get_invitee_discount(session, outsider)
+        assert no_disc.active is False
+        assert await resolve_plan_stars(session, outsider, "pro_1m") == 100
+
+        row = (
+            await session.execute(select(Referral).where(Referral.referred_user_id == invited.id))
+        ).scalar_one()
+        row.created_at = _utc_now() - timedelta(days=31)
+        await session.commit()
+
+        expired = await get_invitee_discount(session, invited)
+        assert expired.active is False
+        assert await resolve_plan_stars(session, invited, "pro_1m") == get_plan_stars("pro_1m")
+
+        plan = PRO_PLANS["pro_1m"]
+        paid = await activate_pro_from_payload(
+            session,
+            invited,
+            plan_id=plan.id,
+            payment_charge_id="charge-invitee-disc-1",
+            amount_stars=80,
+            invoice_payload=f"ghosteek_pro:{plan.id}:{invited.telegram_id}:disc",
+        )
+        assert paid.activated is True
+        assert await is_user_pro(session, invited) is True
+    await engine.dispose()
+
+
+def test_invitee_referral_discount() -> None:
+    asyncio.run(_run_invitee_discount_window())
+
+
+def test_referral_discount_catalog() -> None:
+    from bot.services.pro.plans import REFERRAL_DISCOUNT_STARS, get_plan_stars
+
+    assert REFERRAL_DISCOUNT_STARS["pro_1m"] == 80
+    assert REFERRAL_DISCOUNT_STARS["pro_3m"] == 200
+    assert REFERRAL_DISCOUNT_STARS["pro_6m"] == 440
+    assert get_plan_stars("pro_1m") == 100
+    assert get_plan_stars("pro_1m", referral_discount=True) == 80
+    assert get_plan_stars("unknown") is None

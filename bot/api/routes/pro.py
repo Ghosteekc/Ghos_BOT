@@ -17,6 +17,7 @@ from bot.models.database import User
 from bot.services.pro.activation import activate_pro_trial
 from bot.services.pro.entitlement import get_pro_status
 from bot.services.pro.plans import TRIAL_DAYS, TRIAL_PLAN_ID, build_invoice_payload, get_plan, list_plans
+from bot.services.referral.service import get_invitee_discount, resolve_plan_stars
 from bot.user_errors import http_error
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class ProPlanOut(BaseModel):
     stars: int
     months: int
     badge: str | None = None
+    original_stars: int | None = None
 
 
 class ProStatusOut(BaseModel):
@@ -45,6 +47,8 @@ class ProStatusOut(BaseModel):
     is_trial: bool = False
     expired: bool = False
     plans: list[ProPlanOut] = Field(default_factory=list)
+    referral_discount_active: bool = False
+    referral_discount_expires_at: str | None = None
 
 
 class ProTrialOut(BaseModel):
@@ -83,14 +87,16 @@ async def pro_status(
     session: AsyncSession = Depends(get_db),
 ) -> ProStatusOut:
     status = await get_pro_status(session, user)
+    discount = await get_invitee_discount(session, user)
     plans = [
         ProPlanOut(
             id=p.id,
             title=p.title,
             description=p.description,
-            stars=p.stars,
+            stars=discount.prices.get(p.id, p.stars) if discount.active else p.stars,
             months=p.months,
             badge=p.badge,
+            original_stars=p.stars if discount.active else None,
         )
         for p in list_plans()
     ]
@@ -108,6 +114,10 @@ async def pro_status(
         is_trial=is_trial,
         expired=bool(payload.get("expired")),
         plans=plans,
+        referral_discount_active=discount.active,
+        referral_discount_expires_at=(
+            discount.expires_at.isoformat() if discount.expires_at and discount.active else None
+        ),
     )
 
 
@@ -135,9 +145,14 @@ async def create_pro_invoice(
     body: CreateInvoiceIn,
     request: Request,
     user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
 ) -> CreateInvoiceOut:
     plan = get_plan(body.plan_id)
     if plan is None:
+        raise http_error("E001", status=400, message="Неизвестный тариф Ghosteek Pro.")
+
+    stars = await resolve_plan_stars(session, user, plan.id)
+    if stars is None:
         raise http_error("E001", status=400, message="Неизвестный тариф Ghosteek Pro.")
 
     bot = _bot_from_request(request)
@@ -153,7 +168,7 @@ async def create_pro_invoice(
             description=plan.description,
             payload=payload,
             currency="XTR",
-            prices=[LabeledPrice(label=plan.title, amount=plan.stars)],
+            prices=[LabeledPrice(label=plan.title, amount=stars)],
         )
     except Exception as exc:
         logger.exception("Failed to create Stars invoice for user=%s", user.telegram_id)
@@ -163,4 +178,4 @@ async def create_pro_invoice(
             message="Не удалось создать счёт Telegram Stars. Попробуйте позже.",
         ) from exc
 
-    return CreateInvoiceOut(plan_id=plan.id, stars=plan.stars, invoice_link=str(link))
+    return CreateInvoiceOut(plan_id=plan.id, stars=stars, invoice_link=str(link))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -14,6 +14,11 @@ from bot.config import settings
 from bot.models.database import Referral, ReferralReward, User
 from bot.services.pro.activation import extend_pro_days
 from bot.services.pro.entitlement import get_pro_status
+from bot.services.pro.plans import (
+    REFERRAL_DISCOUNT_STARS,
+    REFERRAL_DISCOUNT_WINDOW_DAYS,
+    get_plan_stars,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +26,27 @@ REFERRAL_PREFIX = "ref_"
 REQUIRED_REFERRALS = 5
 REWARD_DAYS = 20
 REFERRAL_PLAN_ID = "referral_20d"
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+@dataclass(frozen=True)
+class InviteeDiscount:
+    """Active purchase discount for a user who registered via referral."""
+
+    active: bool
+    expires_at: datetime | None
+    prices: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -66,6 +92,32 @@ def build_referral_link(*, telegram_id: int, bot_username: str | None = None) ->
     if not username:
         username = "GhosteekBot"
     return f"https://t.me/{username}?start={REFERRAL_PREFIX}{telegram_id}"
+
+
+async def get_invitee_discount(session: AsyncSession, user: User) -> InviteeDiscount:
+    """Discount for referred users within 30 days of successful referral registration."""
+    res = await session.execute(select(Referral).where(Referral.referred_user_id == user.id))
+    row = res.scalar_one_or_none()
+    if row is None:
+        return InviteeDiscount(active=False, expires_at=None, prices={})
+
+    created = _aware(row.created_at) or _utc_now()
+    expires = created + timedelta(days=REFERRAL_DISCOUNT_WINDOW_DAYS)
+    now = _utc_now()
+    if now >= expires:
+        return InviteeDiscount(active=False, expires_at=expires, prices={})
+
+    return InviteeDiscount(
+        active=True,
+        expires_at=expires,
+        prices=dict(REFERRAL_DISCOUNT_STARS),
+    )
+
+
+async def resolve_plan_stars(session: AsyncSession, user: User, plan_id: str) -> int | None:
+    """Stars amount the user must pay for ``plan_id`` right now."""
+    discount = await get_invitee_discount(session, user)
+    return get_plan_stars(plan_id, referral_discount=discount.active)
 
 
 async def _count_referrals(session: AsyncSession, referrer_user_id: int) -> int:

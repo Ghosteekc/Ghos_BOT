@@ -43,6 +43,14 @@ PRO_6M = ProPlan(
 TRIAL_PLAN_ID = "trial_7d"
 TRIAL_DAYS = 7
 
+# Invitee discount (after registering via referral deep link).
+REFERRAL_DISCOUNT_WINDOW_DAYS = 30
+REFERRAL_DISCOUNT_STARS: dict[str, int] = {
+    PRO_1M.id: 80,
+    PRO_3M.id: 200,
+    PRO_6M.id: 440,
+}
+
 PRO_PLANS: dict[str, ProPlan] = {
     PRO_1M.id: PRO_1M,
     PRO_3M.id: PRO_3M,
@@ -58,6 +66,16 @@ def get_plan(plan_id: str) -> ProPlan | None:
 
 def list_plans() -> list[ProPlan]:
     return [PRO_1M, PRO_3M, PRO_6M]
+
+
+def get_plan_stars(plan_id: str, *, referral_discount: bool = False) -> int | None:
+    """Catalog or referral-discount Stars price for a plan."""
+    plan = get_plan(plan_id)
+    if plan is None:
+        return None
+    if referral_discount:
+        return REFERRAL_DISCOUNT_STARS.get(plan_id, plan.stars)
+    return plan.stars
 
 
 def add_calendar_months(dt: datetime, months: int) -> datetime:

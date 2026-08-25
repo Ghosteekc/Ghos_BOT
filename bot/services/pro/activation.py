@@ -147,7 +147,7 @@ async def activate_pro_from_payload(
     plan = get_plan(plan_id)
     if plan is None:
         raise ValueError(f"Unknown plan_id: {plan_id}")
-    # Never trust client/Telegram amount over catalog price for entitlement length.
+    # Never trust client amount for entitlement length; store what Telegram charged.
     return await activate_pro_plan(
         session,
         user,
@@ -155,7 +155,7 @@ async def activate_pro_from_payload(
         payment_charge_id=payment_charge_id,
         provider_payment_charge_id=provider_payment_charge_id,
         currency=currency,
-        amount_stars=plan.stars,
+        amount_stars=amount_stars if amount_stars is not None else plan.stars,
         invoice_payload=invoice_payload,
     )
 

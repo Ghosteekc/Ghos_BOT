@@ -14,8 +14,10 @@ from bot.services.pro.activation import activate_pro_from_payload
 from bot.services.pro.plans import (
     build_invoice_payload,
     get_plan,
+    get_plan_stars,
     parse_invoice_payload,
 )
+from bot.services.referral.service import get_invitee_discount
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +46,23 @@ async def pre_checkout(query: PreCheckoutQuery) -> None:
         await query.answer(ok=False, error_message="Поддерживается только оплата Stars.")
         return
 
-    if int(query.total_amount or 0) != plan.stars:
+    amount = int(query.total_amount or 0)
+    catalog = plan.stars
+    allowed = {catalog}
+    async with async_session() as session:
+        sub_service = SubscriptionService(session)
+        user = await sub_service.get_or_create_user(telegram_id)
+        discount = await get_invitee_discount(session, user)
+        if discount.active:
+            discounted = get_plan_stars(plan.id, referral_discount=True)
+            if discounted is not None:
+                allowed.add(discounted)
+
+    if amount not in allowed:
         logger.warning(
-            "Pre-checkout amount mismatch: got=%s expected=%s plan=%s",
-            query.total_amount,
-            plan.stars,
+            "Pre-checkout amount mismatch: got=%s allowed=%s plan=%s",
+            amount,
+            sorted(allowed),
             plan.id,
         )
         await query.answer(ok=False, error_message="Некорректная сумма счёта.")
