@@ -59,7 +59,7 @@ from bot.services.arena_decks import get_arena_popular_decks
 from bot.services.deck_constructor import build_constructor_decks
 from bot.services.deck_compare import compare_decks
 from bot.services.deck_detail import build_mine_deck_stats
-from bot.services.mine_decks import sync_tracked_mine_decks
+from bot.services.mine_decks import load_full_battles, sync_tracked_mine_decks
 from bot.services.top_players import _cards_from_current_deck, get_top_players
 from bot.services.meta_analyzer import _guess_deck_name
 from bot.services.random_deck import generate_random_deck
@@ -345,7 +345,9 @@ async def get_mine_deck_stats(
     user: User = Depends(require_linked_player),
 ) -> MineDeckStatsResponse:
     cards = [c.strip() for c in deck.split("|") if c.strip()]
-    battles = await _get_battles(user)
+    live = await _get_battles(user)
+    # Same battle source as /api/winrates (live ∪ full battle_cache).
+    battles = await load_full_battles(user.player_tag or "", live)
     data = build_mine_deck_stats(battles, user.player_tag or "", cards)
     if data.get("error"):
         raise HTTPException(status_code=400, detail=data["error"])

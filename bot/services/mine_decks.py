@@ -143,12 +143,17 @@ def _combine_deck_cards(*candidates: list[dict] | None) -> list[dict]:
     return or_merge_modes_onto(base, variants, clamp=False)
 
 
-async def _load_full_winrates(player_tag: str, live_battles: list[dict]) -> dict[str, dict]:
+async def load_full_battles(player_tag: str, live_battles: list[dict] | None = None) -> list[dict]:
+    """Merge live battle log with full battle_cache history (same source as winrates)."""
     tag = normalize_tag(player_tag)
     rows = await get_cached_battle_rows(tag, limit=5000)
     cached = [row_to_battle_dict(r, tag) for r in rows]
-    merged = _merge_battles(live_battles or [], cached)
-    return calculate_deck_winrates(merged, tag)
+    return _merge_battles(live_battles or [], cached)
+
+
+async def _load_full_winrates(player_tag: str, live_battles: list[dict]) -> dict[str, dict]:
+    merged = await load_full_battles(player_tag, live_battles)
+    return calculate_deck_winrates(merged, normalize_tag(player_tag))
 
 
 def _touch_existing(
