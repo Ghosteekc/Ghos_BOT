@@ -1,6 +1,157 @@
 {
-  "source": "",
+  "source": "Ghosteek · базовые колоды для КВ",
   "source_url": "",
-  "updated_at": null,
-  "decks": []
+  "updated_at": "2026-08-25T21:46:41.691504+00:00",
+  "decks": [
+    {
+      "cards": [
+        "Hog Rider",
+        "Musketeer",
+        "Ice Golem",
+        "Ice Spirit",
+        "Skeletons",
+        "Cannon",
+        "Fireball",
+        "The Log"
+      ],
+      "name": "Хог 2.6",
+      "role": "Цикл",
+      "recommendation": "Классический быстрый цикл с хогом"
+    },
+    {
+      "cards": [
+        "Goblin Barrel",
+        "Princess",
+        "Goblin Gang",
+        "Ice Spirit",
+        "Knight",
+        "Inferno Tower",
+        "Rocket",
+        "The Log"
+      ],
+      "name": "Бейт",
+      "role": "Бейт",
+      "recommendation": "Провокация заклинаний и гоблинская бочка"
+    },
+    {
+      "cards": [
+        "X-Bow",
+        "Tesla",
+        "Archers",
+        "Ice Spirit",
+        "Skeletons",
+        "Fireball",
+        "The Log",
+        "Knight"
+      ],
+      "name": "Арбалет 3.0",
+      "role": "Контроль",
+      "recommendation": "Контроль с арбалетом и теслой"
+    },
+    {
+      "cards": [
+        "Giant",
+        "Dark Prince",
+        "Prince",
+        "Miner",
+        "Musketeer",
+        "Electro Wizard",
+        "Poison",
+        "Zap"
+      ],
+      "name": "Гигант + принцы",
+      "role": "Битдаун",
+      "recommendation": "Битдаун с двойным принцем"
+    },
+    {
+      "cards": [
+        "Royal Giant",
+        "Fisherman",
+        "Hunter",
+        "Fireball",
+        "Lightning",
+        "Electro Spirit",
+        "Skeletons",
+        "Cannon"
+      ],
+      "name": "Королевский гигант",
+      "role": "Мета",
+      "recommendation": "Королевский гигант с рыбаком"
+    },
+    {
+      "cards": [
+        "P.E.K.K.A",
+        "Battle Ram",
+        "Bandit",
+        "Royal Ghost",
+        "Magic Archer",
+        "Electro Wizard",
+        "Poison",
+        "Zap"
+      ],
+      "name": "Пекка мост",
+      "role": "Мета",
+      "recommendation": "Мостовой спам вокруг пекки"
+    },
+    {
+      "cards": [
+        "Lava Hound",
+        "Balloon",
+        "Mega Minion",
+        "Tombstone",
+        "Guards",
+        "Arrows",
+        "Lightning",
+        "Barbarian Barrel"
+      ],
+      "name": "Лава-Loon",
+      "role": "Битдаун",
+      "recommendation": "Воздушный битдаун"
+    },
+    {
+      "cards": [
+        "Golem",
+        "Night Witch",
+        "Baby Dragon",
+        "Mega Minion",
+        "Lumberjack",
+        "Tornado",
+        "Lightning",
+        "Barbarian Barrel"
+      ],
+      "name": "Голем + ночная ведьма",
+      "role": "Битдаун",
+      "recommendation": "Классический голем-пуш"
+    },
+    {
+      "cards": [
+        "Mortar",
+        "Knight",
+        "Archers",
+        "Ice Spirit",
+        "Skeletons",
+        "Rocket",
+        "The Log",
+        "Tornado"
+      ],
+      "name": "Мортира цикл",
+      "role": "Цикл",
+      "recommendation": "Мортира и быстрый цикл"
+    },
+    {
+      "cards": [
+        "Miner",
+        "Poison",
+        "Knight",
+        "Inferno Dragon",
+        "Bats",
+        "Skeletons",
+        "Rocket",
+        "The Log"
+      ],
+      "name": "Шахтёр + яд",
+      "role": "Контроль",
+      "recommendation": "Контроль с шахтёром и ядом"
+    }
+  ]
 }

@@ -5,22 +5,61 @@ Recommendations — только через RecommendationEngine (без лок�
 
 from __future__ import annotations
 
-from bot.services.card_data import COUNTERS, is_pure_spell
+from bot.services.card_data import COUNTERS, is_building, is_pure_spell
+from bot.services.card_matchups import card_counters_target, counters_in_deck
 from bot.services.card_names_ru import card_name_ru
 from bot.services.clash_api import normalize_tag
 from bot.services.deck_analyzer import analyze_deck, extract_deck
 from bot.services.meta_analyzer import _guess_deck_name
 from bot.services.recommendation_engine import RecommendationEngine
 
+# Мелкий цикл / духи: обычно не дефают ради эликсира — контру в UI не пишем.
+_SKIP_COUNTER_ADVICE = frozenset({
+    "Skeletons",
+    "Ice Spirit",
+    "Fire Spirit",
+    "Electro Spirit",
+    "Heal Spirit",
+})
+
 
 def deck_key(cards: list[str]) -> str:
     return "|".join(sorted(cards))
 
 
+def _skip_counter_advice(threat: str) -> bool:
+    return threat in _SKIP_COUNTER_ADVICE
+
+
 def _effective_counters(deck: list[str], threat: str) -> list[str]:
-    if is_pure_spell(threat):
+    """Карты из колоды, которые реально отвечают на угрозу (не wincon vs здание)."""
+    if is_pure_spell(threat) or _skip_counter_advice(threat):
         return []
-    return [c for c in COUNTERS.get(threat, []) if c in deck and c != threat]
+    strong, partial = counters_in_deck(threat, deck)
+    return strong or partial
+
+
+def _suggested_counters(threat: str, *, limit: int = 3) -> list[str]:
+    """Подсказки «подойдут», без атакующих wincon как «контры» зданий и без цикла."""
+    if is_pure_spell(threat) or _skip_counter_advice(threat):
+        return []
+    out: list[str] = []
+    for candidate in COUNTERS.get(threat, []):
+        if candidate == threat:
+            continue
+        if card_counters_target(candidate, threat):
+            out.append(candidate)
+        if len(out) >= limit:
+            return out
+    if is_building(threat):
+        for spell in ("Earthquake", "Lightning", "Rocket", "Poison", "Fireball"):
+            if spell in out:
+                continue
+            if card_counters_target(spell, threat):
+                out.append(spell)
+            if len(out) >= limit:
+                break
+    return out[:limit]
 
 
 def _filter_battles_for_deck(battles: list[dict], player_tag: str, cards: list[str]) -> list[dict]:
@@ -71,20 +110,39 @@ def _analyze_opponent_card_matchups(deck_cards: list[str], deck_battles: list[di
         wr = round(wins / total * 100, 1)
         counters = _effective_counters(deck_cards, card)
         label = card_name_ru(card, short=True) or card
+        skip_advice = _skip_counter_advice(card)
 
-        if wr >= 55 and counters:
-            strong.append({
-                "card": card,
-                "card_ru": label,
-                "winrate": wr,
-                "games": total,
-                "reason": f"Есть ответ ({', '.join(card_name_ru(c, short=True) or c for c in counters[:2])})",
-            })
-        elif wr <= 45 or (not counters and wr < 52):
-            if counters:
+        if wr >= 55:
+            if skip_advice:
+                # Винрейт оставляем, контру на мелкий цикл не пишем.
+                strong.append({
+                    "card": card,
+                    "card_ru": label,
+                    "winrate": wr,
+                    "games": total,
+                    "reason": "Мелкая цикл-карта — обычно не дефают ради эликсира",
+                })
+            elif counters:
+                strong.append({
+                    "card": card,
+                    "card_ru": label,
+                    "winrate": wr,
+                    "games": total,
+                    "reason": (
+                        "Есть ответ ("
+                        f"{', '.join(card_name_ru(c, short=True) or c for c in counters[:2])}"
+                        ")"
+                    ),
+                })
+        elif wr <= 45 or (not counters and not skip_advice and wr < 52):
+            if skip_advice:
+                reason = f"Винрейт {wr:.0f}% — слабый матчап (не из‑за отсутствия контры)"
+            elif counters:
                 reason = f"Винрейт {wr:.0f}% — счётчик есть, но матчап слабый"
             else:
-                rec = ", ".join(card_name_ru(c, short=True) or c for c in COUNTERS.get(card, [])[:3])
+                rec = ", ".join(
+                    card_name_ru(c, short=True) or c for c in _suggested_counters(card)
+                )
                 reason = f"Винрейт {wr:.0f}% — нет прямого счётчика"
                 if rec:
                     reason += f". Подойдут: {rec}"
