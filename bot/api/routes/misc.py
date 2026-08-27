@@ -16,7 +16,6 @@ from bot.api.schemas import (
 from bot.models.database import FavoriteDeck, User, async_session
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_cards_catalog
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag, validate_tag
-from bot.services.battle_service import load_and_persist
 from bot.services.player_preview import build_player_preview
 from bot.services.user_settings import load_settings_response, update_user_settings
 from bot.user_errors import http_error, http_error_from_clash
@@ -194,17 +193,15 @@ async def sync_player_data(user: User = Depends(get_current_user)) -> SyncRespon
     if not user.player_tag:
         raise HTTPException(status_code=400, detail="Сначала привяжите аккаунт в боте: /link #ТЕГ")
 
-    from bot.services.battle_session_cache import clear_user, set_session_battles
+    from bot.services.battle_session_cache import clear_user
     from bot.services.clash_api import normalize_tag
+    from bot.services.user_bootstrap import bootstrap_linked_user
 
     tag = normalize_tag(user.player_tag)
     clear_user(user.telegram_id, tag)
 
-    battles = await load_and_persist(user, force_refresh=True)
-    if battles:
-        set_session_battles(user.telegram_id, tag, battles)
-
-    return SyncResponse(ok=True, battles_loaded=len(battles or []))
+    boot = await bootstrap_linked_user(user, force=True)
+    return SyncResponse(ok=True, battles_loaded=int(boot.get("battles_loaded") or 0))
 
 
 class UnlinkAccountResponse(BaseModel):

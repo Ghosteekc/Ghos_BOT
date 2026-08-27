@@ -120,12 +120,35 @@ async def _link_player_by_tag(message: Message, state: FSMContext, raw_tag: str)
         trophies = player.get("trophies", 0)
         logger.info("Successfully linked player %s to user %s", tag, message.from_user.id)
         await _clear_link_state(state)
+
+        # Prefetch battles / mine decks so Mini App opens with data, not empty states.
+        import asyncio
+
+        from bot.services.user_bootstrap import bootstrap_user_by_telegram_id
+
+        try:
+            boot = await asyncio.wait_for(
+                bootstrap_user_by_telegram_id(message.from_user.id),
+                timeout=25,
+            )
+            battles_n = int(boot.get("battles_loaded") or 0)
+        except Exception:
+            logger.exception("Bootstrap after link failed for %s", tag)
+            battles_n = 0
+            asyncio.create_task(bootstrap_user_by_telegram_id(message.from_user.id))
+
+        extra = (
+            f"\n📜 Загружено боёв: <b>{battles_n}</b>"
+            if battles_n > 0
+            else "\n📜 Бои подтянутся при открытии приложения."
+        )
         await message.answer(
             f"✅ Аккаунт привязан!\n\n"
             f"👤 <b>{player.get('name')}</b>\n"
             f"🏷 Тег: <code>{tag}</code>\n"
             f"🏆 Кубки: {trophies}\n"
-            f"🏟 Арена: {arena.get('name', '?')}\n\n"
+            f"🏟 Арена: {arena.get('name', '?')}"
+            f"{extra}\n\n"
             "Откройте приложение через Menu Button для анализа боёв и колод."
         )
     except PlayerTagAlreadyLinkedError:
