@@ -112,6 +112,9 @@ matchup, battle analysis, knowledge/mechanics, coach tips и другие под
 RENDERER_TEMPERATURE = 0.42
 RENDERER_TEMPERATURE_CHAT = 0.55
 RENDERER_NUM_PREDICT = 220
+# Cloud reasoning models (Groq Qwen3) spend tokens on hidden reasoning — need headroom.
+RENDERER_NUM_PREDICT_CLOUD = 768
+RENDERER_NUM_PREDICT_CLOUD_CHAT = 1024
 # CR system prompt + compact FACTS; 2048 вытесняет факты.
 RENDERER_NUM_CTX = 4096
 RENDERER_NUM_CTX_CHAT = 2048
@@ -1014,11 +1017,14 @@ def renderer_generate_kwargs(
     }
 
     if cloud:
-        # Coach voice temps (not low cloud defaults); max_tokens from LLM_* with floor.
-        max_tokens = int(
-            getattr(settings, "llm_max_tokens", 0) or 0
-        ) or RENDERER_NUM_PREDICT
-        max_tokens = max(max_tokens, RENDERER_NUM_PREDICT)
+        # Groq/Qwen thinking models burn max_tokens on reasoning → content cuts mid-word.
+        floor = (
+            RENDERER_NUM_PREDICT_CLOUD_CHAT
+            if conversational
+            else RENDERER_NUM_PREDICT_CLOUD
+        )
+        max_tokens = int(getattr(settings, "llm_max_tokens", 0) or 0) or floor
+        max_tokens = max(max_tokens, floor)
         return {
             "temperature": float(temp),
             "max_tokens": max_tokens,

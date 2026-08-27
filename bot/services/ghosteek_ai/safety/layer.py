@@ -24,6 +24,7 @@ from bot.services.ghosteek_ai.voice import (
     SYSTEM_PROMPT,
     assert_coach_voice,
     ensure_coach_ending,
+    repair_cut_off_tail,
     trim_to_word_limit,
     word_limit_for,
 )
@@ -89,7 +90,9 @@ class SafetyLayer:
             if ctx is not None:
                 intent = getattr(getattr(ctx, "intent", None), "request", None)
             if out != LOCAL_RENDERER_INVALID_FALLBACK:
+                out = repair_cut_off_tail(out)
                 out = trim_to_word_limit(out, word_limit_for(intent))
+                out = repair_cut_off_tail(out)
             if len(out) > cls.MAX_CHARS:
                 out = out[: cls.MAX_CHARS - 1].rstrip() + "…"
             return out
@@ -103,7 +106,9 @@ class SafetyLayer:
         intent = None
         if ctx is not None:
             intent = getattr(getattr(ctx, "intent", None), "request", None)
+        out = repair_cut_off_tail(out)
         out = trim_to_word_limit(out, word_limit_for(intent))
+        out = repair_cut_off_tail(out)
         if len(out) > cls.MAX_CHARS:
             out = out[: cls.MAX_CHARS - 1].rstrip() + "…"
         return out

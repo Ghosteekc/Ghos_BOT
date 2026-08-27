@@ -172,6 +172,30 @@ def trim_to_word_limit(text: str, limit: int) -> str:
     return out
 
 
+def repair_cut_off_tail(text: str) -> str:
+    """Убрать хвост, обрезанный max_tokens посередине слова/фразы."""
+    raw = (text or "").rstrip()
+    if not raw:
+        return raw
+    if raw[-1] in ".!?…:;)»\"'”":
+        return raw
+    # Есть законченное предложение — оставить до последнего.
+    best = -1
+    for i, ch in enumerate(raw):
+        if ch in ".!?…":
+            best = i
+    if best >= 8 and best >= len(raw) // 3:
+        return raw[: best + 1].rstrip()
+    # Иначе сбросить последнее неполное слово.
+    parts = raw.rsplit(None, 1)
+    if len(parts) == 2 and len(parts[0]) >= 8:
+        head = parts[0].rstrip(" ,;—-–")
+        if head and head[-1] not in ".!?…":
+            head = head + "."
+        return head
+    return raw
+
+
 def coach_reply(
     verdict: str,
     *,
