@@ -1,8 +1,6 @@
-# Let the Python provider create the venv + pip PATH.
-# Do not override [phases.install] with bare "pip" — that breaks Nixpacks (exit 127).
+# Do not set providers = ["...", "python"] — that duplicates install/setup
+# and the second venv create fails with: Text file busy: /opt/venv/bin/python
 # Empty build skips root build.sh (expects local webapp/; frontend is on Vercel).
-
-providers = ["...", "python"]
 
 [phases.build]
 cmds = []
