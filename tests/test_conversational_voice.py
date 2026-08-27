@@ -56,6 +56,9 @@ from bot.services.ghosteek_ai.safety.local_renderer_validator import (
         "Ты хороший тренер?",
         "Мне скучно",
         "Я сегодня опять слил все бои",
+        "Салам",
+        "Салам алейкум",
+        "Как дела братан",
     ],
 )
 def test_conversational_intent(phrase: str):
@@ -64,6 +67,35 @@ def test_conversational_intent(phrase: str):
     plan = Planner.plan(d)
     assert plan.tools == []
     assert INTENT_TOOL_MAP[INTENT_CHAT] == []
+
+
+def test_chat_template_never_clarify_when_ok_false():
+    """Regression: default AIContext.ok=False must not emit CLARIFY for chat."""
+    from bot.services.ghosteek_ai.generator.response import TemplateResponseGenerator
+    from bot.services.ghosteek_ai.intents import CLARIFY_PROMPT
+
+    ctx = AIContext(raw_message="Салам алейкум")
+    ctx.intent.request = INTENT_CHAT
+    assert ctx.ok is False
+    attach_conversational_facts(ctx)
+    assert ctx.ok is True
+    text = TemplateResponseGenerator().generate(ctx)
+    assert "Не совсем понял" not in text
+    assert "Давай уточним" not in text
+    assert text != CLARIFY_PROMPT
+    assert len(text.strip()) > 5
+
+
+def test_chat_template_ok_false_without_attach_still_chat_voice():
+    from bot.services.ghosteek_ai.generator.response import TemplateResponseGenerator
+    from bot.services.ghosteek_ai.intents import CLARIFY_PROMPT
+
+    ctx = AIContext(raw_message="Привет")
+    ctx.intent.request = INTENT_CHAT
+    ctx.ok = False
+    text = TemplateResponseGenerator().generate(ctx)
+    assert text != CLARIFY_PROMPT
+    assert "уточним задачу" not in text.lower()
 
 
 @pytest.mark.parametrize(

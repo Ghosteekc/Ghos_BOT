@@ -81,7 +81,25 @@ def _sanity_blocks_explain(ai_context) -> bool:
 
 
 def _configured_backend() -> str:
-    return (settings.ghosteek_ai_backend or "qwen").strip().lower()
+    key = (settings.ghosteek_ai_backend or "qwen").strip().lower()
+    # Railway has no local Ollama — if LLM_* is set, use cloud (Groq/Qwen).
+    if key in {"ollama", "local"}:
+        from bot.config import _running_on_railway
+
+        has_cloud = bool(
+            (settings.llm_api_key or "").strip()
+            and (settings.llm_base_url or "").strip()
+        )
+        if _running_on_railway() and has_cloud:
+            base = (settings.llm_base_url or "").lower()
+            cloud = "groq" if "groq.com" in base else "qwen"
+            logger.warning(
+                "ghosteek_ai backend=%s on Railway with LLM_* set → using %s",
+                key,
+                cloud,
+            )
+            return cloud
+    return key
 
 
 def _configured_mode() -> str:

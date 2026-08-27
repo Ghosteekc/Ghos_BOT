@@ -158,8 +158,9 @@ _VOICE_VARIATION_PATTERNS: tuple[str, ...] = (
 _SOFT_CLARIFY_RE = re.compile(
     r"^\s*(?:"
     r"привет\w*|здравствуй(?:те)?|хай|hello|hi|hey|йо|здарова|"
+    r"салам(?:\s+алейкум)?|ассаламу\s+алейкум|assalamu\s+alaikum|"
     r"добр(?:ое|ый|ой)\s+(?:утро|день|вечер)|"
-    r"как\s+дела|что\s+(?:ты\s+)?умеешь|кто\s+ты|помощь|help|"
+    r"как\s+дела(?:\s+\w+)?|что\s+(?:ты\s+)?умеешь|кто\s+ты|помощь|help|"
     r"что\s+можешь|чем\s+поможешь|спасибо|расскажи\s+про\s+себя|"
     r"а\s+ты\s+вообще\s+кто|мне\s+скучно"
     r")[\s!.?…]*$",
@@ -713,12 +714,20 @@ def build_conversational_envelope(message: str = "") -> dict[str, Any]:
 def attach_capability_clarify_facts(ctx: AIContext) -> dict[str, Any]:
     envelope = build_capability_clarify_envelope()
     ctx.render_facts = envelope
+    # Soft-clarify is a valid coach turn — not a failed tool (ok=False → template clarify).
+    ctx.ok = True
+    ctx.error_code = None
+    ctx.error_params = {}
     return envelope
 
 
 def attach_conversational_facts(ctx: AIContext) -> dict[str, Any]:
     envelope = build_conversational_envelope(ctx.raw_message or "")
     ctx.render_facts = envelope
+    # Chat has no ToolResult; default ok=False would make Template emit CLARIFY.
+    ctx.ok = True
+    ctx.error_code = None
+    ctx.error_params = {}
     return envelope
 
 

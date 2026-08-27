@@ -49,6 +49,10 @@ class TemplateResponseGenerator:
     backend = "template"
 
     def generate(self, ctx: AIContext) -> str:
+        intent = getattr(getattr(ctx, "intent", None), "request", None)
+        # Chat / soft-talk never falls through to CLARIFY templates (ok defaults False).
+        if intent == INTENT_CHAT:
+            return assert_coach_voice(self._from_success(ctx))
         if not ctx.ok:
             return assert_coach_voice(self._from_error(ctx))
         text = self._from_success(ctx)

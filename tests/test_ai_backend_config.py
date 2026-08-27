@@ -135,3 +135,24 @@ def test_default_backend_remains_cloud_safe_qwen():
     assert Settings.model_fields["ollama_num_ctx"].default == 2048
     assert Settings.model_fields["ollama_enable_tools"].default is False
     assert Settings.model_fields["ollama_temperature"].default == 0.4
+
+
+def test_railway_ollama_remaps_to_groq_when_llm_configured():
+    """On Railway, ollama + LLM_* (Groq) → cloud groq so chat is not dead templates."""
+    from bot.services.ghosteek_ai import service as svc
+
+    with (
+        patch.object(svc.settings, "ghosteek_ai_backend", "ollama"),
+        patch.object(svc.settings, "llm_api_key", "gsk_test"),
+        patch.object(svc.settings, "llm_base_url", "https://api.groq.com/openai/v1"),
+        patch("bot.config._running_on_railway", return_value=True),
+    ):
+        assert svc._configured_backend() == "groq"
+
+    with (
+        patch.object(svc.settings, "ghosteek_ai_backend", "ollama"),
+        patch.object(svc.settings, "llm_api_key", "gsk_test"),
+        patch.object(svc.settings, "llm_base_url", "https://api.groq.com/openai/v1"),
+        patch("bot.config._running_on_railway", return_value=False),
+    ):
+        assert svc._configured_backend() == "ollama"
