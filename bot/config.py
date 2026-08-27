@@ -1,11 +1,26 @@
 import logging
+import os
+
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
 
+def _running_on_railway() -> bool:
+    return bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RAILWAY_PROJECT_ID")
+        or os.environ.get("RAILWAY_SERVICE_ID")
+    )
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        populate_by_name=True,
+    )
 
     bot_token: str
     clash_royale_api_key: str
@@ -38,7 +53,9 @@ class Settings(BaseSettings):
     webapp_url: str = "https://your-domain.com"
     support_username: str | None = None
     api_host: str = "0.0.0.0"
-    api_port: int = 8080
+    # Railway injects PORT; local/dev can still use API_PORT.
+    api_port: int = Field(default=8080, validation_alias=AliasChoices("API_PORT", "PORT"))
+    # Localtunnel is for local/dev only. On Railway default is off unless TUNNEL_AUTO_START=true.
     tunnel_auto_start: bool = True
     tunnel_subdomain: str = "ghosteekcr"
     tunnel_skip_loca_lt_check: bool = False
@@ -86,6 +103,12 @@ class Settings(BaseSettings):
     # Лимит completion tokens — компактные ответы тренера
     llm_max_tokens: int = 512
     llm_temperature: float = 0.3
+
+    @model_validator(mode="after")
+    def _apply_platform_defaults(self) -> "Settings":
+        if _running_on_railway() and "TUNNEL_AUTO_START" not in os.environ:
+            object.__setattr__(self, "tunnel_auto_start", False)
+        return self
 
 
 settings = Settings()

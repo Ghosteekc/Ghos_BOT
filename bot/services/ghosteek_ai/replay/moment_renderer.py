@@ -1,4 +1,4 @@
-﻿"""Stage 7: Grounded Moment Explanation.
+"""Stage 7: Grounded Moment Explanation.
 
 FACTS = Source of Truth. Qwen only renders wording.
 No raw video, no invented events/cards/elixir/damage/winner, no coaching.

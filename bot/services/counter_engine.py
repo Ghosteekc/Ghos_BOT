@@ -14,6 +14,10 @@ from bot.services.card_matchups import card_counters_target, synergy_partners
 from bot.services.deck_analyzer import analyze_deck, extract_deck, find_opponent_threats
 from bot.services.deck_improver import improve_player_deck
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # TODO(card-profile): _ANTI_AIR / _AIR_OFFENSE / splash sets дублируют CardProfile.
 # Алгоритм counter_engine не менять на этом этапе.
 _AIR_OFFENSE = {
@@ -311,8 +315,17 @@ def suggest_counter_deck(
 
     # Preferred path: tweak the deck the player actually used vs this opponent.
     if len(user_deck) == 8:
-        return _adapt_user_deck_vs_opponent(
+        deck = _adapt_user_deck_vs_opponent(
             user_deck, opponent_deck, pool, preferred_cards, ranked,
+        )
+        return _apply_threat_coverage(
+            deck,
+            opponent_deck,
+            pool=pool,
+            ranked=ranked,
+            preferred=preferred_cards,
+            arena_id=arena_id,
+            trophies=trophies,
         )
 
     # Fallback when user_deck is missing: build counters, then force an attack card.
@@ -346,7 +359,51 @@ def suggest_counter_deck(
 
     deck = _finalize_counter_deck(deck, ranked, pool, opponent_deck)
     deck = _ensure_win_condition(deck, pool, preferred_cards, opponent_deck, threats)
-    return deck[:8]
+    return _apply_threat_coverage(
+        deck,
+        opponent_deck,
+        pool=pool,
+        ranked=ranked,
+        preferred=preferred_cards,
+        arena_id=arena_id,
+        trophies=trophies,
+    )
+
+
+def _apply_threat_coverage(
+    deck: list[str],
+    opponent_deck: list[str],
+    *,
+    pool: set[str],
+    ranked: list[tuple[float, str]],
+    preferred: list[str],
+    arena_id: int | None,
+    trophies: int | None,
+) -> list[str]:
+    """Post-pass: critical threat coverage (esp. reliable anti-air)."""
+    from bot.services.counter_threat_coverage import ensure_counter_threat_coverage
+
+    fixed, report = ensure_counter_threat_coverage(
+        deck,
+        opponent_deck,
+        pool=pool,
+        ranked=ranked,
+        preferred=preferred,
+        arena_id=arena_id,
+        trophies=trophies,
+    )
+    if report.repaired:
+        logger.info(
+            "Counter threat coverage repaired: %s reasons=%s",
+            report.replacements,
+            report.reasons,
+        )
+    elif not report.is_valid:
+        logger.warning(
+            "Counter threat coverage still invalid after pass: %s",
+            report.reasons,
+        )
+    return fixed[:8]
 
 
 _GROUND_COUNTERS = {"Inferno Tower", "Tesla", "Cannon", "Tombstone"}
