@@ -3,10 +3,11 @@ import logging
 from dataclasses import dataclass
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bot.models import database
-from bot.models.database import BattleCache, User
+from bot.models.database import BattleCache, User, _is_sqlite
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.battle_time import battle_time_from_record
 from bot.services.battle_opponent import resolve_opponent_fields
@@ -233,8 +234,9 @@ async def _insert_battle_row(session, row: dict) -> bool:
         return False
 
     try:
+        insert_fn = sqlite_insert if _is_sqlite() else pg_insert
         await session.execute(
-            sqlite_insert(BattleCache)
+            insert_fn(BattleCache)
             .values(**row)
             .on_conflict_do_nothing(index_elements=["player_tag", "battle_time"])
         )

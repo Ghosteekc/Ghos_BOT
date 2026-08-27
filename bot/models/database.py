@@ -1,12 +1,67 @@
 import logging
 from datetime import datetime, timezone
+
 from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from bot.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _is_sqlite() -> bool:
+    return (settings.database_url or "").startswith("sqlite")
+
+
+async def _column_exists(conn: AsyncConnection, table: str, column: str) -> bool:
+    if _is_sqlite():
+        result = await conn.execute(
+            text(f"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name=:col"),
+            {"col": column},
+        )
+        return int(result.scalar_one_or_none() or 0) > 0
+    result = await conn.execute(
+        text(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = current_schema() "
+            "AND table_name = :table AND column_name = :col"
+        ),
+        {"table": table, "col": column},
+    )
+    return int(result.scalar_one_or_none() or 0) > 0
+
+
+async def _index_exists(conn: AsyncConnection, index_name: str) -> bool:
+    if _is_sqlite():
+        result = await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM sqlite_master "
+                "WHERE type='index' AND name=:name"
+            ),
+            {"name": index_name},
+        )
+        return int(result.scalar_one_or_none() or 0) > 0
+    result = await conn.execute(
+        text(
+            "SELECT COUNT(*) FROM pg_indexes "
+            "WHERE schemaname = current_schema() AND indexname = :name"
+        ),
+        {"name": index_name},
+    )
+    return int(result.scalar_one_or_none() or 0) > 0
+
+
+def _engine_kwargs() -> dict:
+    url = settings.database_url
+    if url.startswith("sqlite"):
+        return {"echo": False}
+    return {
+        "echo": False,
+        "pool_pre_ping": True,
+        "pool_size": 5,
+        "max_overflow": 10,
+    }
 
 
 class Base(DeclarativeBase):
@@ -338,7 +393,7 @@ class FsmStorageRecord(Base):
     value: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-engine = create_async_engine(settings.database_url, echo=False)
+engine = create_async_engine(settings.database_url, **_engine_kwargs())
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -347,28 +402,21 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT COUNT(*) FROM pragma_table_info('users') WHERE name='trophies'")
-        )
-        count = result.scalar_one_or_none()
-        if count == 0:
+        if not await _column_exists(conn, "users", "trophies"):
             await conn.execute(text("ALTER TABLE users ADD COLUMN trophies INTEGER"))
-            logger = logging.getLogger(__name__)
             logger.info("Added 'trophies' column to users table")
 
-        result = await conn.execute(
-            text("SELECT COUNT(*) FROM pragma_table_info('user_settings') WHERE name='haptic_enabled'")
-        )
-        if result.scalar_one_or_none() == 0:
+        if not await _column_exists(conn, "user_settings", "haptic_enabled"):
+            default_bool = "TRUE" if not _is_sqlite() else "1"
             await conn.execute(
-                text("ALTER TABLE user_settings ADD COLUMN haptic_enabled BOOLEAN DEFAULT 1 NOT NULL")
+                text(
+                    "ALTER TABLE user_settings ADD COLUMN haptic_enabled "
+                    f"BOOLEAN DEFAULT {default_bool} NOT NULL"
+                )
             )
-            logging.getLogger(__name__).info("Added 'haptic_enabled' column to user_settings table")
+            logger.info("Added 'haptic_enabled' column to user_settings table")
 
-        result = await conn.execute(
-            text("SELECT COUNT(*) FROM pragma_table_info('user_settings') WHERE name='haptic_intensity'")
-        )
-        if result.scalar_one_or_none() == 0:
+        if not await _column_exists(conn, "user_settings", "haptic_intensity"):
             await conn.execute(
                 text(
                     "ALTER TABLE user_settings ADD COLUMN haptic_intensity VARCHAR(10) "
@@ -393,15 +441,10 @@ async def _migrate_referral_credits_v2() -> None:
     log = logging.getLogger(__name__)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        result = await conn.execute(
-            text(
-                "SELECT COUNT(*) FROM pragma_table_info('referrals') "
-                "WHERE name='first_purchase_at'"
-            )
-        )
-        if int(result.scalar_one_or_none() or 0) == 0:
+        if not await _column_exists(conn, "referrals", "first_purchase_at"):
+            col_type = "TIMESTAMPTZ" if not _is_sqlite() else "DATETIME"
             await conn.execute(
-                text("ALTER TABLE referrals ADD COLUMN first_purchase_at DATETIME")
+                text(f"ALTER TABLE referrals ADD COLUMN first_purchase_at {col_type}")
             )
             log.info("Added referrals.first_purchase_at")
 
@@ -410,23 +453,18 @@ async def _migrate_ghosteek_pro_columns() -> None:
     """Add Pro columns / payment table; revoke legacy free-forever grants."""
     log = logging.getLogger(__name__)
     async with engine.begin() as conn:
+        dt = "TIMESTAMPTZ" if not _is_sqlite() else "DATETIME"
         for col, ddl in (
             (
                 "started_at",
-                "ALTER TABLE subscriptions ADD COLUMN started_at DATETIME",
+                f"ALTER TABLE subscriptions ADD COLUMN started_at {dt}",
             ),
             (
                 "plan_id",
                 "ALTER TABLE subscriptions ADD COLUMN plan_id VARCHAR(32)",
             ),
         ):
-            result = await conn.execute(
-                text(
-                    "SELECT COUNT(*) FROM pragma_table_info('subscriptions') "
-                    f"WHERE name='{col}'"
-                )
-            )
-            if result.scalar_one_or_none() == 0:
+            if not await _column_exists(conn, "subscriptions", col):
                 await conn.execute(text(ddl))
                 log.info("Added subscriptions.%s", col)
 
@@ -434,6 +472,12 @@ async def _migrate_ghosteek_pro_columns() -> None:
         # Keep only explicit admin unlimited (plan_id='unlimited').
         await conn.execute(
             text(
+                "UPDATE subscriptions SET is_active = false "
+                "WHERE expires_at IS NULL AND (plan_id IS NULL OR plan_id != 'unlimited') "
+                "AND is_active = true"
+            )
+            if not _is_sqlite()
+            else text(
                 "UPDATE subscriptions SET is_active = 0 "
                 "WHERE expires_at IS NULL AND (plan_id IS NULL OR plan_id != 'unlimited') "
                 "AND is_active = 1"
@@ -444,15 +488,10 @@ async def _migrate_ghosteek_pro_columns() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+
 async def _migrate_battle_cache_user_deck_json() -> None:
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text(
-                "SELECT COUNT(*) FROM pragma_table_info('battle_cache') "
-                "WHERE name='user_deck_json'"
-            )
-        )
-        if result.scalar_one_or_none() == 0:
+        if not await _column_exists(conn, "battle_cache", "user_deck_json"):
             await conn.execute(
                 text(
                     "ALTER TABLE battle_cache ADD COLUMN user_deck_json TEXT "
@@ -466,13 +505,7 @@ async def _migrate_battle_cache_user_deck_json() -> None:
 
 async def _migrate_tracked_mine_decks_cards_json() -> None:
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text(
-                "SELECT COUNT(*) FROM pragma_table_info('tracked_mine_decks') "
-                "WHERE name='cards_json'"
-            )
-        )
-        if result.scalar_one_or_none() == 0:
+        if not await _column_exists(conn, "tracked_mine_decks", "cards_json"):
             await conn.execute(
                 text(
                     "ALTER TABLE tracked_mine_decks ADD COLUMN cards_json TEXT "
@@ -486,10 +519,7 @@ async def _migrate_tracked_mine_decks_cards_json() -> None:
 
 async def _migrate_battle_cache_trophy() -> None:
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT COUNT(*) FROM pragma_table_info('battle_cache') WHERE name='trophy_change'")
-        )
-        if result.scalar_one_or_none() == 0:
+        if not await _column_exists(conn, "battle_cache", "trophy_change"):
             await conn.execute(text("ALTER TABLE battle_cache ADD COLUMN trophy_change INTEGER"))
             logging.getLogger(__name__).info("Added 'trophy_change' column to battle_cache")
 
@@ -500,10 +530,7 @@ async def _migrate_battle_cache_opponent() -> None:
             ("opponent_name", "ALTER TABLE battle_cache ADD COLUMN opponent_name VARCHAR(100) DEFAULT ''"),
             ("opponent_tag", "ALTER TABLE battle_cache ADD COLUMN opponent_tag VARCHAR(20) DEFAULT ''"),
         ):
-            result = await conn.execute(
-                text(f"SELECT COUNT(*) FROM pragma_table_info('battle_cache') WHERE name='{column}'")
-            )
-            if result.scalar_one_or_none() == 0:
+            if not await _column_exists(conn, "battle_cache", column):
                 await conn.execute(text(ddl))
                 logging.getLogger(__name__).info("Added '%s' column to battle_cache", column)
 
@@ -530,13 +557,7 @@ async def _migrate_users_player_tag_unique() -> None:
             logger.info("Normalized %d users.player_tag values", normalized)
 
     async with engine.begin() as conn:
-        index_exists = await conn.execute(
-            text(
-                "SELECT COUNT(*) FROM sqlite_master "
-                "WHERE type='index' AND name='uq_users_player_tag'"
-            )
-        )
-        if index_exists.scalar_one():
+        if await _index_exists(conn, "uq_users_player_tag"):
             return
 
         dupes = await conn.execute(
@@ -545,7 +566,7 @@ async def _migrate_users_player_tag_unique() -> None:
                 "FROM users "
                 "WHERE player_tag IS NOT NULL "
                 "GROUP BY player_tag "
-                "HAVING cnt > 1"
+                "HAVING COUNT(*) > 1"
             )
         )
         dupe_rows = dupes.fetchall()
@@ -600,13 +621,7 @@ async def _migrate_battle_cache_dedup() -> None:
             logger.info("Normalized %d battle_cache.battle_time values", normalized)
 
     async with engine.begin() as conn:
-        index_exists = await conn.execute(
-            text(
-                "SELECT COUNT(*) FROM sqlite_master "
-                "WHERE type='index' AND name='uq_battle_cache_player_time'"
-            )
-        )
-        if index_exists.scalar_one():
+        if await _index_exists(conn, "uq_battle_cache_player_time"):
             return
 
         dupes = await conn.execute(
@@ -614,7 +629,7 @@ async def _migrate_battle_cache_dedup() -> None:
                 "SELECT player_tag, battle_time, COUNT(*) AS cnt "
                 "FROM battle_cache "
                 "GROUP BY player_tag, battle_time "
-                "HAVING cnt > 1"
+                "HAVING COUNT(*) > 1"
             )
         )
         dupe_rows = dupes.fetchall()

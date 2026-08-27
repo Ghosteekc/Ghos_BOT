@@ -1,7 +1,7 @@
 import logging
 import os
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -13,6 +13,21 @@ def _running_on_railway() -> bool:
         or os.environ.get("RAILWAY_PROJECT_ID")
         or os.environ.get("RAILWAY_SERVICE_ID")
     )
+
+
+def normalize_database_url(url: str) -> str:
+    """Railway/Heroku give postgres://… — SQLAlchemy async needs postgresql+asyncpg://…"""
+    u = (url or "").strip()
+    if not u:
+        return "sqlite+aiosqlite:///./cr_bot.db"
+    if u.startswith("postgres://"):
+        u = "postgresql://" + u.removeprefix("postgres://")
+    scheme, sep, rest = u.partition("://")
+    if not sep:
+        return u
+    if scheme in {"postgresql", "postgres"} and "+asyncpg" not in scheme:
+        return f"postgresql+asyncpg://{rest}"
+    return u
 
 
 class Settings(BaseSettings):
@@ -104,6 +119,11 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 512
     llm_temperature: float = 0.3
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, value: object) -> str:
+        return normalize_database_url("" if value is None else str(value))
+
     @model_validator(mode="after")
     def _apply_platform_defaults(self) -> "Settings":
         if _running_on_railway():
@@ -113,6 +133,14 @@ class Settings(BaseSettings):
             railway_port = (os.environ.get("PORT") or "").strip()
             if railway_port.isdigit():
                 object.__setattr__(self, "api_port", int(railway_port))
+            db = (self.database_url or "").lower()
+            if db.startswith("sqlite"):
+                logger.warning(
+                    "DATABASE_URL is SQLite on Railway — the container disk is ephemeral, "
+                    "so every redeploy wipes users/battles. Add a Postgres plugin and set "
+                    "DATABASE_URL=${{Postgres.DATABASE_URL}}, or mount a persistent volume "
+                    "for the .db file."
+                )
         return self
 
 
