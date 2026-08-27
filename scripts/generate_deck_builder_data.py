@@ -54,7 +54,7 @@ SPLASH = {
     "Baby Dragon", "Wizard", "Executioner", "Bowler", "Valkyrie", "Bomber",
     "Electro Dragon", "Goblin Demolisher", "Witch", "Electro Wizard", "Ice Wizard",
     "Skeleton Dragons", "Mega Knight", "Dark Prince", "Firecracker", "Skeleton King",
-    "Magic Archer", "Mother Witch", "Royal Delivery",
+    "Magic Archer", "Mother Witch", "Royal Delivery", "Bomb Tower",
 }
 ANTI_TANK = {
     "Inferno Tower", "Inferno Dragon", "P.E.K.K.A", "Mini P.E.K.K.A", "Hunter",
@@ -70,6 +70,7 @@ ANTI_SWARM = {
     "The Log", "Zap", "Arrows", "Barbarian Barrel", "Giant Snowball", "Fireball",
     "Poison", "Tornado", "Earthquake", "Mega Knight", "Dark Prince", "Witch",
     "Electro Wizard", "Ice Wizard", "Firecracker", "Royal Delivery", "Skeleton Dragons",
+    "Bomb Tower",
 }
 COUNTERPUSH = {
     "Bandit", "Dark Prince", "Prince", "Battle Ram", "Royal Ghost", "Miner",

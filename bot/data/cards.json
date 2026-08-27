@@ -115,7 +115,9 @@
       "type": "building",
       "roles": [
         "building",
-        "defensive"
+        "defensive",
+        "splash",
+        "anti_swarm"
       ]
     },
     "Bomber": {
