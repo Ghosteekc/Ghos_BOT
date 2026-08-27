@@ -1,6 +1,11 @@
-# Skip root build.sh (expects local webapp/; frontend is on Vercel).
-[phases.install]
-cmds = ["pip install -r requirements.txt"]
+# Let the Python provider create the venv + pip PATH.
+# Do not override [phases.install] with bare "pip" — that breaks Nixpacks (exit 127).
+# Empty build skips root build.sh (expects local webapp/; frontend is on Vercel).
+
+providers = ["...", "python"]
+
+[phases.build]
+cmds = []
 
 [start]
 cmd = "python -m bot.main"
