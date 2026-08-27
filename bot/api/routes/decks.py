@@ -859,10 +859,7 @@ async def extended_stats(user: User = Depends(require_linked_player)) -> StatsOv
     if stats is None and battles:
         stats = _stats_from_battles(battles, user.player_tag or "")
     if stats is None or stats.total == 0:
-        raise HTTPException(
-            status_code=404,
-            detail="Нет данных о боях. Сыграйте несколько рейтинговых боёв и обновите страницу.",
-        )
+        raise http_error("E025", status=404)
 
     max_trophies = user.trophies or 0
     chart_battles = await get_battles_for_winrate_chart(user.player_tag or "", days=14)
