@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     webapp_url: str = "https://your-domain.com"
     support_username: str | None = None
     api_host: str = "0.0.0.0"
-    # Railway injects PORT; local/dev can still use API_PORT.
+    # Local/dev: API_PORT. Railway always injects PORT — preferred in _apply_platform_defaults.
     api_port: int = Field(default=8080, validation_alias=AliasChoices("API_PORT", "PORT"))
     # Localtunnel is for local/dev only. On Railway default is off unless TUNNEL_AUTO_START=true.
     tunnel_auto_start: bool = True
@@ -106,8 +106,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _apply_platform_defaults(self) -> "Settings":
-        if _running_on_railway() and "TUNNEL_AUTO_START" not in os.environ:
-            object.__setattr__(self, "tunnel_auto_start", False)
+        if _running_on_railway():
+            if "TUNNEL_AUTO_START" not in os.environ:
+                object.__setattr__(self, "tunnel_auto_start", False)
+            # Prefer platform PORT even if API_PORT=8080 was copied from local .env.
+            railway_port = (os.environ.get("PORT") or "").strip()
+            if railway_port.isdigit():
+                object.__setattr__(self, "api_port", int(railway_port))
         return self
 
 
