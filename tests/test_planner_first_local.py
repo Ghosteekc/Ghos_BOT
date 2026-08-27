@@ -160,8 +160,8 @@ def test_c_unknown_intent_skips_llm():
     assert meta["tool_success"] is False
 
 
-def test_d_groq_agent_mode_still_works():
-    """D: backend=groq + tools → Agent Mode (existing path)."""
+def test_d_groq_coach_planner_by_default():
+    """D: backend=groq auto → planner+LocalRenderer; explicit agent still Agent."""
     from bot.services.ghosteek_ai import service as svc
 
     provider = MagicMock()
@@ -169,15 +169,17 @@ def test_d_groq_agent_mode_still_works():
     provider.config = LLMConfig(provider="groq", model="llama-3.3-70b")
 
     with patch.object(svc, "_configured_mode", return_value="auto"):
-        assert svc._resolve_runtime_mode(provider, backend="groq") == "agent"
+        assert svc._resolve_runtime_mode(provider, backend="groq") == "planner"
+        assert svc._force_planner_first("groq", provider) is True
 
     with patch.object(svc, "_configured_mode", return_value="agent"):
         assert svc._resolve_runtime_mode(provider, backend="groq") == "agent"
+        assert svc._force_planner_first("groq", provider) is False
 
-    # Cloud with tools must not be forced to planner-first.
-    assert svc._force_planner_first("groq", provider) is False
     assert svc._is_local_renderer_first("groq", provider) is False
     assert svc._is_local_qwen3_8b("groq", provider) is False
+    assert svc._uses_coach_renderer("groq") is True
+    assert svc._uses_coach_renderer("qwen") is True
 
 
 def test_e_ollama_qwen3_8b_forces_planner_first():

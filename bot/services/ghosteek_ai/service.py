@@ -35,6 +35,19 @@ MODE_PLANNER = "planner"
 # Tools that never feed the LLM renderer (safe template responses only).
 _TEMPLATE_ONLY_TOOLS = frozenset({"clarify", "unsupported"})
 
+# Cloud + local: coach voice via LocalRendererPromptBuilder (facts → short trainer text).
+_COACH_RENDERER_BACKENDS = frozenset(
+    {"ollama", "local", "qwen", "dashscope", "openai", "openai_compatible", "groq"}
+)
+_COACH_CLOUD_BACKENDS = frozenset(
+    {"qwen", "dashscope", "openai", "openai_compatible", "groq"}
+)
+
+
+def _uses_coach_renderer(backend: str) -> bool:
+    """True when replies go through LocalRenderer (persona + FACTS), not free Agent prose."""
+    return (backend or "").strip().lower() in _COACH_RENDERER_BACKENDS
+
 
 def _sanity_blocks_explain(ai_context) -> bool:
     """Если Deck Sanity не пройден — не даём LLM оправдывать колоду игрока.
@@ -122,10 +135,15 @@ def _force_planner_first(backend: str, provider: LLMProvider | None) -> bool:
     caps = _runtime_capabilities(backend, provider)
     if not caps.supports_agent_loop:
         return True
+    key = (backend or "").strip().lower()
     # Local with tools disabled → planner-first.
-    if (backend or "").strip().lower() in {"ollama", "local"}:
+    if key in {"ollama", "local"}:
         if not caps.supports_tools:
             return True
+    # Cloud auto: same coach path as Ollama (planner → tools → LocalRenderer).
+    # Explicit GHOSTEEK_AI_MODE=agent still allows Agent (see _resolve_runtime_mode).
+    if key in _COACH_CLOUD_BACKENDS:
+        return _configured_mode() in {MODE_AUTO, ""}
     return False
 
 
@@ -195,8 +213,7 @@ def _successful_tool_results(results: list) -> list:
 def _make_renderer(backend: str, provider: LLMProvider | None):
     """Response generator bound to the request provider (shared session/config).
 
-    Local Ollama → facts-only LocalRendererPromptBuilder (voice layer).
-    Cloud Qwen/Groq → default PromptBuilder (Agent Mode uses its own builder).
+    Coach backends (Ollama + cloud Qwen/Groq) → LocalRendererPromptBuilder (voice layer).
     """
     from bot.services.ghosteek_ai.generator.llm_generator import (
         OllamaResponseGenerator,
@@ -210,8 +227,11 @@ def _make_renderer(backend: str, provider: LLMProvider | None):
             provider=provider,
             prompt_builder=LocalRendererPromptBuilder(),
         )
-    if key in {"qwen", "dashscope", "openai", "openai_compatible", "groq"}:
-        return QwenResponseGenerator(provider=provider) if provider else QwenResponseGenerator()
+    if key in _COACH_CLOUD_BACKENDS:
+        return QwenResponseGenerator(
+            provider=provider,
+            prompt_builder=LocalRendererPromptBuilder(),
+        )
     return get_response_generator(key)
 
 
@@ -275,7 +295,11 @@ async def _run_planner_fallback(
     # Прочие no-tool планы — только template.
     if not plan.tools:
         intent_l = str(intent or "").strip().lower()
-        if backend in {"ollama", "local"} and intent_l == "chat" and provider is not None:
+        if (
+            _uses_coach_renderer(backend)
+            and intent_l == "chat"
+            and provider is not None
+        ):
             from bot.services.ghosteek_ai.llm.local_renderer import (
                 attach_conversational_facts,
                 attach_render_facts,
@@ -328,13 +352,13 @@ async def _run_planner_fallback(
                 can_reuse_last_facts_for_followup,
             )
 
-            if backend in {"ollama", "local"} and can_reuse_last_facts_for_followup(
+            if _uses_coach_renderer(backend) and can_reuse_last_facts_for_followup(
                 ai_context
             ):
                 attach_render_facts(ai_context)
                 meta["tool_success"] = False
                 meta["followup_reuse_facts"] = True
-            elif backend in {"ollama", "local"} and (
+            elif _uses_coach_renderer(backend) and (
                 can_render_conversational(ai_context)
                 or can_render_capability_clarify(ai_context)
             ):
@@ -381,7 +405,7 @@ async def _run_planner_fallback(
     # LLM = renderer only (no tool schemas → cannot invent tool calls as primary path).
     try:
         render_kwargs: dict[str, Any] = {}
-        if backend in {"ollama", "local"}:
+        if _uses_coach_renderer(backend):
             from bot.services.ghosteek_ai.llm.local_renderer import (
                 attach_render_facts,
                 renderer_generate_kwargs,
@@ -393,7 +417,8 @@ async def _run_planner_fallback(
             render_kwargs = renderer_generate_kwargs(
                 conversational=bool(
                     meta.get("conversational") or meta.get("capability_clarify")
-                )
+                ),
+                backend=backend,
             )
         generator = _make_renderer(backend, provider)
         agenerate = getattr(generator, "agenerate", None)
@@ -477,9 +502,37 @@ async def _run_agent_mode(
         meta["used_backend"] = provider.name
         meta["agent_rounds"] = result.rounds
         meta["used_tool_calling"] = result.used_tool_calling
+
+        # Coach voice parity: after tools, re-render via LocalRenderer (not free Agent prose).
+        text = result.text
+        if _uses_coach_renderer(backend) and result.tool_names:
+            try:
+                from bot.services.ghosteek_ai.llm.local_renderer import (
+                    attach_render_facts,
+                    renderer_generate_kwargs,
+                )
+
+                attach_render_facts(ai_context)
+                generator = _make_renderer(backend, provider)
+                agenerate = getattr(generator, "agenerate", None)
+                if agenerate is not None:
+                    voiced = await agenerate(
+                        ai_context,
+                        tools=None,
+                        **renderer_generate_kwargs(backend=backend),
+                    )
+                    if isinstance(voiced, str) and voiced.strip():
+                        text = voiced
+                        meta["renderer_invoked"] = True
+            except Exception:
+                logger.warning(
+                    "ghosteek_ai agent LocalRenderer re-voice failed; keeping agent text",
+                    exc_info=True,
+                )
+
         logger.info(
             "ghosteek_ai mode=%s llm_backend=%s used_backend=%s response_time_ms=%s "
-            "agent_rounds=%s used_tool_calling=%s tools=%s",
+            "agent_rounds=%s used_tool_calling=%s tools=%s renderer_invoked=%s",
             MODE_AGENT,
             meta["llm_backend"],
             meta["used_backend"],
@@ -487,8 +540,9 @@ async def _run_agent_mode(
             result.rounds,
             result.used_tool_calling,
             result.tool_names,
+            meta.get("renderer_invoked", False),
         )
-        return result.text, result.tool_names, meta
+        return text, result.tool_names, meta
     except Exception as exc:
         reason = f"agent_failed: {type(exc).__name__}: {exc}"
         logger.warning(
@@ -519,8 +573,8 @@ async def ask_ghosteek_ai(
     Orchestrator:
 
     Conversation → Intent → Plan (INTENT_TOOL_MAP)
-      → local qwen3:8b / planner: ToolCaller(plan) → (ok ToolResult) → LLM renderer
-      → cloud Agent: PromptBuilder → LLM tool_calls → … → Safety
+      → coach backends (Ollama / Qwen / Groq): ToolCaller(plan) → (ok ToolResult) → LocalRenderer
+      → explicit Agent mode: PromptBuilder → LLM tool_calls → LocalRenderer re-voice → Safety
       → tool fail / clarify / unsupported: Template only (no LLM)
     """
     session = ConversationManager.get_or_create(user.telegram_id)

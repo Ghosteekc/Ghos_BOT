@@ -96,13 +96,13 @@ def test_runtime_mode_ollama_qwen3_8b_always_planner():
     assert svc._is_local_renderer_first("ollama", provider) is True
 
 
-def test_runtime_mode_cloud_groq_stays_agent():
+def test_runtime_mode_cloud_groq_coach_planner():
     from bot.services.ghosteek_ai import service as svc
 
     caps = resolve_cloud_capabilities(enable_tools=True)
     assert caps.supports_agent_loop is True
     assert caps.supports_tools is True
-    assert caps.supports_renderer is False
+    assert caps.supports_renderer is True
 
     provider = MagicMock()
     provider.capabilities.return_value = caps
@@ -110,10 +110,11 @@ def test_runtime_mode_cloud_groq_stays_agent():
     provider.config = LLMConfig(provider="groq", model="llama-3.3-70b", extra={"enable_tools": True})
 
     with patch.object(svc, "_configured_mode", return_value="auto"):
-        assert svc._resolve_runtime_mode(provider, backend="groq") == "agent"
+        assert svc._resolve_runtime_mode(provider, backend="groq") == "planner"
+        assert svc._force_planner_first("groq", provider) is True
     with patch.object(svc, "_configured_mode", return_value="agent"):
         assert svc._resolve_runtime_mode(provider, backend="groq") == "agent"
-    assert svc._force_planner_first("groq", provider) is False
+        assert svc._force_planner_first("groq", provider) is False
 
 
 def test_qwen_cloud_provider_capabilities():
@@ -127,7 +128,7 @@ def test_qwen_cloud_provider_capabilities():
     caps = provider.capabilities()
     assert caps.supports_tools is True
     assert caps.supports_agent_loop is True
-    assert caps.supports_renderer is False
+    assert caps.supports_renderer is True
 
 
 def test_profile_matching_not_single_hardcoded_string():

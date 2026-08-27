@@ -13,7 +13,6 @@ from bot.services.ghosteek_ai.llm.local_renderer import (
     find_ungrounded_card_mentions,
     ground_local_renderer_text,
 )
-from bot.services.ghosteek_ai.llm.prompt_builder import PromptBuilder
 from bot.services.ghosteek_ai.safety.layer import SafetyLayer
 from bot.services.ghosteek_ai.safety.local_renderer_validator import (
     LOCAL_RENDERER_INVALID_FALLBACK,
@@ -186,7 +185,8 @@ def test_safety_local_grounding_blocks_wizard():
     assert out != LOCAL_RENDERER_INVALID_FALLBACK
 
 
-def test_cloud_agent_prompt_not_local_renderer():
+def test_cloud_coach_uses_local_renderer():
+    """Cloud Qwen/Groq use the same LocalRenderer voice layer as Ollama."""
     from bot.services.ghosteek_ai import service as svc
     from bot.services.ghosteek_ai.generator.llm_generator import QwenResponseGenerator
     from bot.services.ghosteek_ai.llm.base import LLMConfig
@@ -197,22 +197,27 @@ def test_cloud_agent_prompt_not_local_renderer():
 
     gen = svc._make_renderer("groq", provider)
     assert isinstance(gen, QwenResponseGenerator)
-    assert not isinstance(gen.prompt_builder, LocalRendererPromptBuilder)
-    assert isinstance(gen.prompt_builder, PromptBuilder)
-    sys_msgs = gen.prompt_builder.build_system()
-    assert SYSTEM_PROMPT.split("\n")[0] in sys_msgs[0].content
+    assert isinstance(gen.prompt_builder, LocalRendererPromptBuilder)
+
+    qwen = svc._make_renderer("qwen", provider)
+    assert isinstance(qwen.prompt_builder, LocalRendererPromptBuilder)
 
     local = svc._make_renderer("ollama", provider)
     assert isinstance(local.prompt_builder, LocalRendererPromptBuilder)
 
 
-def test_resolve_groq_still_agent():
+def test_resolve_groq_auto_planner_agent_explicit():
+    """Cloud auto → planner+LocalRenderer; explicit mode=agent still Agent."""
     from bot.services.ghosteek_ai import service as svc
 
     provider = MagicMock()
     provider.supports_tools.return_value = True
     with patch.object(svc, "_configured_mode", return_value="auto"):
+        assert svc._resolve_runtime_mode(provider, backend="groq") == "planner"
+        assert svc._force_planner_first("groq", provider) is True
+    with patch.object(svc, "_configured_mode", return_value="agent"):
         assert svc._resolve_runtime_mode(provider, backend="groq") == "agent"
+        assert svc._force_planner_first("groq", provider) is False
 
 
 def test_recommendation_no_swap_facts_and_style():

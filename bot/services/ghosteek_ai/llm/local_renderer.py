@@ -983,17 +983,40 @@ def can_reuse_last_facts_for_followup(ctx: AIContext) -> bool:
     return bool(facts or cards)
 
 
-def renderer_generate_kwargs(*, conversational: bool = False) -> dict[str, Any]:
-    """Параметры Ollama /api/chat для local renderer.
+def renderer_generate_kwargs(
+    *,
+    conversational: bool = False,
+    backend: str = "",
+) -> dict[str, Any]:
+    """Параметры генерации для LocalRenderer (Ollama и cloud Qwen/Groq).
 
     think всегда False на этом пути — не генерировать reasoning (не просто скрывать).
     """
     from bot.config import settings
 
     temp = RENDERER_TEMPERATURE_CHAT if conversational else RENDERER_TEMPERATURE
-    configured = int(
-        getattr(settings, "ollama_num_ctx", 0) or 0
-    )
+    key = (backend or "").strip().lower()
+    cloud = key in {
+        "qwen",
+        "dashscope",
+        "openai",
+        "openai_compatible",
+        "groq",
+    }
+
+    if cloud:
+        # Coach voice temps (not low cloud defaults); max_tokens from LLM_* with floor.
+        max_tokens = int(
+            getattr(settings, "llm_max_tokens", 0) or 0
+        ) or RENDERER_NUM_PREDICT
+        max_tokens = max(max_tokens, RENDERER_NUM_PREDICT)
+        return {
+            "temperature": float(temp),
+            "max_tokens": max_tokens,
+            "think": False,
+        }
+
+    configured = int(getattr(settings, "ollama_num_ctx", 0) or 0)
     if conversational:
         num_ctx = configured or RENDERER_NUM_CTX_CHAT
     else:

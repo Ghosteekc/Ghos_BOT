@@ -119,13 +119,13 @@ def resolve_local_ollama_capabilities(
 
 
 def resolve_cloud_capabilities(*, enable_tools: bool = True) -> LLMCapabilities:
-    """Cloud Qwen/Groq — Agent Mode compatible."""
+    """Cloud Qwen/Groq — tools + coach LocalRenderer (agent_loop optional via mode=agent)."""
     return LLMCapabilities(
         tools=bool(enable_tools),
         stream=False,
         json_mode=False,
         agent_loop=bool(enable_tools),
-        renderer=False,
+        renderer=True,
     )
 
 

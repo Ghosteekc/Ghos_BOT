@@ -27,17 +27,20 @@ def test_ollama_supports_tools_from_config():
     ).supports_tools() is True
 
 
-def test_resolve_runtime_mode_auto_agent_when_tools():
+def test_resolve_runtime_mode_cloud_auto_planner_agent_explicit():
     from bot.services.ghosteek_ai import service as svc
     from bot.services.ghosteek_ai.llm.base import LLMCapabilities
 
     provider = MagicMock()
     provider.supports_tools.return_value = True
     provider.capabilities.return_value = LLMCapabilities(
-        tools=True, agent_loop=True, renderer=False
+        tools=True, agent_loop=True, renderer=True
     )
     provider.config = MagicMock(extra={"enable_tools": True}, model="llama")
     with patch.object(svc, "_configured_mode", return_value="auto"):
+        assert svc._resolve_runtime_mode(provider, backend="groq") == "planner"
+
+    with patch.object(svc, "_configured_mode", return_value="agent"):
         assert svc._resolve_runtime_mode(provider, backend="groq") == "agent"
 
     provider.supports_tools.return_value = False
