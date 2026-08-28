@@ -81,6 +81,12 @@ def _title_font(size: int) -> ImageFont.ImageFont:
 
 
 def _elixir_font(size: int) -> ImageFont.ImageFont:
+    # Bundled font first — Railway/Linux often has no arial/dejavu (load_default = tiny digits).
+    if _TITLE_FONT_PATH.exists():
+        try:
+            return ImageFont.truetype(str(_TITLE_FONT_PATH), size=size)
+        except OSError:
+            pass
     for name in (
         "C:/Windows/Fonts/ariblk.ttf",
         "C:/Windows/Fonts/arialbd.ttf",
@@ -91,7 +97,7 @@ def _elixir_font(size: int) -> ImageFont.ImageFont:
             return ImageFont.truetype(name, size=size)
         except OSError:
             continue
-    return ImageFont.load_default()
+    return _font(size)
 
 
 def _absolute_url(url: str) -> str:
@@ -244,7 +250,7 @@ def _draw_elixir_drop_at(canvas: Image.Image, origin: tuple[int, int], elixir: i
     body.paste(fill, (0, 0), mask)
     layer.alpha_composite(body, dest=(pad, pad))
 
-    font = _elixir_font(30)
+    font = _elixir_font(40)
     num = str(elixir)
     draw = ImageDraw.Draw(layer)
     cx = pad + drop_w / 2
