@@ -449,6 +449,7 @@ class WinrateEntry(BaseModel):
     losses: int
     total: int
     winrate: float
+    last_seen: str | None = None
 
 
 class DeckEntry(BaseModel):

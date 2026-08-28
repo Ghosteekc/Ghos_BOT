@@ -2,6 +2,8 @@
 
 Правило замены: если уже 10 колод и появляется новая сыгранная —
 вытесняется слот с наименьшим числом боёв (при равенстве — самый старый last_seen).
+
+Порядок в списке: **сначала недавно сыгранные** (`last_seen` desc).
 """
 
 from __future__ import annotations
@@ -313,10 +315,15 @@ async def sync_tracked_mine_decks(
                 await ensure_slot(key, names, seen, rich if rich and len(rich) == 8 else None)
 
             if profile_key:
+                profile_seen = ""
+                for sk, _names, seen, _parsed in sightings:
+                    if sk == profile_key:
+                        profile_seen = seen
+                        break
                 await ensure_slot(
                     profile_key,
                     profile_names,
-                    sightings[0][2] if sightings else "",
+                    profile_seen,
                     profile_deck,
                 )
 
@@ -331,11 +338,18 @@ async def sync_tracked_mine_decks(
                     if len(names) == 8:
                         _touch_existing(slot, names, slot.last_seen or "", dc)
 
-            # Bootstrap: если слотов нет — заполнить топом из истории
+            # Bootstrap: если слотов нет — заполнить топом из истории (сначала недавно сыгранные)
             if not by_key and winrates:
-                for key, data in list(winrates.items())[:MAX_MINE_DECKS]:
+                keys_by_recency = sorted(
+                    winrates.keys(),
+                    key=lambda k: (winrates[k].get("last_seen") or "", winrates[k].get("total") or 0),
+                    reverse=True,
+                )
+                for key in keys_by_recency[:MAX_MINE_DECKS]:
+                    data = winrates[key]
                     cards = list(data.get("cards") or key.split("|"))
-                    await ensure_slot(key, cards, "", data.get("deck_cards"))
+                    seen = data.get("last_seen") or ""
+                    await ensure_slot(key, cards, seen, data.get("deck_cards"))
 
             try:
                 await session.commit()
@@ -359,8 +373,10 @@ async def sync_tracked_mine_decks(
         stats = winrates.get(slot.deck_key)
         cards_from_csv = [c for c in (slot.cards_csv or "").split(",") if c]
         stored_cards = parse_deck_cards_json(getattr(slot, "cards_json", None))
+        last_seen = slot.last_seen or (stats or {}).get("last_seen") or ""
         if stats:
             row = dict(stats)
+            row["last_seen"] = last_seen
             combined = _combine_deck_cards(
                 row.get("deck_cards") or [],
                 stored_cards,
@@ -373,23 +389,9 @@ async def sync_tracked_mine_decks(
             out.append(row)
         else:
             cards = cards_from_csv or slot.deck_key.split("|")
-            out.append(_empty_stats(cards, stored_cards or None))
+            out.append({**_empty_stats(cards, stored_cards or None), "last_seen": last_seen})
 
-    # Текущая колода профиля — первой, если есть в списке
-    if profile_key:
-        pinned = [r for r in out if deck_fingerprint(r.get("cards") or []) == profile_key]
-        rest = [r for r in out if deck_fingerprint(r.get("cards") or []) != profile_key]
-        if pinned:
-            pinned[0] = {
-                **pinned[0],
-                "cards": profile_names,
-                "deck_cards": _combine_deck_cards(
-                    profile_deck,
-                    pinned[0].get("deck_cards") or [],
-                ),
-            }
-            out = pinned + rest
-
+    out.sort(key=lambda row: row.get("last_seen") or "", reverse=True)
     return out[:MAX_MINE_DECKS]
 
 

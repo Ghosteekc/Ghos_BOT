@@ -695,6 +695,7 @@ async def deck_winrates(user: User = Depends(require_linked_player)) -> list[Win
             losses=data["losses"],
             total=data["total"],
             winrate=data["winrate"],
+            last_seen=data.get("last_seen") or None,
         ))
     return result
 

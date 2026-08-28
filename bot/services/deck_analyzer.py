@@ -183,6 +183,7 @@ def calculate_deck_winrates(battles: list[dict], player_tag: str) -> dict[str, d
 
     deck_results: dict[str, list[bool]] = {}
     deck_variants: dict[str, list[list[dict]]] = {}
+    deck_last_seen: dict[str, str] = {}
 
     for battle in battles:
         battle_type = battle.get("type") or "PvP"
@@ -218,6 +219,11 @@ def calculate_deck_winrates(battles: list[dict], player_tag: str) -> dict[str, d
         if not deck_key:
             continue
 
+        bt = str(battle.get("battleTime") or battle.get("battle_time") or "")
+        prev_seen = deck_last_seen.get(deck_key, "")
+        if bt and bt >= prev_seen:
+            deck_last_seen[deck_key] = bt
+
         won = team.get("crowns", 0) > opponent.get("crowns", 0)
         deck_results.setdefault(deck_key, []).append(won)
         deck_variants.setdefault(deck_key, []).append(parsed)
@@ -246,6 +252,7 @@ def calculate_deck_winrates(battles: list[dict], player_tag: str) -> dict[str, d
             "losses": total - wins,
             "total": total,
             "winrate": round(wins / total * 100, 1) if total else 0,
+            "last_seen": deck_last_seen.get(deck_key, ""),
         }
 
     return dict(sorted(winrates.items(), key=lambda x: x[1]["total"], reverse=True))
