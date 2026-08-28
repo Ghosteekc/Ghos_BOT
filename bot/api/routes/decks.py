@@ -190,27 +190,18 @@ def _apply_profile_deck_to_winrates(
     if len(profile_deck) != 8:
         return winrates
     key = "|".join(sorted(c["name"] for c in profile_deck))
-    if key in winrates:
-        row = dict(winrates[key])
-        row["cards"] = [c["name"] for c in profile_deck]
-        existing = row.get("deck_cards") or []
-        row["deck_cards"] = (
-            or_merge_modes_onto(profile_deck, [profile_deck, existing])
-            if existing
-            else profile_deck
-        )
-        rest = {k: v for k, v in winrates.items() if k != key}
-        return {key: row, **rest}
-    # Profile deck not in recent battles — still show it first with zero stats.
-    stub = {
-        "cards": [c["name"] for c in profile_deck],
-        "deck_cards": profile_deck,
-        "wins": 0,
-        "losses": 0,
-        "total": 0,
-        "winrate": 0.0,
-    }
-    return {key: stub, **winrates}
+    if key not in winrates or int(winrates[key].get("total") or 0) <= 0:
+        return winrates
+    row = dict(winrates[key])
+    row["cards"] = [c["name"] for c in profile_deck]
+    existing = row.get("deck_cards") or []
+    row["deck_cards"] = (
+        or_merge_modes_onto(profile_deck, [profile_deck, existing])
+        if existing
+        else profile_deck
+    )
+    rest = {k: v for k, v in winrates.items() if k != key}
+    return {key: row, **rest}
 
 
 async def _cards_to_deck_infos(cards: list[str]) -> list[DeckCardInfo]:

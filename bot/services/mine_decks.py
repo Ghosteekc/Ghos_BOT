@@ -4,6 +4,7 @@
 вытесняется слот с наименьшим числом боёв (при равенстве — самый старый last_seen).
 
 Порядок в списке: **сначала недавно сыгранные** (`last_seen` desc).
+currentDeck профиля без боёв в список не добавляется.
 """
 
 from __future__ import annotations
@@ -206,6 +207,7 @@ async def sync_tracked_mine_decks(
     tag = normalize_tag(user.player_tag)
     winrates = await _load_full_winrates(tag, live_battles)
     sightings = _recent_deck_sightings(live_battles or [], tag)
+    sighting_keys = {key for key, _names, _seen, _parsed in sightings}
 
     # Profile current deck — тоже «сыгранная» опора
     profile_key: str | None = None
@@ -214,7 +216,7 @@ async def sync_tracked_mine_decks(
         profile_names = [c["name"] for c in profile_deck if c.get("name")]
         if len(profile_names) == 8:
             profile_key = deck_fingerprint(profile_names)
-            if profile_key in winrates:
+            if profile_key in winrates and int(winrates[profile_key].get("total") or 0) > 0:
                 row = dict(winrates[profile_key])
                 row["cards"] = profile_names
                 # OR profile modes onto battle-derived cards (never wipe evo from history)
@@ -223,8 +225,6 @@ async def sync_tracked_mine_decks(
                     row.get("deck_cards") or [],
                 )
                 winrates[profile_key] = row
-            else:
-                winrates[profile_key] = _empty_stats(profile_names, profile_deck)
 
     async with _lock_for_user(user.id):
         async with async_session() as session:
@@ -314,18 +314,34 @@ async def sync_tracked_mine_decks(
                 rich = parsed if len(parsed) == 8 else (winrates.get(key) or {}).get("deck_cards")
                 await ensure_slot(key, names, seen, rich if rich and len(rich) == 8 else None)
 
-            if profile_key:
+            if profile_key and battle_count(profile_key) > 0:
                 profile_seen = ""
                 for sk, _names, seen, _parsed in sightings:
                     if sk == profile_key:
                         profile_seen = seen
                         break
+                if not profile_seen:
+                    profile_seen = str((winrates.get(profile_key) or {}).get("last_seen") or "")
                 await ensure_slot(
                     profile_key,
                     profile_names,
                     profile_seen,
                     profile_deck,
                 )
+
+            # Убрать слоты без боёв (старый pin currentDeck / сборка без лестницы)
+            for key, slot in list(by_key.items()):
+                if battle_count(key) > 0 or key in sighting_keys or key in protected:
+                    continue
+                logger.info(
+                    "Mine decks: drop never-played slot %s for user_id=%s",
+                    key,
+                    user.id,
+                )
+                del by_key[key]
+                await session.delete(slot)
+            if by_key:
+                await session.flush()
 
             # Подтянуть evo/hero из winrates в уже существующие слоты
             for key, slot in list(by_key.items()):
@@ -342,11 +358,16 @@ async def sync_tracked_mine_decks(
             if not by_key and winrates:
                 keys_by_recency = sorted(
                     winrates.keys(),
-                    key=lambda k: (winrates[k].get("last_seen") or "", winrates[k].get("total") or 0),
+                    key=lambda k: (
+                        winrates[k].get("last_seen") or "",
+                        int(winrates[k].get("total") or 0),
+                    ),
                     reverse=True,
                 )
                 for key in keys_by_recency[:MAX_MINE_DECKS]:
                     data = winrates[key]
+                    if int(data.get("total") or 0) <= 0:
+                        continue
                     cards = list(data.get("cards") or key.split("|"))
                     seen = data.get("last_seen") or ""
                     await ensure_slot(key, cards, seen, data.get("deck_cards"))
@@ -391,7 +412,12 @@ async def sync_tracked_mine_decks(
             cards = cards_from_csv or slot.deck_key.split("|")
             out.append({**_empty_stats(cards, stored_cards or None), "last_seen": last_seen})
 
-    out.sort(key=lambda row: row.get("last_seen") or "", reverse=True)
+    out.sort(
+        key=lambda row: (row.get("last_seen") or "", int(row.get("total") or 0)),
+        reverse=True,
+    )
+    # Safety: never surface never-played profile stubs.
+    out = [row for row in out if int(row.get("total") or 0) > 0]
     return out[:MAX_MINE_DECKS]
 
 
