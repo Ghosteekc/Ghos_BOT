@@ -36,9 +36,9 @@ NAMES = [
 
 
 def test_elixir_font_uses_bundled_truetype_not_bitmap_default():
-    font = _elixir_font(40)
+    font = _elixir_font(34)
     bbox = font.getbbox("4")
-    assert bbox[3] - bbox[1] >= 24
+    assert bbox[3] - bbox[1] >= 18
 
 
 def test_collage_uses_restored_cache_modes():

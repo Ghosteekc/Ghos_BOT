@@ -250,7 +250,7 @@ def _draw_elixir_drop_at(canvas: Image.Image, origin: tuple[int, int], elixir: i
     body.paste(fill, (0, 0), mask)
     layer.alpha_composite(body, dest=(pad, pad))
 
-    font = _elixir_font(40)
+    font = _elixir_font(34)
     num = str(elixir)
     draw = ImageDraw.Draw(layer)
     cx = pad + drop_w / 2
