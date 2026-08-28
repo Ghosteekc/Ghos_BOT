@@ -3,6 +3,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 from bot.services.weekly_digest import (
+    current_week,
     iso_week_key,
     previous_completed_week,
     seconds_until_digest_wake,
@@ -89,3 +90,16 @@ def test_wake_monday_morning_until_11():
 def test_wake_during_send_window_hourly():
     assert seconds_until_digest_wake(_msk(2026, 8, 17, 11, 5)) == 3600.0
     assert seconds_until_digest_wake(_msk(2026, 8, 18, 14)) == 3600.0
+
+
+def test_current_week_is_monday_through_today():
+    window = current_week(_msk(2026, 8, 28, 18, 48))
+    assert window.start == date(2026, 8, 24)
+    assert window.end == date(2026, 8, 28)
+    assert window.week_key == iso_week_key(date(2026, 8, 28))
+
+
+def test_current_week_on_monday_is_single_day():
+    window = current_week(_msk(2026, 8, 24, 9, 0))
+    assert window.start == date(2026, 8, 24)
+    assert window.end == date(2026, 8, 24)

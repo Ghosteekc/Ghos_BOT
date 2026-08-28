@@ -75,7 +75,7 @@ async def cmd_help(message: Message) -> None:
         "/unlink — отвязать аккаунт Clash Royale от этого Telegram\n"
         "/cancel — отменить ввод тега (во время /link)\n"
         "/profile — ваш профиль\n"
-        "/digest — превью недельной сводки в чат\n\n"
+        "/digest — превью сводки за текущую неделю (пн–сегодня)\n\n"
         "Кнопка «📝 Регистрация» — то же, что /link: бот попросит тег игрока.\n\n"
         "<b>Ghosteek AI</b> — кнопка «⚡Ghosteek AI» (сразу чат с тренером).\n"
         "<b>Анализ и статистика</b> — Mini App: Menu Button «Ghosteek» "

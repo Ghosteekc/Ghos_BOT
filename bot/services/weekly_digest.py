@@ -95,6 +95,18 @@ def previous_completed_week(now: datetime | None = None) -> WeekWindow:
     return week_bounds(iso_week_key(last_sunday))
 
 
+def current_week(now: datetime | None = None) -> WeekWindow:
+    """Текущая ISO-неделя (пн–сегодня, МСК). Для /digest в середине недели."""
+    now = now or now_msk()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=now_msk().tzinfo)
+    else:
+        now = now.astimezone(now_msk().tzinfo)
+    today = now.date()
+    start = today - timedelta(days=today.isoweekday() - 1)
+    return WeekWindow(week_key=iso_week_key(today), start=start, end=today)
+
+
 def target_week_for_now(now: datetime | None = None) -> WeekWindow | None:
     """Понедельник с 11:00 МСК → прошедшая ISO-неделя (пн–вс); вт–ср — догон."""
     now = now or now_msk()
@@ -675,16 +687,16 @@ async def send_digest_to_user(
 
 
 async def send_digest_preview(bot: Bot, user: User) -> tuple[bool, str]:
-    """Force-send previous completed week digest without marking as delivered."""
+    """Force-send current week digest (Mon–today) without marking as delivered."""
     if not user.player_tag:
         return False, "Сначала привяжите тег: /link #ВАШТЕГ"
     await ensure_cards_loaded()
-    window = previous_completed_week()
+    window = current_week()
     ok = await send_digest_to_user(bot, user, window, force=True, mark=False)
     if ok:
         return True, ""
     return False, (
-        f"За предыдущую неделю {window.start.strftime('%d.%m')}–{window.end.strftime('%d.%m')} "
+        f"За эту неделю {window.start.strftime('%d.%m')}–{window.end.strftime('%d.%m')} "
         "в кеше нет боёв — сыграйте на лестнице или дождитесь синхронизации."
     )
 
