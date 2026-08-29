@@ -60,11 +60,12 @@ async def cmd_test_invite(message: Message) -> None:
             bot_username=bot_username,
         )
 
+    link = result.link
     await message.answer(
         f"🧪 <b>Ссылка для бета-тестера</b>\n\n"
         f"Срок: <b>{days}</b> дн. Ghosteek Pro\n"
         f"Одноразовая — после перехода аннулируется.\n\n"
-        f"<code>{result.link}</code>"
+        f'<a href="{link}">{link}</a>'
     )
 
 
