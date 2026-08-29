@@ -39,8 +39,26 @@ TOWER_CHIP_SUPPORT = frozenset({
     "Princess", "Dart Goblin", "Firecracker", "Magic Archer", "Flying Machine",
 })
 
-# Mini-tank без реального урона по башням (кайт).
-_DEFENSIVE_MINI_TANKS = frozenset({"Ice Golem"})
+# Mini-tank без реального урона по башням (кайт / деф).
+_DEFENSIVE_MINI_TANKS = frozenset({"Ice Golem", "Berserker"})
+
+# Тяжёлый танк beatdown — за ним едет air-support, который реально добивает башни.
+_BEATDOWN_TANKS = frozenset({
+    "Golem",
+    "Lava Hound",
+    "Giant",
+    "Electro Giant",
+    "Goblin Giant",
+    "Elixir Golem",
+})
+_BEATDOWN_AIR_SUPPORT = frozenset({
+    "Electro Dragon",
+    "Baby Dragon",
+    "Night Witch",
+    "Mega Minion",
+    "Inferno Dragon",
+    "Skeleton Dragons",
+})
 
 
 # TODO(card-profile): AIR_CARDS / SPLASH_CARDS дублируют CardProfile roles — не удалять.
@@ -153,12 +171,22 @@ def _damage_score(
         score += 5.0 + 0.5 * min(crowns, 3)
 
     synergies = deck
+    # Air-support за beatdown-танком — реальная угроза башням (не «просто сплеш»).
+    if card in _BEATDOWN_AIR_SUPPORT and (set(synergies) & _BEATDOWN_TANKS):
+        score = max(score, 8.2)
+
     if card == "Balloon" and "Lumberjack" in synergies:
         score += 2.0
     if card == "Hog Rider" and any(c in synergies for c in ("Ice Golem", "Ice Spirit")):
         score += 1.5
     if card == "Golem" and "Night Witch" in synergies:
         score += 2.0
+    if card == "Golem" and "Electro Dragon" in synergies:
+        score += 1.5
+    if card == "Electro Dragon" and "Golem" in synergies:
+        score += 1.5
+    if card == "Baby Dragon" and "Golem" in synergies:
+        score += 1.0
     if card == "Princess" and any(
         c in synergies for c in ("Royal Giant", "Hog Rider", "Goblin Barrel")
     ):
