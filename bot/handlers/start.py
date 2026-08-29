@@ -5,6 +5,7 @@ from aiogram.types import Message
 
 from bot.keyboards.menus import main_menu
 from bot.models.database import async_session
+from bot.services.beta_invite import parse_beta_payload, redeem_beta_invite
 from bot.services.clash_api import SubscriptionService
 from bot.services.referral.service import parse_referral_payload, process_referral_conversion
 from bot.services.weekly_digest import send_digest_preview
@@ -20,10 +21,38 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         return
     logger.info("User %s started the bot (args=%r)", message.from_user.id, command.args)
 
-    referrer_tg = parse_referral_payload(command.args)
+    beta_token = parse_beta_payload(command.args)
+    referrer_tg = None if beta_token else parse_referral_payload(command.args)
+
     async with async_session() as session:
         sub_service = SubscriptionService(session)
         user, created = await sub_service.get_or_create_user_ex(message.from_user.id)
+
+    beta_note = ""
+    if beta_token:
+        async with async_session() as session:
+            sub_service = SubscriptionService(session)
+            tester, _ = await sub_service.get_or_create_user_ex(message.from_user.id)
+            redeem = await redeem_beta_invite(session, user=tester, token=beta_token)
+        if redeem.ok:
+            beta_note = (
+                f"\n\n🧪 <b>Бета-доступ активирован на {redeem.days} дн.</b>\n"
+                "Откройте приложение через Menu Button «Ghosteek»."
+            )
+            logger.info(
+                "Beta invite ok: user=%s days=%s",
+                message.from_user.id,
+                redeem.days,
+            )
+        elif redeem.reason == "already_used":
+            beta_note = "\n\n⚠️ Эта бета-ссылка уже использована."
+        else:
+            beta_note = "\n\n⚠️ Бета-ссылка недействительна или устарела."
+            logger.info(
+                "Beta invite failed: user=%s reason=%s",
+                message.from_user.id,
+                redeem.reason,
+            )
 
     if referrer_tg is not None:
         async with async_session() as session:
@@ -61,6 +90,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         "Для начала нажмите «📝 Регистрация» или отправьте тег:\n"
         "<code>/link #ВАШТЕГ</code>\n\n"
         f"{'✅ Тег привязан: ' + user.player_tag if user.player_tag else '❌ Тег не привязан'}"
+        f"{beta_note}"
     )
     await message.answer(text, reply_markup=main_menu())
 

@@ -307,6 +307,23 @@ class CreditTransaction(Base):
     )
 
 
+class BetaInvite(Base):
+    """One-time admin invite link that grants Pro (beta tester) for N days."""
+
+    __tablename__ = "beta_invites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    days: Mapped[int] = mapped_column(Integer)
+    created_by_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_by_telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    used_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
 class MetaBattleObservation(Base):
     """One unique ladder battle observation from a scanned player's battlelog."""
 
