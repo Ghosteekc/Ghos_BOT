@@ -81,6 +81,35 @@ def test_template_build_presents_complete_deck():
     assert "закрой" not in low
 
 
+def test_template_build_mentions_all_requested_core_cards():
+    deck = [
+        "Valkyrie",
+        "Hog Rider",
+        "Fire Spirit",
+        "Skeletons",
+        "Hunter",
+        "Fireball",
+        "The Log",
+        "Firecracker",
+    ]
+    text = template_build_deck({
+        "core": ["Valkyrie", "Hog Rider"],
+        "decks": [{
+            "name": "Cycle",
+            "archetype": "Cycle",
+            "cards": deck,
+        }],
+        "mode": "freeform_anchor",
+    })
+    low = text.lower().replace("ё", "е")
+    assert "валькир" in low
+    assert "хог" in low or "наездник" in low
+    assert "вокруг" in low
+    # Не акцентируем только одну карту местоимением «под неё».
+    assert "под неё" not in low
+    assert "все запрошенные" in low or "под них" in low
+
+
 def test_template_analyze_blocks_play_plan_on_fail():
     text = template_analyze_deck({
         "recommendation": {

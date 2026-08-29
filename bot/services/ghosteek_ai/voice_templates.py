@@ -22,7 +22,31 @@ from bot.services.ghosteek_ai.voice import assert_coach_voice, coach_reply
 
 
 def _ru_list(cards: list[str], *, limit: int = 4) -> str:
-    return ", ".join(card_name_ru(c, short=True) for c in cards[:limit])
+    names = [card_name_ru(c, short=True) for c in cards[:limit] if c]
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} и {names[1]}"
+    return ", ".join(names[:-1]) + f" и {names[-1]}"
+
+
+def _core_names(data: dict[str, Any], *, limit: int = 4) -> list[str]:
+    raw = data.get("core") or []
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            out.append(item.strip())
+        elif isinstance(item, dict):
+            name = item.get("name") or item.get("card")
+            if isinstance(name, str) and name.strip():
+                out.append(name.strip())
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _first(*candidates: Any) -> str:
@@ -87,15 +111,15 @@ def _template_sanity_fail(sanity: dict[str, Any], *, intent: str, arch: str | No
 
 
 def template_build_deck(data: dict[str, Any]) -> str:
-    core = data.get("core") or []
+    core = _core_names(data)
     decks = data.get("decks") or []
     mode = data.get("mode")
     stage = data.get("stage") or mode
     arch = _arch_from_data(data)
     label = archetype_label(arch)
     tip = ""
-    primary = core[0] if core else None
-    primary_ru = card_name_ru(primary, short=True) if primary else ""
+    core_txt = _ru_list(core, limit=4) if core else ""
+    multi_core = len(core) > 1
 
     if not decks:
         # Пустой список — внутренняя ошибка; не светим шаблоны/ядро пользователю.
@@ -122,9 +146,15 @@ def template_build_deck(data: dict[str, Any]) -> str:
             alt = f"Запасной вариант — {archetype_label(str(alt_name))}."
 
     if mode == "meta_templates" or stage == "meta_templates":
+        if multi_core and core_txt:
+            why = f"Играется через {core_txt}, цикл держит темп."
+        elif core_txt:
+            why = f"Играется через {core_txt}, цикл держит темп."
+        else:
+            why = f"Стиль — {label}."
         return coach_reply(
             f"Собрал {title} — можно сразу ставить." if title else f"Собрал {label}.",
-            why=f"Играется через {primary_ru}, цикл держит темп." if primary_ru else f"Стиль — {label}.",
+            why=why,
             tip=alt or tip,
             intent=INTENT_BUILD_DECK,
             archetype=arch,
@@ -135,9 +165,12 @@ def template_build_deck(data: dict[str, Any]) -> str:
         "archetype_fallback",
     }:
         style = label or "контроль"
-        if primary_ru:
-            verdict = f"Собрал {style.lower()} вокруг {primary_ru}."
-            why = f"Под неё закрыл поддержку, спеллы и цикл — колода уже полная."
+        if multi_core and core_txt:
+            verdict = f"Собрал {style.lower()} вокруг {core_txt}."
+            why = "Все запрошенные карты в составе — под них закрыл поддержку, спеллы и цикл."
+        elif core_txt:
+            verdict = f"Собрал {style.lower()} вокруг {core_txt}."
+            why = "Под неё закрыл поддержку, спеллы и цикл — колода уже полная."
         else:
             verdict = f"Собрал рабочий {style.lower()}."
             why = "Роли закрыты, можно пробовать на лестнице."
@@ -149,7 +182,6 @@ def template_build_deck(data: dict[str, Any]) -> str:
             archetype=arch,
         )
 
-    core_txt = _ru_list(core, limit=4) if core else ""
     verdict = f"Собрал {title}." if title else f"Собрал {label}."
     if core_txt:
         why = f"Опора {core_txt} уже в составе — это готовый вариант, не черновик."

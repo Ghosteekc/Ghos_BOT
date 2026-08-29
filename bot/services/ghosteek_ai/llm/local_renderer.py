@@ -56,7 +56,9 @@ matchup, battle analysis, knowledge/mechanics, coach tips и другие под
 ## СОЗДАНИЕ КОЛОДЫ
 Если Backend передал результат Deck Builder — используй именно его.
 Не создавай другую колоду самостоятельно.
-Можно объяснить идею, роли и вокруг какой карты сборка, но нельзя подменять результат Builder.
+Можно объяснить идею и роли. Если в FACTS несколько карт в «Ядро» —
+озвучь все эти карты как опору сборки (не только первую).
+Нельзя подменять результат Builder.
 
 ## MATCHUP
 Если Backend передал matchup — используй именно его.
@@ -512,7 +514,8 @@ def _facts_deck_builder(data: dict[str, Any], ctx: AIContext | None) -> list[str
         )
     core = _as_str_list(data.get("core"))
     if core:
-        _push_fact(facts, "Ядро: " + ", ".join(core[:4]))
+        core_ru = [card_name_ru(c, short=True) for c in core[:4]]
+        _push_fact(facts, "Ядро (озвучь все): " + ", ".join(core_ru))
     return facts
 
 
@@ -584,6 +587,7 @@ def _answer_constraints(tool: str, intent: str | None) -> list[str]:
         constraints.append(
             "Не перечисляй карты текстом — UI показывает колоду. "
             "2–3 живых предложения с глаголами: что собрал и как этим играть. "
+            "Если в FACTS «Ядро» из нескольких карт — назови все эти карты как опору, не одну. "
             "Не ругай сборку и не проси игрока её доделывать — колода уже полная."
         )
     elif tool_l == "game_coach" or intent_l == "game_coach":
