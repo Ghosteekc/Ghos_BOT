@@ -6,11 +6,14 @@ Does not extract frames or inspect Clash Royale content.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Ingest cap. Phone CR recordings are transcoded after upload.
 MAX_SIZE_BYTES = 250 * 1024 * 1024
@@ -257,6 +260,10 @@ def parse_ffprobe_payload(payload: dict) -> tuple[float, int, int, float | None]
 def probe_video(path: Path) -> tuple[float, int, int, float | None]:
     binary = find_ffprobe()
     if not binary:
+        logger.error(
+            "Replay probe failed: ffprobe/ffmpeg not installed on host "
+            "(REPLAY_FFMPEG_UNAVAILABLE). Add ffmpeg via nixpacks nixPkgs."
+        )
         raise ReplayError(CODE_FFMPEG_UNAVAILABLE)
 
     cmd = [
