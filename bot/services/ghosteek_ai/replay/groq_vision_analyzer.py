@@ -25,7 +25,8 @@ from bot.services.ghosteek_ai.replay.vision_shared import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+# Llama 4 Scout shut down on Groq (2026-07-17). Current vision models: qwen3.6 / 3.8.
+DEFAULT_GROQ_VISION_MODEL = "qwen/qwen3.6-27b"
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 
