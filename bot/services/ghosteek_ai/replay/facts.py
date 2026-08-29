@@ -28,6 +28,10 @@ LIMITATION_NO_CARD_IDENTITY = (
 LIMITATION_NO_EVIDENCE = (
     "Grounded gameplay events require visual evidence from sampled frames."
 )
+LIMITATION_VISION_DISABLED = (
+    "Frame vision for card plays is disabled on this server "
+    "(REPLAY_VISION_ENABLED=0)."
+)
 from bot.services.ghosteek_ai.replay.game_state import GameStateObservation
 from bot.services.ghosteek_ai.replay.models import (
     DEFAULT_LIMITATIONS,
@@ -252,6 +256,10 @@ def _limitations_for(
             out = [x for x in out if x != "deck_identity_not_confirmed"]
     if any(e.value is not None for e in elixir):
         out = [x for x in out if x != "elixir_values_not_extracted"]
+    from bot.services.ghosteek_ai.replay.models import vision_enabled
+
+    if not vision_enabled() and LIMITATION_VISION_DISABLED not in out:
+        out.append(LIMITATION_VISION_DISABLED)
     # unique preserve order
     uniq: list[str] = []
     for item in out:

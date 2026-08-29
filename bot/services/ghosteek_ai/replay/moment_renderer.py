@@ -145,6 +145,10 @@ _LIMITATION_HUMAN = {
     "elixir_values_not_extracted": "числовые значения эликсира не извлечены",
     "damage_events_not_detected": "урон по башням и войскам не зафиксирован",
     "deck_identity_not_confirmed": "полная колода не подтверждена",
+    "Frame vision for card plays is disabled on this server "
+    "(REPLAY_VISION_ENABLED=0).": (
+        "распознавание розыгрышей по кадрам выключено на сервере"
+    ),
 }
 
 
@@ -293,7 +297,15 @@ def fallback_replay_summary(
     moments: Sequence[ReplayVisualMoment] = (),
     limitations: Sequence[str] = (),
 ) -> ReplayGroundedSummary:
-    if not moments:
+    from bot.services.ghosteek_ai.replay.models import vision_enabled
+
+    if not vision_enabled() and not moments:
+        overview = (
+            "Реплей Clash Royale распознан, но разбор розыгрышей по кадрам "
+            "на сервере пока выключен. Поэтому тайминги и конкретные карты в бою "
+            "ещё не описываются."
+        )
+    elif not moments:
         overview = (
             "Пока удалось уверенно распознать только отдельные элементы поля. "
             "Для полноценного разбора этого реплея данных недостаточно."

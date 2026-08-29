@@ -6,7 +6,6 @@ from bot.services.ghosteek_ai.conversation.manager import ConversationManager
 from bot.services.ghosteek_ai.conversation.state import ConversationState
 from bot.services.ghosteek_ai.intents import (
     INTENT_BUILD_DECK,
-    INTENT_CLARIFY,
     detect_intent,
     is_build_alternative_request,
     parse_build_variant_count,
@@ -68,6 +67,30 @@ def test_followup_reuses_build_core():
     assert enriched.prefer_alternative is True
     assert ctx.get("exclude_decks")
     assert any("Valkyrie" in d and "Hunter" in d for d in ctx["exclude_decks"])
+
+
+def test_followup_day_eshe_reuses_core():
+    session = ConversationState()
+    session.last_intent = INTENT_BUILD_DECK
+    session.last_build_core = ["Valkyrie", "Hog Rider"]
+    session.last_deck = [
+        "Valkyrie",
+        "Hog Rider",
+        "Fire Spirit",
+        "Skeletons",
+        "Hunter",
+        "Fireball",
+        "The Log",
+        "Firecracker",
+    ]
+    detected = detect_intent("дай еще")
+    ctx: dict = {}
+    enriched = ConversationManager.apply_followup_enrichment(
+        session, detected, "дай еще", ctx
+    )
+    assert enriched.intent == INTENT_BUILD_DECK
+    assert enriched.cards == ["Valkyrie", "Hog Rider"]
+    assert enriched.prefer_alternative is True
 
 
 def test_update_persists_build_core():

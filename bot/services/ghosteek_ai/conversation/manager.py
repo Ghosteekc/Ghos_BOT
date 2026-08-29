@@ -280,6 +280,7 @@ class ConversationManager:
             INTENT_IMPROVE_DECK,
             SERVICE_BY_INTENT,
             is_build_alternative_request,
+            is_build_more_followup,
             parse_build_variant_count,
         )
 
@@ -288,6 +289,14 @@ class ConversationManager:
         wants_alt = is_build_alternative_request(follow_low) or bool(
             getattr(detected, "prefer_alternative", False)
         )
+        # «дай ещё» после сборки — тот же core, даже если intent ушёл в chat.
+        if (
+            not wants_alt
+            and build_core
+            and session.last_intent == INTENT_BUILD_DECK
+            and is_build_more_followup(follow_low)
+        ):
+            wants_alt = True
         if wants_alt and build_core:
             core_cards = cards[:4] if cards else build_core
             # Карты из сообщения дополняют/заменяют ядро только если явно названы.
