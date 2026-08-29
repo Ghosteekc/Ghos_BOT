@@ -45,10 +45,6 @@ from bot.services.ghosteek_ai.replay.moment_renderer import (
 )
 from bot.services.ghosteek_ai.replay.moment_shots import extract_moment_shots
 from bot.services.ghosteek_ai.replay.evidence import EvidenceBuilder
-from bot.services.ghosteek_ai.replay.ollama_vision_analyzer import (
-    OllamaVisionTimeout,
-    OllamaVisionUnavailable,
-)
 from bot.services.ghosteek_ai.replay.sampler import FrameSampler
 from bot.services.ghosteek_ai.replay.tactical_analysis import ReplayTacticalAnalyzer
 from bot.services.ghosteek_ai.replay.timeline import ReplayTimelineBuilder
@@ -67,6 +63,7 @@ from bot.services.ghosteek_ai.replay.validator import (
     validate_size,
 )
 from bot.services.ghosteek_ai.replay.vision_analyzer import VisionAnalyzer
+from bot.services.ghosteek_ai.replay.vision_errors import VisionTimeout, VisionUnavailable
 from bot.services.ghosteek_ai.replay.vision_events import (
     merge_event_lists,
     repartition_merged_events,
@@ -400,9 +397,9 @@ class ReplayAnalyzeService:
         analyzer = self._vision_analyzer
         owns_analyzer = analyzer is None
         if analyzer is None:
-            from bot.services.ghosteek_ai.replay.ollama_vision_analyzer import OllamaVisionAnalyzer
+            from bot.services.ghosteek_ai.replay.vision_factory import create_vision_analyzer
 
-            analyzer = OllamaVisionAnalyzer()
+            analyzer = create_vision_analyzer()
 
         try:
             timeline_builder = self._timeline_builder or ReplayTimelineBuilder()
@@ -440,10 +437,10 @@ class ReplayAnalyzeService:
 
                 try:
                     observations = await analyzer.analyze_frame_sequence(sequence)
-                except OllamaVisionTimeout:
+                except VisionTimeout:
                     logger.warning("replay vision timed out")
                     return bundle
-                except OllamaVisionUnavailable:
+                except VisionUnavailable:
                     logger.warning("replay vision unavailable")
                     return bundle
                 except Exception:

@@ -33,7 +33,6 @@ from bot.services.ghosteek_ai.replay.ollama_vision_analyzer import (
     OllamaVisionAnalyzer,
     OllamaVisionTimeout,
     OllamaVisionUnavailable,
-    _parse_json_content,
 )
 from bot.services.ghosteek_ai.replay.service import ReplayAnalyzeService
 from bot.services.ghosteek_ai.replay.timeline import ReplayTimelineBuilder
@@ -49,6 +48,7 @@ from bot.services.ghosteek_ai.replay.vision_events import (
     repartition_merged_events,
     vision_observations_to_events,
 )
+from bot.services.ghosteek_ai.replay.vision_shared import parse_vision_json_content as _parse_json_content
 
 HOG_ID = "26000000"
 

@@ -18,6 +18,7 @@ from bot.services.ghosteek_ai.replay.models import (
 )
 from bot.services.ghosteek_ai.replay.sampler import FrameSampler
 from bot.services.ghosteek_ai.replay.ollama_vision_analyzer import OllamaVisionAnalyzer
+from bot.services.ghosteek_ai.replay.groq_vision_analyzer import GroqVisionAnalyzer
 from bot.services.ghosteek_ai.replay.service import ReplayAnalyzeService, get_replay_service
 from bot.services.ghosteek_ai.replay.tactical_analysis import ReplayTacticalAnalyzer
 from bot.services.ghosteek_ai.replay.timeline import ReplayTimelineBuilder
@@ -32,10 +33,12 @@ from bot.services.ghosteek_ai.replay.vision_analyzer import (
     VisionAnalyzer,
     VisionObservation,
 )
+from bot.services.ghosteek_ai.replay.vision_factory import create_vision_analyzer, vision_provider
 
 __all__ = [
     "FrameSampler",
     "GameStateBuilder",
+    "GroqVisionAnalyzer",
     "HeuristicCardRecognizer",
     "HeuristicHudAnalyzer",
     "MAX_DURATION_SECONDS",
@@ -58,5 +61,7 @@ __all__ = [
     "VisionObservation",
     "NullVisionAnalyzer",
     "OllamaVisionAnalyzer",
+    "create_vision_analyzer",
     "get_replay_service",
+    "vision_provider",
 ]
