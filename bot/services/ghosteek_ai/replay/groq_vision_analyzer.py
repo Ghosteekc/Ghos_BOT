@@ -7,13 +7,18 @@ import base64
 import json
 import logging
 import os
+import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import aiohttp
 
 from bot.services.ghosteek_ai.replay.card_catalog import CardCatalog
-from bot.services.ghosteek_ai.replay.models import vision_timeout_seconds
+from bot.services.ghosteek_ai.replay.models import (
+    vision_frame_delay_seconds,
+    vision_timeout_seconds,
+)
 from bot.services.ghosteek_ai.replay.vision_analyzer import VisionAnalyzer, VisionObservation
 from bot.services.ghosteek_ai.replay.vision_errors import VisionTimeout, VisionUnavailable
 from bot.services.ghosteek_ai.replay.vision_events import parse_raw_observations
@@ -28,6 +33,7 @@ logger = logging.getLogger(__name__)
 # Llama 4 Scout shut down on Groq (2026-07-17). Current vision models: qwen3.6 / 3.8.
 DEFAULT_GROQ_VISION_MODEL = "qwen/qwen3.6-27b"
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+_MAX_POST_RETRIES = 3
 
 
 class GroqVisionUnavailable(VisionUnavailable):
@@ -69,6 +75,25 @@ class GroqVisionAnalyzer(VisionAnalyzer):
             await self._session.close()
         self._session = None
 
+    async def analyze_frame_sequence(
+        self,
+        frames: Sequence[tuple[str, int, float]],
+    ) -> list[VisionObservation]:
+        """Sequential frames with inter-frame delay — free Groq tier is ~8k TPM."""
+        out: list[VisionObservation] = []
+        delay = vision_frame_delay_seconds()
+        for index, (path, frame_index, timestamp_seconds) in enumerate(frames):
+            if index > 0 and delay > 0:
+                await asyncio.sleep(delay)
+            out.extend(
+                await self.analyze_frame(
+                    path,
+                    frame_index=int(frame_index),
+                    timestamp_seconds=float(timestamp_seconds),
+                )
+            )
+        return out
+
     async def analyze_frame(
         self,
         frame_path: str,
@@ -94,13 +119,12 @@ class GroqVisionAnalyzer(VisionAnalyzer):
         mime = image_mime_for_path(str(path))
         user_text = (
             f"Frame index {frame_index} at {timestamp_seconds:.2f}s. "
-            "List visible gameplay observations only as JSON."
+            'Return JSON only: {"observations":[...]} with visible gameplay facts.'
         )
         payload = {
             "model": self._model,
             "temperature": 0.1,
-            "max_completion_tokens": 512,
-            "response_format": {"type": "json_object"},
+            "max_completion_tokens": 384,
             "messages": [
                 {"role": "system", "content": VISION_SYSTEM_PROMPT},
                 {
@@ -130,7 +154,7 @@ class GroqVisionAnalyzer(VisionAnalyzer):
         content = _extract_message_content(data)
         parsed = parse_vision_json_content(content)
         if parsed is None:
-            logger.warning("groq vision malformed JSON frame=%s", frame_index)
+            logger.warning("groq vision malformed JSON frame=%s content=%r", frame_index, content[:120])
             return []
 
         return parse_raw_observations(
@@ -148,24 +172,59 @@ class GroqVisionAnalyzer(VisionAnalyzer):
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
-        try:
-            async with session.post(url, json=payload, headers=headers, timeout=timeout) as resp:
-                text = await resp.text()
-                if resp.status >= 400:
-                    raise GroqVisionUnavailable(f"Groq HTTP {resp.status}: {text[:200]}")
-                try:
-                    return json.loads(text) if text else {}
-                except json.JSONDecodeError as exc:
-                    raise GroqVisionUnavailable("Groq returned non-JSON") from exc
-        except asyncio.TimeoutError as exc:
-            raise GroqVisionTimeout("Groq vision request timed out") from exc
-        except aiohttp.ClientError as exc:
-            raise GroqVisionUnavailable(str(exc)) from exc
+        last_error: Exception | None = None
+        for attempt in range(_MAX_POST_RETRIES):
+            try:
+                async with session.post(url, json=payload, headers=headers, timeout=timeout) as resp:
+                    text = await resp.text()
+                    if resp.status == 429 and attempt < _MAX_POST_RETRIES - 1:
+                        wait = _retry_after_seconds(text, resp)
+                        logger.info(
+                            "groq vision rate limited — retry in %.1fs (attempt %s)",
+                            wait,
+                            attempt + 1,
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+                    if resp.status >= 400:
+                        raise GroqVisionUnavailable(f"Groq HTTP {resp.status}: {text[:200]}")
+                    try:
+                        return json.loads(text) if text else {}
+                    except json.JSONDecodeError as exc:
+                        raise GroqVisionUnavailable("Groq returned non-JSON") from exc
+            except asyncio.TimeoutError as exc:
+                last_error = GroqVisionTimeout("Groq vision request timed out")
+                if attempt < _MAX_POST_RETRIES - 1:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                    continue
+                raise last_error from exc
+            except aiohttp.ClientError as exc:
+                last_error = GroqVisionUnavailable(str(exc))
+                if attempt < _MAX_POST_RETRIES - 1:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                    continue
+                raise last_error from exc
+        if last_error is not None:
+            raise last_error
+        raise GroqVisionUnavailable("Groq vision request failed")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
         return self._session
+
+
+def _retry_after_seconds(body: str, resp: aiohttp.ClientResponse) -> float:
+    header = resp.headers.get("Retry-After")
+    if header:
+        try:
+            return max(1.0, float(header))
+        except ValueError:
+            pass
+    match = re.search(r"try again in ([0-9]+(?:\.[0-9]+)?)s", body, re.IGNORECASE)
+    if match:
+        return max(1.0, float(match.group(1)) + 0.5)
+    return 2.5
 
 
 def _default_api_key() -> str:

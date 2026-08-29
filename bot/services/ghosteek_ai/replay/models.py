@@ -37,7 +37,7 @@ TARGET_SHORT_SIDE = 1080
 NEAR_DUP_HAMMING = 6
 
 # Stage 5 vision analyzer
-VISION_MAX_FRAMES_DEFAULT = 12
+VISION_MAX_FRAMES_DEFAULT = 4
 VISION_MAX_FRAMES_MIN = 1
 VISION_MAX_FRAMES_MAX = 24
 VISION_MIN_GAP_SECONDS_DEFAULT = 1.0
@@ -147,6 +147,16 @@ def vision_timeout_seconds() -> float:
         VISION_TIMEOUT_DEFAULT,
         10.0,
         300.0,
+    )
+
+
+def vision_frame_delay_seconds() -> float:
+    """Pause between Groq vision frame calls to stay under free-tier TPM (~8k/min)."""
+    return _env_float(
+        "REPLAY_VISION_FRAME_DELAY_SECONDS",
+        2.5,
+        0.0,
+        60.0,
     )
 
 

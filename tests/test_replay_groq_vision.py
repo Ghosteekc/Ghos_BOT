@@ -102,3 +102,40 @@ def test_groq_missing_key_returns_empty(tmp_path: Path, monkeypatch: pytest.Monk
         return await analyzer.analyze_frame(str(frame), frame_index=0, timestamp_seconds=0.0)
 
     assert asyncio.run(_run()) == []
+
+
+def test_groq_retries_on_rate_limit() -> None:
+    analyzer = GroqVisionAnalyzer(api_key="gsk_test", timeout_seconds=5.0)
+    calls: list[int] = []
+
+    class _Resp:
+        def __init__(self, status: int, body: str) -> None:
+            self.status = status
+            self._body = body
+            self.headers: dict[str, str] = {}
+
+        async def text(self) -> str:
+            return self._body
+
+        async def __aenter__(self) -> "_Resp":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    def fake_post(*_args: object, **_kwargs: object) -> _Resp:
+        calls.append(1)
+        if len(calls) == 1:
+            return _Resp(429, '{"error":{"message":"try again in 0.01s"}}')
+        return _Resp(200, '{"choices":[{"message":{"content":"{}"}}]}')
+
+    session = type("S", (), {"closed": False, "post": fake_post})()
+
+    async def _run() -> dict:
+        analyzer._session = session  # noqa: SLF001
+        with patch("asyncio.sleep", return_value=None):
+            return await analyzer._post_chat({"model": "qwen/qwen3.6-27b"})  # noqa: SLF001
+
+    result = asyncio.run(_run())
+    assert len(calls) == 2
+    assert result == {"choices": [{"message": {"content": "{}"}}]}

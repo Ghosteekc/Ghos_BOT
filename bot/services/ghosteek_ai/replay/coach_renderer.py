@@ -693,12 +693,9 @@ class ReplayCoachRenderer:
 
     async def _ensure_provider(self) -> Any:
         if self._provider is None:
-            from bot.services.ghosteek_ai.llm.provider import (
-                OllamaProvider,
-                ollama_config_from_settings,
-            )
+            from bot.services.ghosteek_ai.replay.replay_llm_provider import replay_wording_provider
 
-            self._provider = OllamaProvider(ollama_config_from_settings())
+            self._provider = replay_wording_provider()
             self._owns_provider = True
         return self._provider
 
@@ -790,12 +787,12 @@ class ReplayCoachRenderer:
     ) -> str:
         from types import SimpleNamespace
 
-        from bot.services.ghosteek_ai.generator.llm_generator import OllamaResponseGenerator
+        from bot.services.ghosteek_ai.generator.llm_generator import LLMResponseGenerator
 
         provider = await self._ensure_provider()
 
         builder = ReplayCoachPromptBuilder(envelope)
-        gen = OllamaResponseGenerator(provider=provider, prompt_builder=builder)
+        gen = LLMResponseGenerator(provider=provider, prompt_builder=builder)
         ctx = SimpleNamespace(raw_message=user_message or "Разбери этот реплей.")
         result = await gen.agenerate(ctx, tools=None, **replay_coach_generate_kwargs())
         if not isinstance(result, str):
