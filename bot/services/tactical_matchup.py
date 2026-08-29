@@ -100,6 +100,10 @@ def _ru(card: str) -> str:
     return card_name_ru(card) or card
 
 
+def _ru_list(cards: list[str], *, limit: int = 3) -> str:
+    return ", ".join(_ru(c) for c in cards[:limit])
+
+
 def _combo_ru(text: str) -> str:
     """Переводит 'CardA + CardB' в русские имена, если обе карты известны."""
     if " + " not in text:
@@ -417,6 +421,11 @@ def _hold_answer_for_win(user: list[str], opp: list[str], out: TacticalMatchupRe
 
 
 def _danger_cards(user: list[str], opp: list[str], out: TacticalMatchupReport) -> None:
+    # Хрупкий цикл / воздух — не считаем «ответом» на даш-чемпионов и танки.
+    soft = frozenset({
+        "Ice Golem", "Ice Spirit", "Skeletons", "Electro Spirit", "Heal Spirit",
+        "Fire Spirit", "Bats", "Minions",
+    })
     for threat in opp:
         if is_pure_spell(threat) and threat not in WIN_CONDITIONS:
             continue
@@ -430,10 +439,12 @@ def _danger_cards(user: list[str], opp: list[str], out: TacticalMatchupReport) -
         if is_building(threat) or threat in _DEFENSIVE_BUILDINGS:
             continue
         strong, partial = counters_in_deck(threat, user)
+        strong = [c for c in strong if c not in soft]
+        partial = [c for c in partial if c not in soft]
         if strong:
             continue
         if partial:
-            reason = f"Только слабый ответ ({_ru(partial[0])}) — риск пробить."
+            reason = f"Только слабый ответ ({_ru_list(partial)}) — риск пробить."
         else:
             reason = "Нет счётчика в колоде."
         out.danger_cards.append(DangerCard(

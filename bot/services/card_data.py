@@ -188,7 +188,10 @@ COUNTERS: dict[str, list[str]] = {
     "Skeletons": ["The Log", "Zap", "Barbarian Barrel", "Giant Snowball", "Arrows"],
     "Cannon": ["Hog Rider", "Battle Ram", "Giant", "Goblin Drill"],
     "Tesla": ["Hog Rider", "Battle Ram", "Balloon", "Lava Hound", "Miner"],
-    "Golden Knight": ["Skeleton Army", "Guards", "Mini P.E.K.K.A", "P.E.K.K.A", "Inferno Tower"],
+    "Golden Knight": [
+        "Valkyrie", "Skeleton Army", "Guards", "Mini P.E.K.K.A", "P.E.K.K.A",
+        "Inferno Tower", "Knight", "Bomb Tower",
+    ],
     "Archer Queen": ["Fireball", "Lightning", "Rocket", "Mini P.E.K.K.A", "Skeleton Army"],
     "Skeleton King": [
         "Valkyrie", "Executioner", "Wizard", "Mini P.E.K.K.A", "Inferno Tower",
@@ -354,11 +357,27 @@ OFFENSE_COUNTER_ALLOWED: dict[str, frozenset[str]] = {
 
 # Ручные правки поверх DeckShop (кого карта реально контрит)
 MANUAL_COUNTERS_STRONG: dict[str, frozenset[str]] = {
-    "Guards": frozenset({"P.E.K.K.A", "Mini P.E.K.K.A", "Ronin", "Prince", "Dark Prince"}),
+    "Guards": frozenset({"P.E.K.K.A", "Mini P.E.K.K.A", "Ronin", "Prince", "Dark Prince", "Golden Knight"}),
     "Little Prince": frozenset({
         "Mega Knight", "Mini P.E.K.K.A", "P.E.K.K.A", "Prince", "Dark Prince",
         "Knight", "Valkyrie", "Bandit", "Mega Minion", "Barbarians", "Ronin",
     }),
+    # Валькирия — надёжный стоп даш-чемпионов и ближних танков (DeckShop часто ставит partial).
+    "Valkyrie": frozenset({
+        "Golden Knight", "Boss Bandit", "Bandit", "Royal Ghost", "Dark Prince",
+        "Prince", "Lumberjack", "Mighty Miner",
+    }),
+    "Knight": frozenset({"Golden Knight", "Bandit", "Royal Ghost", "Miner"}),
+    "Mini P.E.K.K.A": frozenset({
+        "Golden Knight", "Boss Bandit", "Mighty Miner", "Ram Rider", "Battle Ram",
+        "Elite Barbarians",
+    }),
+    "P.E.K.K.A": frozenset({"Golden Knight", "Boss Bandit", "Mega Knight", "Golem", "Giant"}),
+    "Dark Prince": frozenset({"Golden Knight", "Bandit", "Royal Ghost"}),
+    "Mega Knight": frozenset({"Golden Knight", "Boss Bandit", "Bandit"}),
+    "Bomb Tower": frozenset({"Golden Knight", "Hog Rider", "Royal Hogs", "Goblin Barrel"}),
+    "Inferno Tower": frozenset({"Golden Knight", "Boss Bandit", "Mighty Miner"}),
+    "Inferno Dragon": frozenset({"Golden Knight", "Boss Bandit", "Mighty Miner"}),
     # Стрелки / воздух / спам vs Ronin (ближний чемпион).
     "Musketeer": frozenset({"Ronin"}),
     "Archers": frozenset({"Ronin"}),
@@ -372,16 +391,40 @@ MANUAL_COUNTERS_STRONG: dict[str, frozenset[str]] = {
     "Minion Horde": frozenset({"Ronin"}),
     "Bats": frozenset({"Ronin"}),
     "Baby Dragon": frozenset({"Ronin"}),
-    "Inferno Dragon": frozenset({"Ronin"}),
+    "Inferno Dragon": frozenset({"Ronin", "Golden Knight", "Boss Bandit", "Mighty Miner"}),
     "Dart Goblin": frozenset({"Ronin"}),
     "Flying Machine": frozenset({"Ronin"}),
-    "Skeleton Army": frozenset({"Ronin"}),
+    "Skeleton Army": frozenset({"Ronin", "Golden Knight"}),
     "Goblin Gang": frozenset({"Ronin"}),
-    "Barbarians": frozenset({"Ronin"}),
+    "Barbarians": frozenset({"Ronin", "Golden Knight"}),
 }
 
 MANUAL_COUNTERS_PARTIAL: dict[str, frozenset[str]] = {
     "Little Prince": frozenset({"Ice Golem", "Lumberjack", "Hunter"}),
+    "Tornado": frozenset({"Golden Knight", "Boss Bandit", "Mighty Miner"}),
+    "Guards": frozenset({"Boss Bandit", "Mighty Miner"}),
+}
+
+# DeckShop / роли иногда помечают хрупкий спам как «контра» на даш/сплэш —
+# такие пары запрещаем (иначе в UI «опасная карта → ответ: мыши»).
+MANUAL_COUNTERS_DENIED: dict[str, frozenset[str]] = {
+    "Bats": frozenset({
+        "Golden Knight", "Mega Knight", "Boss Bandit", "Mighty Miner",
+        "Wizard", "Executioner", "Baby Dragon", "Electro Wizard", "Valkyrie",
+        "Dark Prince", "Bowler", "Firecracker",
+    }),
+    "Minions": frozenset({
+        "Golden Knight", "Mega Knight", "Boss Bandit", "Wizard", "Executioner",
+        "Baby Dragon", "Valkyrie",
+    }),
+    "Minion Horde": frozenset({
+        "Golden Knight", "Mega Knight", "Boss Bandit", "Wizard", "Executioner",
+        "Baby Dragon", "Valkyrie", "Arrows",
+    }),
+    "Skeletons": frozenset({
+        "Golden Knight", "Mega Knight", "Boss Bandit", "Valkyrie", "Wizard",
+        "Dark Prince", "Bomber",
+    }),
 }
 
 

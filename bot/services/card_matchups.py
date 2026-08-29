@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from bot.services.card_data import (
     COUNTERS,
+    MANUAL_COUNTERS_DENIED,
     MANUAL_COUNTERS_PARTIAL,
     MANUAL_COUNTERS_STRONG,
     OFFENSE_COUNTER_ALLOWED,
@@ -241,6 +242,9 @@ def counters_in_deck(threat: str, deck: list[str]) -> tuple[list[str], list[str]
 def card_counters_target(counter_card: str, target: str) -> str | None:
     """'strong' | 'partial' | None — контрит ли counter_card карту target."""
     if counter_card == target:
+        return None
+
+    if target in MANUAL_COUNTERS_DENIED.get(counter_card, ()):
         return None
 
     if is_pure_spell(target):

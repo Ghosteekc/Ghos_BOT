@@ -218,7 +218,7 @@ def _wc_counter_pressure(user: list[str], opp: list[str]) -> list[_Factor]:
             factors.append(_Factor(
                 "counter_database",
                 8,
-                f"Только слабый ответ на {_ru(threat)} ({_ru(partial[0])}).",
+                f"Только слабый ответ на {_ru(threat)} ({', '.join(_ru(c) for c in partial[:3])}).",
             ))
         elif len(strong) >= 2:
             factors.append(_Factor(
