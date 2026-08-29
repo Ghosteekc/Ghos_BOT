@@ -37,13 +37,14 @@ TARGET_SHORT_SIDE = 1080
 NEAR_DUP_HAMMING = 6
 
 # Stage 5 vision analyzer
-VISION_MAX_FRAMES_DEFAULT = 4
+VISION_MAX_FRAMES_DEFAULT = 3
 VISION_MAX_FRAMES_MIN = 1
 VISION_MAX_FRAMES_MAX = 24
 VISION_MIN_GAP_SECONDS_DEFAULT = 1.0
 VISION_TIMEOUT_DEFAULT = 90.0
 VISION_CONFIDENCE_THRESHOLD_DEFAULT = 0.90
 VISION_CANDIDATE_MIN_DEFAULT = 3
+VISION_SHORT_SIDE_DEFAULT = 720
 
 # Stage 6 visual evidence
 EVIDENCE_ENABLED_DEFAULT = "1"
@@ -154,9 +155,19 @@ def vision_frame_delay_seconds() -> float:
     """Pause between Groq vision frame calls to stay under free-tier TPM (~8k/min)."""
     return _env_float(
         "REPLAY_VISION_FRAME_DELAY_SECONDS",
-        2.5,
+        3.5,
         0.0,
         60.0,
+    )
+
+
+def vision_short_side() -> int:
+    """JPEG short side for vision API (does not change Groq image token count, saves bandwidth)."""
+    return _env_int(
+        "REPLAY_VISION_SHORT_SIDE",
+        VISION_SHORT_SIDE_DEFAULT,
+        480,
+        TARGET_SHORT_SIDE,
     )
 
 

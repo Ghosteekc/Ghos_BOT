@@ -3,26 +3,35 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
-VISION_SYSTEM_PROMPT = """You analyze Clash Royale replay still frames.
-Return ONLY valid JSON with this shape:
-{"observations":[{"event_type":"troop_visible","card_name":null,"side":"player","lane":"right","confidence":0.86}]}
+# Compact prompt — fewer text tokens; vision image cost is fixed ~2048 on Groq.
+VISION_SYSTEM_PROMPT = """Clash Royale replay frame analyzer.
+Return ONLY JSON: {"observations":[{"event_type":"troop_visible","card_name":null,"side":"player","lane":"right","confidence":0.86}]}
+event_type: card_visible|card_play_candidate|troop_visible|spell_visible|building_visible|tower_damage_candidate|defensive_interaction_candidate|offensive_interaction_candidate|unknown
+card_name only if clearly visible in frame, else null. No thinking, no coaching."""
 
-Rules:
-- observation only — never coaching or advice
-- event_type must be one of: card_visible, card_play_candidate, troop_visible, spell_visible, building_visible, tower_damage_candidate, defensive_interaction_candidate, offensive_interaction_candidate, unknown
-- confidence is required (0.0-1.0)
-- card_name must be null unless you clearly read the card text/icon from THIS frame
-- never guess card names from deck patterns or gameplay context
-- side: player, opponent, or unknown
-- lane: left, right, center, or unknown
-- if unsure, use unknown event_type and lower confidence
-"""
+_THINKING_BLOCK_RE = re.compile(
+    r"<think>.*?</think>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def strip_model_thinking(text: str) -> str:
+    """Drop Qwen/Groq reasoning wrappers so JSON extraction can run."""
+    raw = text or ""
+    cleaned = _THINKING_BLOCK_RE.sub("", raw)
+    brace = cleaned.find("{")
+    if brace >= 0:
+        return cleaned[brace:].strip()
+    if "<think>" in raw.lower():
+        return ""
+    return cleaned.strip()
 
 
 def parse_vision_json_content(text: str) -> dict[str, Any] | list[Any] | None:
-    raw = (text or "").strip()
+    raw = strip_model_thinking(text)
     if not raw:
         return None
     if raw.startswith("```"):

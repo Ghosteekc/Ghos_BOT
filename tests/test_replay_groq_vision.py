@@ -15,9 +15,11 @@ from bot.services.ghosteek_ai.replay.groq_vision_analyzer import (
     GroqVisionUnavailable,
 )
 from bot.services.ghosteek_ai.replay.ollama_vision_analyzer import OllamaVisionAnalyzer
+from bot.services.ghosteek_ai.replay.replay_llm_provider import DEFAULT_REPLAY_WORDING_MODEL, replay_wording_provider
 from bot.services.ghosteek_ai.replay.vision_analyzer import VisionObservation
 from bot.services.ghosteek_ai.replay.vision_errors import VisionTimeout, VisionUnavailable
 from bot.services.ghosteek_ai.replay.vision_factory import create_vision_analyzer, vision_provider
+from bot.services.ghosteek_ai.replay.vision_shared import parse_vision_json_content, strip_model_thinking
 
 
 def test_vision_provider_defaults_to_groq(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,6 +51,18 @@ def test_groq_exceptions_subclass_shared() -> None:
     assert issubclass(GroqVisionUnavailable, VisionUnavailable)
 
 
+def test_strip_thinking_then_parse_json() -> None:
+    raw = (
+        "\n<think>\nplanning...\n"
+        '{"observations":[{"event_type":"spell_visible","card_name":null,'
+        '"side":"opponent","lane":"center","confidence":0.8}]}'
+    )
+    parsed = parse_vision_json_content(raw)
+    assert isinstance(parsed, dict)
+    assert parsed["observations"][0]["event_type"] == "spell_visible"
+    assert strip_model_thinking("<think>foo") == ""
+
+
 def test_groq_parses_openai_style_response(tmp_path: Path) -> None:
     frame = tmp_path / "f.jpg"
     frame.write_bytes(b"\xff\xd8\xff" + b"\x00" * 32)
@@ -77,6 +91,39 @@ def test_groq_parses_openai_style_response(tmp_path: Path) -> None:
     assert out[0].side == "player"
     assert out[0].frame_index == 2
     assert out[0].timestamp_seconds == 3.5
+
+
+def test_groq_payload_disables_thinking(tmp_path: Path) -> None:
+    analyzer = GroqVisionAnalyzer(api_key="gsk_test")
+    captured: dict = {}
+
+    async def fake_post(payload: dict) -> dict:
+        captured.update(payload)
+        return {"choices": [{"message": {"content": '{"observations":[]}'}}]}
+
+    frame = tmp_path / "f.jpg"
+    frame.write_bytes(b"\xff\xd8\xff" + b"\x00" * 32)
+
+    async def _run() -> None:
+        with patch.object(analyzer, "_post_chat", side_effect=fake_post):
+            await analyzer.analyze_frame(str(frame), frame_index=0, timestamp_seconds=0.0)
+
+    asyncio.run(_run())
+    assert captured.get("reasoning_effort") == "none"
+    assert captured.get("reasoning_format") == "hidden"
+    assert captured.get("max_completion_tokens") == 200
+
+
+def test_replay_wording_provider_uses_separate_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bot.config import settings
+
+    monkeypatch.setattr(settings, "ghosteek_ai_backend", "groq")
+    monkeypatch.setattr(settings, "llm_api_key", "gsk_test")
+    monkeypatch.setattr(settings, "llm_base_url", "https://api.groq.com/openai/v1")
+    monkeypatch.setattr(settings, "llm_model", "qwen/qwen3.6-27b")
+    monkeypatch.setenv("REPLAY_WORDING_MODEL", "openai/gpt-oss-20b")
+    provider = replay_wording_provider()
+    assert provider.config.model == "openai/gpt-oss-20b"
 
 
 def test_groq_timeout_returns_empty(tmp_path: Path) -> None:

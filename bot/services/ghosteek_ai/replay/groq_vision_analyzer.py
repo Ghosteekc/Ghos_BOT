@@ -17,6 +17,7 @@ import aiohttp
 from bot.services.ghosteek_ai.replay.card_catalog import CardCatalog
 from bot.services.ghosteek_ai.replay.models import (
     vision_frame_delay_seconds,
+    vision_short_side,
     vision_timeout_seconds,
 )
 from bot.services.ghosteek_ai.replay.vision_analyzer import VisionAnalyzer, VisionObservation
@@ -124,7 +125,9 @@ class GroqVisionAnalyzer(VisionAnalyzer):
         payload = {
             "model": self._model,
             "temperature": 0.1,
-            "max_completion_tokens": 384,
+            "max_completion_tokens": 200,
+            "reasoning_effort": "none",
+            "reasoning_format": "hidden",
             "messages": [
                 {"role": "system", "content": VISION_SYSTEM_PROMPT},
                 {
@@ -275,6 +278,9 @@ def _extract_message_content(data: dict[str, Any]) -> str:
         message = choices[0].get("message") if isinstance(choices[0], dict) else None
         if isinstance(message, dict):
             content = message.get("content")
-            if isinstance(content, str):
+            if isinstance(content, str) and content.strip():
                 return content
+            reasoning = message.get("reasoning")
+            if isinstance(reasoning, str) and reasoning.strip():
+                return reasoning
     return ""

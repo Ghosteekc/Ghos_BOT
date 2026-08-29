@@ -24,6 +24,7 @@ from bot.services.ghosteek_ai.replay.models import (
     frame_timeout_seconds,
     max_analysis_frames,
     sample_frame_count,
+    vision_short_side,
 )
 from bot.services.ghosteek_ai.replay.validator import (
     CODE_ANALYSIS_TIMEOUT,
@@ -342,13 +343,18 @@ class FrameSampler:
         duration: float,
         src_width: int,
         src_height: int,
+        short_side: int | None = None,
     ) -> tuple[list[SampledFrame], Path]:
         """Extract specific timestamps; caller must delete returned tmpdir."""
         binary = find_ffmpeg()
         if not binary:
             raise ReplayError(CODE_FFMPEG_UNAVAILABLE)
 
-        out_w, out_h = scaled_dimensions(src_width, src_height)
+        out_w, out_h = scaled_dimensions(
+            src_width,
+            src_height,
+            short_side=short_side if short_side is not None else vision_short_side(),
+        )
         tmpdir = Path(tempfile.mkdtemp(prefix="ghosteek-replay-vision-"))
         deadline = time.monotonic() + self.timeout_seconds
         frames: list[SampledFrame] = []
