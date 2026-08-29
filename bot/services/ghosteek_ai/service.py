@@ -644,10 +644,20 @@ async def ask_ghosteek_ai(
     detected = ConversationManager.apply_followup_enrichment(
         session, detected, message, req_ctx
     )
+    if getattr(detected, "build_limit", None):
+        req_ctx["build_limit"] = int(detected.build_limit)
+    if getattr(detected, "prefer_alternative", False):
+        req_ctx["prefer_alternative"] = True
 
     # Plan: seed args + executed in planner-first / agent fallback.
     plan = Planner.plan(detected)
     tool_args = dict(plan.tools[0].args) if plan.tools else {}
+    if req_ctx.get("exclude_decks") and "exclude_decks" not in tool_args:
+        tool_args["exclude_decks"] = req_ctx["exclude_decks"]
+    if req_ctx.get("build_limit") and "build_limit" not in tool_args:
+        tool_args["build_limit"] = req_ctx["build_limit"]
+    if req_ctx.get("prefer_alternative") and "prefer_alternative" not in tool_args:
+        tool_args["prefer_alternative"] = True
 
     ai_context = ContextBuilder.bootstrap(
         user=user,
@@ -792,10 +802,36 @@ async def ask_ghosteek_ai(
         },
     }
 
+    deck_cards: list[dict] = []
+    data_cards = (getattr(ai_context, "data", None) or {}).get("deck_cards")
+    if isinstance(data_cards, list):
+        deck_cards = [
+            dict(c) for c in data_cards if isinstance(c, dict) and c.get("deck")
+        ]
+    if not deck_cards and ai_context.deck.built_decks:
+        from bot.services.ghosteek_ai.deck_card import (
+            deck_card_from_entry,
+            format_arena_label,
+        )
+
+        arena_label = format_arena_label(ai_context.arena.arena_id, ai_context.arena.trophies)
+        for entry in ai_context.deck.built_decks[:3]:
+            if not isinstance(entry, dict):
+                continue
+            built = deck_card_from_entry(entry, arena=arena_label)
+            if built:
+                deck_cards.append(built)
+    primary_deck = (
+        deck_cards[0]
+        if deck_cards
+        else (dict(ai_context.deck_card) if isinstance(ai_context.deck_card, dict) else None)
+    )
+
     return GhosteekAiResponse(
         intent=intent_name,
         answer=answer,
         sources=sources,
         actions=actions,
-        deck_card=dict(ai_context.deck_card) if isinstance(ai_context.deck_card, dict) else None,
+        deck_card=primary_deck,
+        deck_cards=deck_cards,
     )

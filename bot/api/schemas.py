@@ -1089,6 +1089,7 @@ class GhosteekAiAskResponse(BaseModel):
     sources: dict = Field(default_factory=dict)
     actions: list[GhosteekAiAction] = Field(default_factory=list)
     deck_card: DeckCardResponse | None = None
+    deck_cards: list[DeckCardResponse] = Field(default_factory=list)
     battle_card: BattleCardResponse | None = None
     analysis_card: AnalysisCardResponse | None = None
 

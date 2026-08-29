@@ -87,12 +87,22 @@ async def ask_ai(
     deck_card = None
     if isinstance(result.deck_card, dict) and result.deck_card.get("deck"):
         deck_card = DeckCardResponse.model_validate(result.deck_card)
+    deck_cards: list[DeckCardResponse] = []
+    for raw in result.deck_cards or []:
+        if isinstance(raw, dict) and raw.get("deck"):
+            try:
+                deck_cards.append(DeckCardResponse.model_validate(raw))
+            except Exception:
+                continue
+    if not deck_cards and deck_card is not None:
+        deck_cards = [deck_card]
     return GhosteekAiAskResponse(
         intent=result.intent,
         answer=result.answer,
         sources=result.sources,
         actions=[GhosteekAiAction(type=a.type, path=a.path) for a in result.actions],
-        deck_card=deck_card,
+        deck_card=deck_card or (deck_cards[0] if deck_cards else None),
+        deck_cards=deck_cards,
         battle_card=None,
         analysis_card=None,
     )

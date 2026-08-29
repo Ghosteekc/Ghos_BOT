@@ -63,6 +63,8 @@ class DetectedIntent:
     card_query: str | None = None
     mechanic_query: str | None = None
     coach_topic: str | None = None
+    build_limit: int | None = None
+    prefer_alternative: bool = False
     service: str = ""
     raw: str = ""
 
@@ -763,6 +765,62 @@ _BUILD_SOFT = (
 _BUILD_DECK_MARK = ("колод", "дек")  # колоду / колода / деку / дека …
 
 
+def parse_build_variant_count(low: str) -> int | None:
+    """«2 колоды» / «три варианта» / «несколько колод» → 2..3."""
+    import re
+
+    text = (low or "").lower().replace("ё", "е")
+    m = re.search(r"(\d+)\s*(?:колод|вариант|дек)", text)
+    if m:
+        n = int(m.group(1))
+        if 2 <= n <= 3:
+            return n
+        if n > 3:
+            return 3
+    word_map = {
+        "два": 2,
+        "две": 2,
+        "двух": 2,
+        "три": 3,
+        "трех": 3,
+        "трёх": 3,
+    }
+    for word, n in word_map.items():
+        if re.search(rf"\b{word}\b\s*(?:колод|вариант|дек)", text):
+            return n
+    if "несколько" in text and any(m in text for m in ("колод", "вариант", "дек")):
+        return 2
+    return None
+
+
+def is_build_alternative_request(low: str) -> bool:
+    """«ещё один вариант / с этой комбинацией / другую колоду»."""
+    text = (low or "").lower().replace("ё", "е")
+    markers = (
+        "еще один вариант",
+        "ещё один вариант",
+        "еще вариант",
+        "ещё вариант",
+        "другой вариант",
+        "другая колода",
+        "другую колоду",
+        "еще одну колоду",
+        "ещё одну колоду",
+        "еще одну деку",
+        "ещё одну деку",
+        "альтернатив",
+        "с этой комбинац",
+        "с этими картами",
+        "той же комбинац",
+        "тем же ядром",
+        "той же связк",
+        "с этой связк",
+        "похожий вариант",
+        "другой сборк",
+    )
+    return any(m in text for m in markers)
+
+
 def _is_build_deck_request(low: str) -> bool:
     """Семантика «собери/сделай/хочу деку …», без угадывания по одной карте."""
     if any(
@@ -1086,6 +1144,8 @@ def detect_intent(message: str, *, context_cards: list[str] | None = None) -> De
         card_query: str | None = None,
         mechanic_query: str | None = None,
         coach_topic: str | None = None,
+        build_limit: int | None = None,
+        prefer_alternative: bool = False,
     ) -> DetectedIntent:
         return DetectedIntent(
             intent=intent,
@@ -1094,6 +1154,8 @@ def detect_intent(message: str, *, context_cards: list[str] | None = None) -> De
             card_query=card_query,
             mechanic_query=mechanic_query,
             coach_topic=coach_topic,
+            build_limit=build_limit,
+            prefer_alternative=prefer_alternative,
             raw=raw,
         )
 
@@ -1226,7 +1288,21 @@ def detect_intent(message: str, *, context_cards: list[str] | None = None) -> De
     # --- Builder (формальные + разговорные формулировки) ---
     if _is_build_deck_request(low) or _is_build_deck_with_cards(low, extracted):
         core = extracted[:4]
-        return _out(INTENT_BUILD_DECK, cards=core)
+        return _out(
+            INTENT_BUILD_DECK,
+            cards=core,
+            build_limit=parse_build_variant_count(low),
+            prefer_alternative=is_build_alternative_request(low),
+        )
+
+    # «Ещё один вариант / с этой комбинацией» без явных карт — follow-up подхватит ядро из сессии.
+    if is_build_alternative_request(low):
+        return _out(
+            INTENT_BUILD_DECK,
+            cards=extracted[:4],
+            build_limit=parse_build_variant_count(low) or 1,
+            prefer_alternative=True,
+        )
 
     # --- Recommendation ---
     if any(

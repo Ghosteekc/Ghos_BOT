@@ -42,7 +42,16 @@ class ContextBuilder:
         args = dict(tool_args or {})
 
         cards = _str_list(args.get("cards")) or _str_list(req.get("cards"))
-        if len(cards) < 8 and len(conversation.last_deck) >= 8:
+        is_build = str(plan.intent or "") == "build_deck"
+        if is_build:
+            # Ядро сборки 1–4 карт — никогда не подменять полной last_deck.
+            if not cards and getattr(conversation, "last_build_core", None):
+                cards = list(conversation.last_build_core)[:4]
+            elif len(cards) >= 8 and getattr(conversation, "last_build_core", None):
+                core = list(conversation.last_build_core)[:4]
+                if core and set(core).issubset(set(cards)):
+                    cards = core
+        elif len(cards) < 8 and len(conversation.last_deck) >= 8:
             cards = list(conversation.last_deck)
 
         opp = _str_list(args.get("opponent_cards")) or _str_list(req.get("opponent_cards"))
@@ -94,6 +103,11 @@ class ContextBuilder:
                 public=conversation.to_public(),
                 last_deck=list(conversation.last_deck),
                 last_opponent_deck=list(conversation.last_opponent_deck),
+                last_build_core=list(getattr(conversation, "last_build_core", None) or []),
+                last_build_shown=[
+                    list(d) for d in (getattr(conversation, "last_build_shown", None) or [])
+                    if isinstance(d, list)
+                ],
                 last_battle_index=conversation.last_battle_index,
                 last_battle=dict(conversation.last_battle),
                 last_recommendation=dict(conversation.last_recommendation),

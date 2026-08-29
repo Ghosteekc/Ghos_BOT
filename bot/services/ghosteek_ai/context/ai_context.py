@@ -291,6 +291,8 @@ class SessionContext:
     public: dict[str, Any] = field(default_factory=dict)
     last_deck: list[str] = field(default_factory=list)
     last_opponent_deck: list[str] = field(default_factory=list)
+    last_build_core: list[str] = field(default_factory=list)
+    last_build_shown: list[list[str]] = field(default_factory=list)
     last_battle_index: int | None = None
     last_battle: dict[str, Any] = field(default_factory=dict)
     last_recommendation: dict[str, Any] = field(default_factory=dict)
@@ -302,6 +304,8 @@ class SessionContext:
             "public": dict(self.public),
             "last_deck": list(self.last_deck),
             "last_opponent_deck": list(self.last_opponent_deck),
+            "last_build_core": list(self.last_build_core),
+            "last_build_shown": [list(d) for d in self.last_build_shown],
             "last_battle_index": self.last_battle_index,
             "last_battle": dict(self.last_battle),
             "last_recommendation": dict(self.last_recommendation),
@@ -312,10 +316,20 @@ class SessionContext:
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "SessionContext":
         data = _as_dict(raw)
+        shown_raw = data.get("last_build_shown") or []
+        shown: list[list[str]] = []
+        if isinstance(shown_raw, list):
+            for item in shown_raw:
+                if isinstance(item, list):
+                    names = [c for c in item if isinstance(c, str)][:8]
+                    if names:
+                        shown.append(names)
         return cls(
             public=_as_dict(data.get("public")),
             last_deck=_as_str_list(data.get("last_deck")),
             last_opponent_deck=_as_str_list(data.get("last_opponent_deck")),
+            last_build_core=_as_str_list(data.get("last_build_core")),
+            last_build_shown=shown,
             last_battle_index=data.get("last_battle_index"),
             last_battle=_as_dict(data.get("last_battle")),
             last_recommendation=_as_dict(data.get("last_recommendation")),

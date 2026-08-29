@@ -143,7 +143,8 @@ def template_build_deck(data: dict[str, Any]) -> str:
     if len(decks) > 1 and isinstance(decks[1], dict):
         alt_name = decks[1].get("name") or decks[1].get("archetype")
         if alt_name:
-            alt = f"Запасной вариант — {archetype_label(str(alt_name))}."
+            alt = f"Ещё вариант — {archetype_label(str(alt_name))}."
+    multi_decks = sum(1 for d in decks if isinstance(d, dict)) > 1
 
     if mode == "meta_templates" or stage == "meta_templates":
         if multi_core and core_txt:
@@ -174,6 +175,9 @@ def template_build_deck(data: dict[str, Any]) -> str:
         else:
             verdict = f"Собрал рабочий {style.lower()}."
             why = "Роли закрыты, можно пробовать на лестнице."
+        if multi_decks:
+            verdict = f"Собрал {sum(1 for d in decks if isinstance(d, dict))} варианта вокруг {core_txt or style.lower()}."
+            why = "Ядро то же, поддержка и цикл отличаются — выбирай, что ближе по стилю."
         return coach_reply(
             verdict,
             why=why,

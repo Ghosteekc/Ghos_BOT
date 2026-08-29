@@ -32,6 +32,9 @@ class ConversationState:
 
     last_deck: list[str] = field(default_factory=list)
     last_opponent_deck: list[str] = field(default_factory=list)
+    # Ядро последней сборки (1–4 запрошенных карты) + уже показанные составы.
+    last_build_core: list[str] = field(default_factory=list)
+    last_build_shown: list[list[str]] = field(default_factory=list)
     last_battle_index: int | None = None
     last_battle: dict[str, Any] = field(default_factory=dict)
     last_recommendation: dict[str, Any] = field(default_factory=dict)
@@ -70,6 +73,7 @@ class ConversationState:
         return {
             "last_deck": list(self.last_deck),
             "last_opponent_deck": list(self.last_opponent_deck),
+            "last_build_core": list(self.last_build_core),
             "last_battle_index": self.last_battle_index,
             "last_intent": self.last_intent,
             "last_service": self.last_service,
@@ -81,6 +85,7 @@ class ConversationState:
             "tool_count": len(self.last_tools),
             "last_tools": list(self.last_tools[-5:]),
             "has_deck": len(self.last_deck) >= 8,
+            "has_build_core": len(self.last_build_core) >= 1,
             "has_matchup": len(self.last_deck) >= 8 and len(self.last_opponent_deck) >= 8,
             "has_battle": self.last_battle_index is not None or bool(self.last_battle),
             "has_recommendation": bool(self.last_recommendation),
@@ -113,6 +118,7 @@ class ConversationState:
             "last_tools": list(self.last_tools[-10:]),
             "last_deck": list(self.last_deck),
             "last_opponent_deck": list(self.last_opponent_deck),
+            "last_build_core": list(self.last_build_core),
             "last_battle": dict(self.last_battle) if self.last_battle else None,
             "last_recommendation": dict(self.last_recommendation)
             if self.last_recommendation

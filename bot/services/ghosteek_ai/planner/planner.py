@@ -104,7 +104,7 @@ class Planner:
 
     @staticmethod
     def args_from_detected(detected: DetectedIntent) -> dict:
-        return {
+        args = {
             "cards": list(detected.cards),
             "opponent_cards": list(detected.opponent_cards),
             "card_query": detected.card_query,
@@ -112,6 +112,11 @@ class Planner:
             "coach_topic": detected.coach_topic,
             "raw": detected.raw,
         }
+        if detected.build_limit:
+            args["build_limit"] = int(detected.build_limit)
+        if detected.prefer_alternative:
+            args["prefer_alternative"] = True
+        return args
 
     @staticmethod
     def plan(detected: DetectedIntent, registry: ToolRegistry | None = None) -> Plan:

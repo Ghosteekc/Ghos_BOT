@@ -80,15 +80,85 @@ def _attach_sanity(decks: list[dict]) -> list[dict]:
     from bot.services.deck_sanity_validator import validate_deck_sanity
     from bot.services.ghosteek_ai.deck_card import extract_deck_names
 
-    first = dict(decks[0])
-    names = extract_deck_names(first)
-    if len(names) == 8:
-        sanity = validate_deck_sanity(names)
-        first["sanity_report"] = sanity.to_dict()
-        if not sanity.passed:
-            first["balanced"] = False
-        decks = [first, *decks[1:]]
-    return decks
+    out: list[dict] = []
+    for raw in decks:
+        entry = dict(raw)
+        names = extract_deck_names(entry)
+        if len(names) == 8:
+            sanity = validate_deck_sanity(names)
+            entry["sanity_report"] = sanity.to_dict()
+            if not sanity.passed:
+                entry["balanced"] = False
+        out.append(entry)
+    return out
+
+
+def _entry_names(entry: dict) -> list[str]:
+    from bot.services.ghosteek_ai.deck_card import extract_deck_names
+
+    return extract_deck_names(entry)[:8]
+
+
+def _deck_key(names: list[str]) -> str:
+    return "|".join(sorted(n for n in names if n))
+
+
+def _filter_excluded_decks(
+    decks: list[dict],
+    exclude_decks: list[list[str]] | None,
+    *,
+    limit: int,
+) -> list[dict]:
+    excluded = {
+        _deck_key(list(d)[:8])
+        for d in (exclude_decks or [])
+        if isinstance(d, list) and len(d) >= 8
+    }
+    if not excluded:
+        return decks[:limit]
+    filtered: list[dict] = []
+    for entry in decks:
+        names = _entry_names(entry)
+        if len(names) >= 8 and _deck_key(names) in excluded:
+            continue
+        filtered.append(entry)
+        if len(filtered) >= limit:
+            break
+    return filtered if filtered else decks[:limit]
+
+
+def _resolve_build_limit(ctx: AIContext) -> int:
+    raw = ctx.arg("build_limit")
+    if raw is None and isinstance(ctx.request_context, dict):
+        raw = ctx.request_context.get("build_limit")
+    try:
+        n = int(raw) if raw is not None else 1
+    except (TypeError, ValueError):
+        n = 1
+    return max(1, min(3, n))
+
+
+def _resolve_exclude_decks(ctx: AIContext) -> list[list[str]]:
+    raw = ctx.arg("exclude_decks")
+    if raw is None and isinstance(ctx.request_context, dict):
+        raw = ctx.request_context.get("exclude_decks")
+    out: list[list[str]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, list):
+                names = [c for c in item if isinstance(c, str)][:8]
+                if len(names) >= 8:
+                    out.append(names)
+    prefer = ctx.arg("prefer_alternative")
+    if prefer is None and isinstance(ctx.request_context, dict):
+        prefer = ctx.request_context.get("prefer_alternative")
+    if prefer and ctx.session.last_deck and len(ctx.session.last_deck) >= 8:
+        out.append(list(ctx.session.last_deck)[:8])
+    shown = getattr(ctx.session, "last_build_shown", None) or []
+    for d in shown:
+        if isinstance(d, list) and len(d) >= 8:
+            out.append([c for c in d if isinstance(c, str)][:8])
+    return out
 
 
 class DeckBuilderTool(BaseTool):
@@ -103,8 +173,17 @@ class DeckBuilderTool(BaseTool):
     async def execute(self, ctx: AIContext) -> ToolResult:
         user = ctx.require_user()
         core = ctx.cards_arg()
+        # Не подставлять прошлую 8-карточную колоду как «ядро» для builder.
+        if len(core) >= 8 and getattr(ctx.session, "last_build_core", None):
+            build_core = [c for c in ctx.session.last_build_core if isinstance(c, str)][:4]
+            if build_core and set(build_core).issubset(set(core)):
+                core = build_core
         arena_label = format_arena_label(ctx.arena.arena_id, ctx.arena.trophies)
         del user
+        build_limit = _resolve_build_limit(ctx)
+        exclude_decks = _resolve_exclude_decks(ctx)
+        # Генерируем с запасом, чтобы отфильтровать уже показанные.
+        gen_limit = min(3, build_limit + (1 if exclude_decks else 0))
 
         # ---- 4-card constructor path (UI core) ----
         if len(core) >= 4:
@@ -113,7 +192,7 @@ class DeckBuilderTool(BaseTool):
                 slots,
                 arena_id=ctx.arena.arena_id,
                 trophies=ctx.arena.trophies,
-                limit=3,
+                limit=gen_limit,
             )
             decks = list(result.get("decks") or [])
             # Promote Stage-2 alternative so Ghosteek never sees an empty list.
@@ -126,7 +205,7 @@ class DeckBuilderTool(BaseTool):
                     core[:4],
                     arena_id=ctx.arena.arena_id,
                     trophies=ctx.arena.trophies,
-                    limit=3,
+                    limit=gen_limit,
                 )
                 if staged.get("ok") and staged.get("build_results"):
                     decks = _entries_from_build_results(
@@ -149,13 +228,20 @@ class DeckBuilderTool(BaseTool):
                     data={"core": core[:4]},
                     actions=[{"type": "navigate", "path": "/decks"}],
                 )
+            decks = _filter_excluded_decks(decks, exclude_decks, limit=build_limit)
             decks = _attach_sanity(decks)
             deck_card = deck_card_from_entry(decks[0], arena=arena_label)
+            deck_cards = [
+                c
+                for c in (deck_card_from_entry(d, arena=arena_label) for d in decks[:build_limit])
+                if c
+            ]
             data: dict = {
                 "core": core[:4],
-                "decks": decks[:3],
+                "decks": decks[:build_limit],
                 "mode": "constructor",
                 "stage": STAGE_FREEFORM if result.get("alternative_deck") and not result.get("decks") else STAGE_META,
+                "deck_cards": deck_cards,
             }
             if deck_card:
                 data["deck_card"] = deck_card
@@ -175,7 +261,7 @@ class DeckBuilderTool(BaseTool):
                 core,
                 arena_id=ctx.arena.arena_id,
                 trophies=ctx.arena.trophies,
-                limit=3,
+                limit=gen_limit,
             )
             if not staged.get("ok"):
                 code = staged.get("error_code") or staged.get("status") or "BUILD_UNKNOWN_CARD"
@@ -224,14 +310,21 @@ class DeckBuilderTool(BaseTool):
                     actions=[{"type": "navigate", "path": "/decks"}],
                 )
 
+            decks = _filter_excluded_decks(decks, exclude_decks, limit=build_limit)
             decks = _attach_sanity(decks)
             deck_card = deck_card_from_entry(decks[0], arena=arena_label)
+            deck_cards = [
+                c
+                for c in (deck_card_from_entry(d, arena=arena_label) for d in decks[:build_limit])
+                if c
+            ]
             data = {
                 "core": core,
-                "decks": decks[:3],
+                "decks": decks[:build_limit],
                 "mode": mode,
                 "stage": staged.get("stage") or mode,
                 "sanity_report": decks[0].get("sanity_report"),
+                "deck_cards": deck_cards,
             }
             if deck_card:
                 data["deck_card"] = deck_card

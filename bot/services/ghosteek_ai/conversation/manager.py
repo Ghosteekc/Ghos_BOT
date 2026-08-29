@@ -274,16 +274,70 @@ class ConversationManager:
                 )
                 return detected
 
+        # Follow-up: «ещё вариант / с этой комбинацией» — то же ядро, другой состав.
+        from bot.services.ghosteek_ai.intents import (
+            INTENT_BUILD_DECK,
+            INTENT_IMPROVE_DECK,
+            SERVICE_BY_INTENT,
+            is_build_alternative_request,
+            parse_build_variant_count,
+        )
+
+        follow_low = (message or "").lower().replace("ё", "е")
+        build_core = [c for c in (session.last_build_core or []) if isinstance(c, str)][:4]
+        wants_alt = is_build_alternative_request(follow_low) or bool(
+            getattr(detected, "prefer_alternative", False)
+        )
+        if wants_alt and build_core:
+            core_cards = cards[:4] if cards else build_core
+            # Карты из сообщения дополняют/заменяют ядро только если явно названы.
+            if cards and not set(cards).issubset(set(build_core) | set(session.last_deck or [])):
+                # Новые карты в запросе — собираем вокруг них.
+                core_cards = cards[:4]
+            else:
+                core_cards = build_core
+            detected.intent = INTENT_BUILD_DECK
+            detected.service = SERVICE_BY_INTENT.get(INTENT_BUILD_DECK, "Builder")
+            detected.cards = list(core_cards)[:4]
+            detected.prefer_alternative = True
+            count = parse_build_variant_count(follow_low) or getattr(detected, "build_limit", None) or 1
+            detected.build_limit = max(1, min(3, int(count)))
+            ctx["exclude_decks"] = [list(d) for d in (session.last_build_shown or []) if d]
+            if session.last_deck and len(session.last_deck) >= 8:
+                ctx.setdefault("exclude_decks", []).append(list(session.last_deck)[:8])
+            ctx["build_limit"] = detected.build_limit
+            ctx["prefer_alternative"] = True
+            ConversationManager.record_followup(
+                session,
+                kind="build_alternative",
+                detail=",".join(detected.cards),
+                intent=INTENT_BUILD_DECK,
+            )
+            return detected
+
+        # build_deck без карт, но ядро в сессии — добираем ядро (в т.ч. «2 колоды» после сборки).
+        if intent == INTENT_BUILD_DECK and not cards and build_core:
+            detected.cards = list(build_core)[:4]
+            count = parse_build_variant_count(follow_low) or getattr(detected, "build_limit", None)
+            if count:
+                detected.build_limit = max(1, min(3, int(count)))
+                ctx["build_limit"] = detected.build_limit
+            if wants_alt or getattr(detected, "prefer_alternative", False):
+                detected.prefer_alternative = True
+                ctx["prefer_alternative"] = True
+                ctx["exclude_decks"] = [list(d) for d in (session.last_build_shown or []) if d]
+                if session.last_deck and len(session.last_deck) >= 8:
+                    ctx.setdefault("exclude_decks", []).append(list(session.last_deck)[:8])
+            ConversationManager.record_followup(
+                session,
+                kind="build_reuse_core",
+                detail=",".join(detected.cards),
+                intent=INTENT_BUILD_DECK,
+            )
+            return detected
+
         # Follow-up: «а что заменить / медленная / оставить карту» при clarify + last_deck.
         if intent == "clarify" and len(session.last_deck) >= 8:
-            from bot.services.ghosteek_ai.intents import (
-                INTENT_BUILD_DECK,
-                INTENT_IMPROVE_DECK,
-                SERVICE_BY_INTENT,
-            )
-
-            follow_low = (message or "").lower().replace("ё", "е")
-            # «а почему?» оставляем clarify → service reuse last_render_facts.
             if follow_low.startswith("а почему") or follow_low in {
                 "почему",
                 "почему?",
@@ -410,7 +464,11 @@ class ConversationManager:
             session.last_deck = [c for c in user_deck if isinstance(c, str)][:8]
 
         if intent == "build_deck":
+            core_raw = data.get("core")
+            if isinstance(core_raw, list) and core_raw:
+                session.last_build_core = [c for c in core_raw if isinstance(c, str)][:4]
             decks = data.get("decks") or []
+            shown: list[list[str]] = list(session.last_build_shown or [])
             if decks:
                 first = decks[0] if isinstance(decks[0], dict) else {}
                 cards = first.get("cards") or []
@@ -423,6 +481,22 @@ class ConversationManager:
                             names.append(str(c["name"]))
                 if len(names) >= 8:
                     session.last_deck = names[:8]
+            for entry in decks if isinstance(decks, list) else []:
+                if not isinstance(entry, dict):
+                    continue
+                cards = entry.get("cards") or []
+                names = []
+                if isinstance(cards, list):
+                    for c in cards:
+                        if isinstance(c, str):
+                            names.append(c)
+                        elif isinstance(c, dict) and c.get("name"):
+                            names.append(str(c["name"]))
+                if len(names) >= 8:
+                    key = "|".join(sorted(names[:8]))
+                    if key not in {"|".join(sorted(d)) for d in shown if len(d) >= 8}:
+                        shown.append(names[:8])
+            session.last_build_shown = shown[-8:]
 
         opp = data.get("opponent_deck")
         if isinstance(opp, list) and len(opp) >= 8:
