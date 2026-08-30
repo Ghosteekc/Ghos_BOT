@@ -232,6 +232,49 @@ def vision_observations_to_events(
     return events
 
 
+def confirmed_facts_from_vision(
+    observations: Sequence[VisionObservation],
+    *,
+    threshold: float | None = None,
+) -> list[ConfirmedCardFact]:
+    """Promote vision card sightings into ConfirmedCardFact.
+
+    Heuristic frame probe often returns nothing; vision is the real source of
+    card names. Without this, coach fact-lock rejects grounded card mentions.
+    """
+    from bot.services.ghosteek_ai.replay.card_recognizer import ConfirmedCardFact
+
+    # Align with event authority floor (0.75), not the stricter 0.90 play threshold —
+    # otherwise troop_visible at 0.86 never becomes a mentionable confirmed card.
+    cut = float(threshold) if threshold is not None else float(CONF_AUTHORITATIVE)
+    best: dict[str, ConfirmedCardFact] = {}
+    for obs in observations:
+        if not obs.card_id or not obs.card_name:
+            continue
+        conf = float(obs.confidence)
+        if conf < cut:
+            continue
+        ts = float(obs.timestamp_seconds)
+        prev = best.get(obs.card_id)
+        if prev is None:
+            best[obs.card_id] = ConfirmedCardFact(
+                card_id=obs.card_id,
+                card_name=obs.card_name,
+                confidence=conf,
+                first_seen=ts,
+                last_seen=ts,
+            )
+            continue
+        best[obs.card_id] = ConfirmedCardFact(
+            card_id=prev.card_id,
+            card_name=prev.card_name,
+            confidence=max(float(prev.confidence), conf),
+            first_seen=min(float(prev.first_seen), ts),
+            last_seen=max(float(prev.last_seen), ts),
+        )
+    return sorted(best.values(), key=lambda c: (-float(c.confidence), c.card_name))
+
+
 def merge_event_lists(
     heuristic: Sequence[ReplayEvent],
     vision: Sequence[ReplayEvent],

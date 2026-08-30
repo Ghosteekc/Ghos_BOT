@@ -264,6 +264,31 @@ def _card_label(card_id: str | None, cards: Sequence[ConfirmedCardFact]) -> str 
     return str(match).strip() if match else None
 
 
+def _event_card_label(
+    ev: ReplayEvent,
+    cards: Sequence[ConfirmedCardFact],
+) -> str | None:
+    """Resolve card name from confirmed facts, event details, or card_id."""
+    label = _card_label(ev.card_id, cards)
+    if label:
+        return label
+    details = ev.details if isinstance(ev.details, dict) else {}
+    raw = details.get("card_name")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    if not ev.card_id:
+        return None
+    try:
+        from bot.services.ghosteek_ai.replay.card_catalog import CardCatalog
+
+        resolved = CardCatalog.from_loaded_registry().resolve(card_id=ev.card_id)
+        if resolved is not None and resolved.card_name:
+            return str(resolved.card_name).strip()
+    except Exception:
+        return None
+    return None
+
+
 def _human_event_label(event_type: str) -> str:
     return _HUMAN_EVENT_LABELS.get(event_type, "наблюдение")
 
@@ -301,7 +326,8 @@ def build_replay_coach_envelope(
     facts: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Compact ReplayFacts envelope for Qwen. Never includes video/frames/debug dumps."""
-    cards = [c for c in confirmed_cards if float(c.confidence) >= 0.90]
+    # Vision often returns 0.75–0.89; keep those mentionable (plays still need confirmed plays).
+    cards = [c for c in confirmed_cards if float(c.confidence) >= 0.75]
     conf_events = list(confirmed_events)
     if not conf_events and battle_timeline is not None:
         conf_events = list(battle_timeline.confirmed_events)
@@ -322,7 +348,7 @@ def build_replay_coach_envelope(
     for ev in conf_events:
         if ev.event_type != EVENT_CARD_PLAY_CONFIRMED:
             continue
-        label = _card_label(ev.card_id, cards)
+        label = _event_card_label(ev, cards)
         if label and label not in confirmed_play_names:
             confirmed_play_names.append(label)
 
@@ -371,7 +397,7 @@ def build_replay_coach_envelope(
         ts = round(float(ev.timestamp_seconds), 3)
         if ts not in allowed_timestamps:
             allowed_timestamps.append(ts)
-        label = _card_label(ev.card_id, cards)
+        label = _event_card_label(ev, cards)
         if label and label not in allowed_names:
             allowed_names.append(label)
         card_bit = f" card={label}" if label else ""
@@ -381,10 +407,22 @@ def build_replay_coach_envelope(
         )
     compact_facts.extend(event_lines[:20])
 
+    # Vision/heuristic events that carry a card but are not in conf_events
+    # (e.g. troop_visible below play-confirm threshold) must still be mentionable.
+    for ev in events:
+        label = _event_card_label(ev, cards)
+        if label and label not in allowed_names:
+            allowed_names.append(label)
+        ts = round(float(ev.timestamp_seconds), 3)
+        if ts not in allowed_timestamps:
+            allowed_timestamps.append(ts)
+
     candidate_notes: list[str] = []
     for ev in candidates:
         ts = round(float(ev.timestamp_seconds), 3)
-        label = _card_label(ev.card_id, cards)
+        label = _event_card_label(ev, cards)
+        if label and label not in allowed_names:
+            allowed_names.append(label)
         if label:
             candidate_notes.append(
                 f"candidate_only t={ts} observation=возможный розыгрыш "

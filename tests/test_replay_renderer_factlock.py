@@ -85,6 +85,50 @@ def _env(*, with_play: bool = False, with_candidate: bool = True):
     )
 
 
+def test_vision_card_mention_allowed_without_heuristic_fact() -> None:
+    """Vision troop_visible must be mentionable even without HeuristicCardRecognizer hits."""
+    from bot.services.ghosteek_ai.replay.events import (
+        EVENT_CARD_IDENTITY_VISIBLE,
+        EventEvidence,
+        PLAYER_SELF,
+        ReplayEvent,
+    )
+
+    vision_ev = ReplayEvent(
+        timestamp_seconds=12.0,
+        event_type=EVENT_CARD_IDENTITY_VISIBLE,
+        player=PLAYER_SELF,
+        card_id="28000000",
+        confidence=0.86,
+        source="vision",
+        evidence=EventEvidence((0,), ("vision:0:troop_visible",), (12.0,)),
+        details={"card_name": "Goblin Barrel"},
+    )
+    battle = ReplayBattleTimelineBuilder().build(
+        duration_seconds=44.5,
+        events=[vision_ev],
+        confirmed_events=[vision_ev],
+        confirmed_cards=[],
+        confidence=0.8,
+    )
+    env = build_replay_coach_envelope(
+        tactical=None,
+        battle_timeline=battle,
+        confirmed_cards=[],
+        confirmed_events=[vision_ev],
+        events=[vision_ev],
+        candidate_events=[],
+        limitations=[],
+        facts=["Clash Royale gameplay interface detected"],
+    )
+    assert "Goblin Barrel" in env["data"]["allowed_card_ids"]
+    ok, reason = validate_replay_coach_response(
+        "Коротко: по кадрам уверенно вижу Goblin Barrel. Что заметил: карта на арене.",
+        env,
+    )
+    assert ok is True, reason
+
+
 def test_hallucinated_card_rejected() -> None:
     env = _env()
     ok, reason = validate_replay_coach_response(

@@ -100,7 +100,7 @@ class ReplayFactsBuilder:
         facts = _facts_from_counts(counts, frames)
         facts = [f for f in facts if not _looks_invented(f)]
 
-        cards = [c for c in (confirmed_cards or ()) if float(c.confidence) >= 0.90]
+        cards = [c for c in (confirmed_cards or ()) if float(c.confidence) >= 0.75]
         ambiguous = list(ambiguous_cards or ())
         all_events = list(events or ())
         confirmed_only = list(confirmed_events or ())

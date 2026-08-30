@@ -142,7 +142,7 @@ class ReplayTacticalAnalyzer:
             else battle_timeline.confirmed_events
         )
         all_events = list(events) if events else list(battle_timeline.events)
-        cards = [c for c in confirmed_cards if float(c.confidence) >= 0.90]
+        cards = [c for c in confirmed_cards if float(c.confidence) >= 0.75]
 
         player_names, opponent_names, unresolved = self._side_card_names(confirmed, cards)
         has_candidates = any(e.event_type == EVENT_CARD_PLAY_CANDIDATE for e in all_events)

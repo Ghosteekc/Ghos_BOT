@@ -42,6 +42,7 @@ from bot.services.ghosteek_ai.replay.vision_analyzer import (
     VisionObservation,
 )
 from bot.services.ghosteek_ai.replay.vision_events import (
+    confirmed_facts_from_vision,
     merge_timeline_with_vision,
     parse_raw_observations,
     partition_vision_observations,
@@ -107,6 +108,26 @@ def test_vision_analyzer_interface() -> None:
         )
         == []
     )
+
+
+def test_confirmed_facts_from_vision_promotes_cards() -> None:
+    obs = [
+        VisionObservation(
+            timestamp_seconds=12.0,
+            frame_index=1,
+            event_type="troop_visible",
+            confidence=0.86,
+            card_name="Hog Rider",
+            card_id=HOG_ID,
+            side="player",
+            lane="right",
+            details={},
+        )
+    ]
+    facts = confirmed_facts_from_vision(obs)
+    assert len(facts) == 1
+    assert facts[0].card_name == "Hog Rider"
+    assert facts[0].confidence == 0.86
 
 
 def test_valid_structured_response() -> None:

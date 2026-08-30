@@ -65,6 +65,7 @@ from bot.services.ghosteek_ai.replay.validator import (
 from bot.services.ghosteek_ai.replay.vision_analyzer import VisionAnalyzer
 from bot.services.ghosteek_ai.replay.vision_errors import VisionTimeout, VisionUnavailable
 from bot.services.ghosteek_ai.replay.vision_events import (
+    confirmed_facts_from_vision,
     merge_event_lists,
     repartition_merged_events,
     vision_observations_to_events,
@@ -471,6 +472,25 @@ class ReplayAnalyzeService:
         event_detector = self._event_detector or ReplayEventDetector()
         timeline = timeline_builder.build_from_bundle(bundle)
         confirmed = group_confirmed_cards(bundle.confirmed_card_observations)
+        vision_facts = confirmed_facts_from_vision(bundle.vision_observations)
+        if vision_facts:
+            by_id = {c.card_id: c for c in confirmed}
+            for fact in vision_facts:
+                prev = by_id.get(fact.card_id)
+                if prev is None:
+                    by_id[fact.card_id] = fact
+                    continue
+                by_id[fact.card_id] = type(fact)(
+                    card_id=prev.card_id,
+                    card_name=prev.card_name,
+                    confidence=max(float(prev.confidence), float(fact.confidence)),
+                    first_seen=min(float(prev.first_seen), float(fact.first_seen)),
+                    last_seen=max(float(prev.last_seen), float(fact.last_seen)),
+                )
+            confirmed = sorted(
+                by_id.values(),
+                key=lambda c: (-float(c.confidence), c.card_name),
+            )
         raw_events = event_detector.detect(
             card_observations=list(bundle.confirmed_card_observations),
             timeline=timeline_builder.build(bundle.frames),
