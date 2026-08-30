@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from bot.services.meta_analyzer import _guess_deck_name
-from bot.services.top_players import get_top_players
+from bot.services.top_players import MAX_TOP_PLAYERS_LIMIT, get_top_players
 
 
 def _deck_names(cards: list[dict]) -> frozenset[str]:
@@ -103,7 +103,7 @@ async def match_constructor_top_decks(
     *,
     limit: int = 30,
 ) -> dict:
-    cache = await get_top_players(limit=100)
+    cache = await get_top_players(limit=MAX_TOP_PLAYERS_LIMIT)
     decks = match_top_decks_from_players(cache.players, card_names, limit=limit)
     updated_at = cache.updated_at.isoformat() if isinstance(cache.updated_at, datetime) else None
     return {"decks": decks, "updated_at": updated_at}

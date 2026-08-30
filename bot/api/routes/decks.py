@@ -622,7 +622,7 @@ async def recommend_deck(
 @router.get("/decks/top-players", response_model=TopPlayersResponse)
 async def list_top_players(
     user: User = Depends(require_linked_player),
-    limit: int = Query(100, ge=5, le=100),
+    limit: int = Query(100, ge=5, le=500),
     refresh: bool = Query(False),
 ) -> TopPlayersResponse:
     del user

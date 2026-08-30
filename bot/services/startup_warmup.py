@@ -39,9 +39,9 @@ async def warmup_caches() -> None:
 
 
 async def _warmup_top_players() -> None:
-    from bot.services.top_players import get_top_players
+    from bot.services.top_players import MAX_TOP_PLAYERS_LIMIT, get_top_players
 
-    cache = await get_top_players(limit=100, force=False)
+    cache = await get_top_players(limit=MAX_TOP_PLAYERS_LIMIT, force=False)
     logger.info(
         "Startup warmup: top players ready (%d decks)",
         len(cache.players),

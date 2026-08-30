@@ -21,8 +21,9 @@ from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, norma
 logger = logging.getLogger(__name__)
 
 _refresh_lock = asyncio.Lock()
-CACHE_VERSION = 7
+CACHE_VERSION = 8
 DEFAULT_LIMIT = 100
+MAX_TOP_PLAYERS_LIMIT = 500
 _FETCH_CONCURRENCY = 6
 
 _SKIP_BATTLE_TYPES = frozenset({
@@ -262,7 +263,7 @@ async def _refresh_top_players(limit: int = DEFAULT_LIMIT) -> TopPlayersCache:
 
 async def get_top_players(*, limit: int = DEFAULT_LIMIT, force: bool = False) -> TopPlayersCache:
     global _cache
-    safe_limit = max(5, min(int(limit), 100))
+    safe_limit = max(5, min(int(limit), MAX_TOP_PLAYERS_LIMIT))
     if (
         not force
         and not _cache.expired()
