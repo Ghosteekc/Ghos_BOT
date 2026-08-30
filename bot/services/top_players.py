@@ -21,8 +21,8 @@ from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, norma
 logger = logging.getLogger(__name__)
 
 _refresh_lock = asyncio.Lock()
-CACHE_VERSION = 6
-DEFAULT_LIMIT = 10
+CACHE_VERSION = 7
+DEFAULT_LIMIT = 100
 _FETCH_CONCURRENCY = 6
 
 _SKIP_BATTLE_TYPES = frozenset({
@@ -262,10 +262,33 @@ async def _refresh_top_players(limit: int = DEFAULT_LIMIT) -> TopPlayersCache:
 
 async def get_top_players(*, limit: int = DEFAULT_LIMIT, force: bool = False) -> TopPlayersCache:
     global _cache
-    if not force and not _cache.expired() and _cache.players:
-        return _cache
-    async with _refresh_lock:
-        if not force and not _cache.expired() and _cache.players:
+    safe_limit = max(5, min(int(limit), 100))
+    if (
+        not force
+        and not _cache.expired()
+        and _cache.players
+        and len(_cache.players) >= safe_limit
+    ):
+        if len(_cache.players) == safe_limit:
             return _cache
-        _cache = await _refresh_top_players(limit=limit)
+        return TopPlayersCache(
+            players=_cache.players[:safe_limit],
+            updated_at=_cache.updated_at,
+            version=_cache.version,
+        )
+    async with _refresh_lock:
+        if (
+            not force
+            and not _cache.expired()
+            and _cache.players
+            and len(_cache.players) >= safe_limit
+        ):
+            if len(_cache.players) == safe_limit:
+                return _cache
+            return TopPlayersCache(
+                players=_cache.players[:safe_limit],
+                updated_at=_cache.updated_at,
+                version=_cache.version,
+            )
+        _cache = await _refresh_top_players(limit=safe_limit)
         return _cache

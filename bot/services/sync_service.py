@@ -124,7 +124,7 @@ async def _refresh_top_players_safe() -> None:
     try:
         from bot.services.top_players import get_top_players
 
-        cache = await get_top_players(limit=10, force=False)
+        cache = await get_top_players(limit=100, force=False)
         logger.info("Background top players refresh: %d decks", len(cache.players))
     except ClashRoyaleAPIError as exc:
         if exc.status == 429:
