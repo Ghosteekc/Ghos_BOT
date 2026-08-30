@@ -394,6 +394,29 @@ class ConstructorResponse(BaseModel):
     alternative_deck: ConstructorDeckEntry | None = None
 
 
+class ConstructorTopMatchRequest(BaseModel):
+    cards: list[str]
+
+
+class ConstructorTopMatchDeck(BaseModel):
+    id: int
+    name: str = ""
+    cards: list[DeckCardInfo]
+    winrate: float = 0.0
+    total_games: int = 0
+    avg_elixir: float = 0.0
+    deck_link: str | None = None
+    description: str = ""
+    best_rank: int = 0
+    player_count: int = 1
+    matched_cards: list[str] = []
+
+
+class ConstructorTopMatchResponse(BaseModel):
+    decks: list[ConstructorTopMatchDeck]
+    updated_at: str | None = None
+
+
 class StatsDeckEntry(BaseModel):
     cards: list[str]
     total: int

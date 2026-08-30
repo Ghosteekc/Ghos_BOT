@@ -10,6 +10,9 @@ from bot.api.schemas import (
     ArenaDecksResponse,
     ConstructorRequest,
     ConstructorResponse,
+    ConstructorTopMatchRequest,
+    ConstructorTopMatchResponse,
+    ConstructorTopMatchDeck,
     ConstructorDeckEntry,
     CoreConflictInfo,
     CounterDeckResponse,
@@ -57,6 +60,7 @@ from bot.services.counter_engine import (
 from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates, get_most_played_cards
 from bot.services.arena_decks import get_arena_popular_decks
 from bot.services.deck_constructor import build_constructor_decks
+from bot.services.constructor_top_match import match_constructor_top_decks
 from bot.services.deck_compare import compare_decks
 from bot.services.deck_detail import build_mine_deck_stats
 from bot.services.mine_decks import load_full_battles, sync_tracked_mine_decks
@@ -484,6 +488,41 @@ async def deck_constructor(
         core_conflict=CoreConflictInfo(**conflict) if conflict else None,
         alternative_deck=_deck_entry(alt) if alt else None,
     )
+
+
+@router.post("/decks/constructor/top-match", response_model=ConstructorTopMatchResponse)
+async def constructor_top_match(
+    body: ConstructorTopMatchRequest,
+    user: User = Depends(require_linked_player),
+) -> ConstructorTopMatchResponse:
+    del user
+    names = [c.strip() for c in body.cards if c and c.strip()]
+    if not names:
+        raise HTTPException(status_code=400, detail="Выбери хотя бы одну карту")
+    if len(names) > 4:
+        raise HTTPException(status_code=400, detail="Можно выбрать не больше 4 карт")
+    if len(set(names)) != len(names):
+        raise HTTPException(status_code=400, detail="Карты должны быть разными")
+
+    await ensure_cards_loaded()
+    data = await match_constructor_top_decks(names)
+    decks = [
+        ConstructorTopMatchDeck(
+            id=d["id"],
+            name=d.get("name", ""),
+            cards=[DeckCardInfo(**c) for c in d.get("cards", [])],
+            winrate=d.get("winrate", 0.0),
+            total_games=d.get("total_games", 0),
+            avg_elixir=d.get("avg_elixir", 0.0),
+            deck_link=d.get("deck_link"),
+            description=d.get("description", ""),
+            best_rank=d.get("best_rank", 0),
+            player_count=d.get("player_count", 1),
+            matched_cards=d.get("matched_cards", []),
+        )
+        for d in data["decks"]
+    ]
+    return ConstructorTopMatchResponse(decks=decks, updated_at=data.get("updated_at"))
 
 
 @router.post("/decks/compare", response_model=DeckCompareResponse)
