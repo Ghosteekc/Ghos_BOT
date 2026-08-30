@@ -9,12 +9,18 @@ from typing import Any
 # Compact prompt — fewer text tokens; vision image cost is fixed ~2048 on Groq.
 VISION_SYSTEM_PROMPT = """Clash Royale replay frame analyzer.
 Return ONLY JSON: {"observations":[{"event_type":"troop_visible","card_name":null,"side":"player","lane":"right","confidence":0.86}]}
+Max 3 observations per frame. card_name only if clearly visible, else null.
 event_type: card_visible|card_play_candidate|troop_visible|spell_visible|building_visible|tower_damage_candidate|defensive_interaction_candidate|offensive_interaction_candidate|unknown
-card_name only if clearly visible in frame, else null. No thinking, no coaching."""
+No markdown fences, no thinking, no coaching."""
 
 _THINKING_BLOCK_RE = re.compile(
     r"<think>.*?</think>",
     re.DOTALL | re.IGNORECASE,
+)
+
+_OBSERVATION_OBJECT_RE = re.compile(
+    r'\{\s*"event_type"\s*:\s*"[^"]+"[^}]*\}',
+    re.DOTALL,
 )
 
 
@@ -28,6 +34,21 @@ def strip_model_thinking(text: str) -> str:
     if "<think>" in raw.lower():
         return ""
     return cleaned.strip()
+
+
+def salvage_observations_json(raw: str) -> dict[str, Any] | None:
+    """Recover complete observation objects from truncated model output."""
+    observations: list[dict[str, Any]] = []
+    for match in _OBSERVATION_OBJECT_RE.finditer(raw):
+        try:
+            parsed = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and parsed.get("event_type"):
+            observations.append(parsed)
+    if not observations:
+        return None
+    return {"observations": observations}
 
 
 def parse_vision_json_content(text: str) -> dict[str, Any] | list[Any] | None:
@@ -50,9 +71,13 @@ def parse_vision_json_content(text: str) -> dict[str, Any] | list[Any] | None:
             try:
                 parsed = json.loads(raw[start : end + 1])
             except json.JSONDecodeError:
-                return None
+                parsed = salvage_observations_json(raw)
+                if parsed is None:
+                    return None
         else:
-            return None
+            parsed = salvage_observations_json(raw)
+            if parsed is None:
+                return None
     if isinstance(parsed, (dict, list)):
         return parsed
     return None

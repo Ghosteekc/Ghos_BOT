@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_GROQ_VISION_MODEL = "qwen/qwen3.6-27b"
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 _MAX_POST_RETRIES = 3
+_GROQ_VISION_MAX_COMPLETION_TOKENS = 1024
 
 
 class GroqVisionUnavailable(VisionUnavailable):
@@ -120,12 +121,12 @@ class GroqVisionAnalyzer(VisionAnalyzer):
         mime = image_mime_for_path(str(path))
         user_text = (
             f"Frame index {frame_index} at {timestamp_seconds:.2f}s. "
-            'Return JSON only: {"observations":[...]} with visible gameplay facts.'
+            'Return JSON only (max 3 observations): {"observations":[...]}'
         )
         payload = {
             "model": self._model,
             "temperature": 0.1,
-            "max_completion_tokens": 200,
+            "max_completion_tokens": _GROQ_VISION_MAX_COMPLETION_TOKENS,
             "reasoning_effort": "none",
             "reasoning_format": "hidden",
             "messages": [

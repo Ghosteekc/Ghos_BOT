@@ -100,6 +100,17 @@ def test_hallucinated_card_rejected() -> None:
     assert "mega knight" not in gated.lower()
 
 
+def test_replay_duration_allowed_as_timestamp() -> None:
+    env = _env()
+    stamps = env["data"]["allowed_timestamps"]
+    assert 90.0 in stamps
+    ok, reason = validate_replay_coach_response(
+        "Коротко: запись длится около 90 секунд, Hog Rider виден уверенно.",
+        env,
+    )
+    assert ok is True, reason
+
+
 def test_hallucinated_timestamp_rejected() -> None:
     env = _env()
     ok, reason = validate_replay_coach_response(

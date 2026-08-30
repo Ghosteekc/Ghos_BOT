@@ -411,6 +411,14 @@ def build_replay_coach_envelope(
         if ts_b not in allowed_timestamps:
             allowed_timestamps.append(ts_b)
 
+    if battle_timeline is not None:
+        duration_ts = round(float(battle_timeline.duration_seconds), 3)
+        if duration_ts > 0 and duration_ts not in allowed_timestamps:
+            allowed_timestamps.append(duration_ts)
+        duration_int = int(round(duration_ts))
+        if duration_int > 0 and float(duration_int) not in allowed_timestamps:
+            allowed_timestamps.append(float(duration_int))
+
     for item in limitations:
         human = _humanize_limitation(str(item))
         if human:

@@ -19,7 +19,11 @@ from bot.services.ghosteek_ai.replay.replay_llm_provider import DEFAULT_REPLAY_W
 from bot.services.ghosteek_ai.replay.vision_analyzer import VisionObservation
 from bot.services.ghosteek_ai.replay.vision_errors import VisionTimeout, VisionUnavailable
 from bot.services.ghosteek_ai.replay.vision_factory import create_vision_analyzer, vision_provider
-from bot.services.ghosteek_ai.replay.vision_shared import parse_vision_json_content, strip_model_thinking
+from bot.services.ghosteek_ai.replay.vision_shared import (
+    parse_vision_json_content,
+    salvage_observations_json,
+    strip_model_thinking,
+)
 
 
 def test_vision_provider_defaults_to_groq(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,7 +115,29 @@ def test_groq_payload_disables_thinking(tmp_path: Path) -> None:
     asyncio.run(_run())
     assert captured.get("reasoning_effort") == "none"
     assert captured.get("reasoning_format") == "hidden"
-    assert captured.get("max_completion_tokens") == 200
+    assert captured.get("max_completion_tokens") == 1024
+
+
+def test_salvage_truncated_vision_json() -> None:
+    raw = (
+        '```json\n{"observations":[{"event_type":"troop_visible","card_name":"Royal Recruits",'
+        '"side":"player","lane":"right","confidence":0.9},{"event_type":"building_visible",'
+        '"card_name":"Inferno Tower","sid'
+    )
+    parsed = parse_vision_json_content(raw)
+    assert isinstance(parsed, dict)
+    assert len(parsed["observations"]) == 1
+    assert parsed["observations"][0]["card_name"] == "Royal Recruits"
+
+
+def test_salvage_observations_json_helper() -> None:
+    raw = (
+        '{"observations":[{"event_type":"spell_visible","card_name":null,"side":"opponent",'
+        '"lane":"center","confidence":0.8},{"event_type":"troop_visible","card_name":"Hog Rider"'
+    )
+    salvaged = salvage_observations_json(raw)
+    assert salvaged is not None
+    assert salvaged["observations"][0]["event_type"] == "spell_visible"
 
 
 def test_replay_wording_provider_uses_separate_model(monkeypatch: pytest.MonkeyPatch) -> None:
