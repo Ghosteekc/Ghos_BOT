@@ -172,3 +172,22 @@ def test_score_balanced_sanity_remarks_same_deck():
         assert gap in eval_msgs or gap in set(
             result.evaluation_report.can_improve or ()
         ) or gap in set(result.evaluation_report.weaknesses or ())
+
+
+def test_invalid_input_is_not_normalized_or_improved() -> None:
+    """Engine callers outside the API cannot turn bad input into a new deck."""
+    original = [
+        "Hog Rider", "Hog Rider", "Musketeer", "Cannon",
+        "Ice Spirit", "Skeletons", "Fireball", "Not A Real Card",
+    ]
+    snapshot = list(original)
+
+    result = RecommendationEngine.analyze(original, apply_swaps=True, use_cache=False)
+
+    assert original == snapshot
+    assert result.improvement_plan.needed is False
+    assert result.improvement_plan.improved_deck == snapshot
+    assert result.evaluation_report is not None
+    assert result.evaluation_report.hard_constraints.passed is False
+    assert result.evaluation_report.hard_constraints.issues == ("unknown_cards",)
+    assert "неизвестн" in " ".join(result.decision_explanation.rejected).lower()

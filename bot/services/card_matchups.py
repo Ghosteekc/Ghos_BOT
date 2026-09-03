@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from bot.services.card_data import (
     COUNTERS,
+    EXCLUSIVE_COUNTER_TARGETS,
     MANUAL_COUNTERS_DENIED,
     MANUAL_COUNTERS_PARTIAL,
     MANUAL_COUNTERS_STRONG,
@@ -256,6 +257,12 @@ def card_counters_target(counter_card: str, target: str) -> str | None:
         return "strong"
     if target in MANUAL_COUNTERS_PARTIAL.get(counter_card, ()):
         return "partial"
+
+    # Не выводим дополнительные контры из snapshot/ролей для карт с
+    # намеренно закрытым списком: это предотвращает превращение value spell
+    # в универсальный ответ.
+    if counter_card in EXCLUSIVE_COUNTER_TARGETS:
+        return None
 
     allowed_offense = OFFENSE_COUNTER_ALLOWED.get(counter_card)
     if allowed_offense is not None:

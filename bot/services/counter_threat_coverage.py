@@ -108,15 +108,29 @@ def is_reliable_air_defense(card: str) -> bool:
     return bool(card_can_target_air(card))
 
 
-def is_critical_air_threat(card: str) -> bool:
-    if not card_is_flying(card):
+def _is_airborne(card: str, evolved_cards: set[str] | None = None) -> bool:
+    if card_is_flying(card):
+        return True
+    if card not in set(evolved_cards or ()):
+        return False
+    from bot.services.card_knowledge import evolution_has_role
+
+    return evolution_has_role(card, "flying")
+
+
+def is_critical_air_threat(
+    card: str, *, evolved_cards: set[str] | None = None,
+) -> bool:
+    if not _is_airborne(card, evolved_cards):
         return False
     if card in _SOFT_AIR_ONLY:
         return False
     return True
 
 
-def analyze_enemy_threats(opponent_deck: list[str]) -> list[EnemyThreat]:
+def analyze_enemy_threats(
+    opponent_deck: list[str], *, evolved_cards: set[str] | None = None,
+) -> list[EnemyThreat]:
     """Structured threat list for an opponent deck (facts only)."""
     out: list[EnemyThreat] = []
     seen: set[tuple[str, str]] = set()
@@ -127,7 +141,7 @@ def analyze_enemy_threats(opponent_deck: list[str]) -> list[EnemyThreat]:
         tags: list[str] = []
         kind: ThreatKind | None = None
 
-        if is_critical_air_threat(card):
+        if is_critical_air_threat(card, evolved_cards=evolved_cards):
             kind = "critical_air"
             tags.append("air_unit")
             if card_can_target_air(card):
@@ -145,7 +159,7 @@ def analyze_enemy_threats(opponent_deck: list[str]) -> list[EnemyThreat]:
         elif card in _CRITICAL_TANKS or (
             card_has_role(card, "win_condition")
             and get_card_elixir(card) >= 5
-            and not card_is_flying(card)
+            and not _is_airborne(card, evolved_cards)
         ):
             kind = "critical_tank"
             tags.append("tank")
@@ -178,9 +192,11 @@ def reliable_air_defense_in_deck(deck: list[str]) -> list[str]:
 def evaluate_threat_coverage(
     counter_deck: list[str],
     opponent_deck: list[str],
+    *,
+    evolved_cards: set[str] | None = None,
 ) -> ThreatCoverageReport:
     """Deck-level coverage check. Spells alone ≠ reliable air coverage."""
-    threats = analyze_enemy_threats(opponent_deck)
+    threats = analyze_enemy_threats(opponent_deck, evolved_cards=evolved_cards)
     critical = [t for t in threats if t.kind in {"critical_air", "critical_tank"}]
     aa = reliable_air_defense_in_deck(counter_deck)
 
@@ -228,7 +244,9 @@ def _has_tank_answer(deck: list[str], threat: str) -> bool:
     for card in deck:
         if is_pure_spell(card):
             continue
-        if card_has_role(card, "anti_tank") or is_building(card):
+        # Buildings count only when their actual role/matchup supports the
+        # tank answer; a passive spawner or Collector is not a tank counter.
+        if card_has_role(card, "anti_tank"):
             return True
         if card_counters_target(card, threat) in {"strong", "partial"}:
             return True
@@ -367,6 +385,7 @@ def ensure_counter_threat_coverage(
     preferred: list[str] | None = None,
     arena_id: int | None = None,
     trophies: int | None = None,
+    evolved_cards: set[str] | None = None,
 ) -> tuple[list[str], ThreatCoverageReport]:
     """Validate coverage; minimally repair critical air gaps; re-check.
 
@@ -374,7 +393,9 @@ def ensure_counter_threat_coverage(
     """
     del preferred, arena_id, trophies  # reserved for future soft repairs
     cards = [c for c in deck if c][:8]
-    report = evaluate_threat_coverage(cards, opponent_deck)
+    report = evaluate_threat_coverage(
+        cards, opponent_deck, evolved_cards=evolved_cards,
+    )
 
     if report.is_valid:
         return cards, report
@@ -396,7 +417,9 @@ def ensure_counter_threat_coverage(
         pool=pool_set,
         ranked=ranked_list,
     )
-    report = evaluate_threat_coverage(repaired, opponent_deck)
+    report = evaluate_threat_coverage(
+        repaired, opponent_deck, evolved_cards=evolved_cards,
+    )
     if swaps:
         report.repaired = True
         report.replacements = list(swaps)

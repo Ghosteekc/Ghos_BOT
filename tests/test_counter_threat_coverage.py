@@ -11,6 +11,8 @@ from bot.services.counter_threat_coverage import (
     repair_critical_air_gap,
     reliable_air_defense_in_deck,
 )
+from bot.services.counter_engine import _deck_has_air, _skip_without_opponent_air
+from bot.services.counter_threat_coverage import _has_tank_answer
 
 
 # User-reported invalid counter vs Electro Dragon (Speedy Miner = Mighty Miner).
@@ -193,3 +195,26 @@ def test_suggest_counter_keeps_existing_good_air() -> None:
     assert "Musketeer" in out or reliable_air_defense_in_deck(out)
     # Should not strip Hog
     assert "Hog Rider" in out
+
+
+def test_counter_air_classification_uses_card_profile_facts() -> None:
+    """Air routing must not rely on a second card-name list in counter_engine."""
+    assert _deck_has_air(["Electro Dragon"])
+    assert not _deck_has_air(["Valkyrie"])
+    # Ground AA/buildings remain eligible without opponent air; flying AA does not.
+    assert not _skip_without_opponent_air("Musketeer")
+    assert not _skip_without_opponent_air("Tesla")
+    assert _skip_without_opponent_air("Mega Minion")
+
+
+def test_evolution_only_airborne_role_requires_explicit_battle_state() -> None:
+    assert not _deck_has_air(["Night Witch"])
+    assert not _deck_has_air(["Royal Hogs"])
+    assert _deck_has_air(["Royal Hogs"], evolved_cards={"Royal Hogs"})
+    assert not is_critical_air_threat("Royal Hogs")
+    assert is_critical_air_threat("Royal Hogs", evolved_cards={"Royal Hogs"})
+
+
+def test_passive_building_is_not_a_tank_answer() -> None:
+    assert not _has_tank_answer(["Elixir Collector"], "Giant")
+    assert _has_tank_answer(["Cannon"], "Giant")

@@ -142,7 +142,22 @@ _AIR_META = frozenset({
 
 
 def _profile_from_meta(name: str) -> CardProfile:
-    """Fallback, если карты нет в cards.json или DB ещё не загружена."""
+    """Fallback during loader initialization; static catalog remains primary."""
+    # ``get_database`` can be unavailable while deck_builder is importing.
+    # Read the same canonical JSON directly before using the legacy metadata,
+    # so a valid card never loses its role/type facts due to that import cycle.
+    from bot.services.card_knowledge import load_card_catalog
+
+    catalog_record = load_card_catalog().get(name)
+    if isinstance(catalog_record, dict):
+        return CardProfile(
+            name=name,
+            elixir=int(catalog_record["elixir"]),
+            card_type=str(catalog_record["type"]),
+            roles=frozenset(catalog_record["roles"]),
+        )
+
+    # Legacy fallback for a name absent from the canonical catalog.
     from bot.services.card_data import CARD_META, WIN_CONDITIONS
 
     meta = CARD_META.get(name, {})

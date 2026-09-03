@@ -326,7 +326,7 @@ SPELL_CARD_COUNTERS: dict[str, list[str]] = {
     "Rocket": ["Monk"],
 }
 
-# Заклинания против зданий: Фаербол — частично, Землетряс — сильно
+# Заклинания против зданий: Фаербол — частично, Землетряс — сильно.
 SPELL_COUNTERS_BUILDINGS_STRONG = {"Earthquake"}
 SPELL_COUNTERS_BUILDINGS_PARTIAL = {"Fireball"}
 
@@ -355,8 +355,15 @@ OFFENSE_COUNTER_ALLOWED: dict[str, frozenset[str]] = {
     }),
 }
 
+# Явные контры не дополняются legacy/role fallback. Ракета — value spell,
+# а не универсальная контра зданий: связь зависит от конкретной цели.
+EXCLUSIVE_COUNTER_TARGETS: dict[str, frozenset[str]] = {
+    "Rocket": frozenset({"Sparky", "Witch", "Elixir Collector", "Elite Barbarians"}),
+}
+
 # Ручные правки поверх DeckShop (кого карта реально контрит)
 MANUAL_COUNTERS_STRONG: dict[str, frozenset[str]] = {
+    "Rocket": EXCLUSIVE_COUNTER_TARGETS["Rocket"],
     "Guards": frozenset({"P.E.K.K.A", "Mini P.E.K.K.A", "Ronin", "Prince", "Dark Prince", "Golden Knight"}),
     "Little Prince": frozenset({
         "Mega Knight", "Mini P.E.K.K.A", "P.E.K.K.A", "Prince", "Dark Prince",

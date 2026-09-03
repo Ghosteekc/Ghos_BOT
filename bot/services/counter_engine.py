@@ -3,9 +3,12 @@ from bot.services.card_data import (
     CARD_META,
     POINT_TARGET_COUNTERS,
     WIN_CONDITIONS,
+    card_can_target_air,
     card_has_role,
+    card_is_flying,
     get_card_elixir,
     get_card_roles,
+    is_building,
     is_point_target_threat,
     is_spam_card,
 )
@@ -17,29 +20,6 @@ from bot.services.deck_improver import improve_player_deck
 import logging
 
 logger = logging.getLogger(__name__)
-
-# TODO(card-profile): _ANTI_AIR / _AIR_OFFENSE / splash sets дублируют CardProfile.
-# Алгоритм counter_engine не менять на этом этапе.
-_AIR_OFFENSE = {
-    "Minions", "Minion Horde", "Baby Dragon", "Mega Minion", "Inferno Dragon",
-    "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix",
-    "Flying Machine", "Electro Dragon",
-}
-
-_ANTI_AIR = {
-    "Archers", "Musketeer", "Three Musketeers", "Wizard", "Baby Dragon", "Electro Dragon",
-    "Executioner", "Electro Wizard", "Ice Wizard", "Inferno Dragon", "Magic Archer",
-    "Flying Machine", "Minions", "Minion Horde", "Mega Minion", "Bats", "Skeleton Dragons",
-    "Firecracker", "Mother Witch", "Phoenix", "Princess", "Hunter", "Dart Goblin",
-    "Witch", "Spear Goblins", "Zappies", "Rascals", "Archer Queen", "Little Prince",
-    "Night Witch", "Tesla", "Inferno Tower",
-}
-
-_FLYING_TROOPS = {
-    "Minions", "Minion Horde", "Mega Minion", "Inferno Dragon", "Baby Dragon",
-    "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix",
-    "Flying Machine", "Electro Dragon",
-}
 
 _MAX_WIN_CONDITIONS = 1
 _MAX_SPELLS = 2
@@ -284,11 +264,13 @@ def suggest_counter_deck(
     preferred_cards: list[str] | None = None,
     user_deck: list[str] | None = None,
     trophies: int | None = None,
+    opponent_evolved_cards: set[str] | None = None,
 ) -> list[str]:
     """Adapt the player's deck to counter this opponent — keep the main attack card."""
     preferred_cards = _sanitize_card_names(preferred_cards)
     opponent_deck = _sanitize_card_names(opponent_deck)
     user_deck = _sanitize_card_names(user_deck)
+    opponent_evolved_cards = set(opponent_evolved_cards or ()) & set(opponent_deck)
 
     pool = _get_arena_pool(arena_id, trophies)
     pool = {card for card in pool if _valid_card_name(card)}
@@ -296,8 +278,8 @@ def suggest_counter_deck(
     pool.update(preferred_cards)
     pool.update(user_deck or [])
 
-    threats = _key_threats(opponent_deck)
-    opp_has_air = _deck_has_air(opponent_deck)
+    threats = _key_threats(opponent_deck, evolved_cards=opponent_evolved_cards)
+    opp_has_air = _deck_has_air(opponent_deck, evolved_cards=opponent_evolved_cards)
 
     ranked: list[tuple[float, str]] = []
     for card in pool:
@@ -326,6 +308,7 @@ def suggest_counter_deck(
             preferred=preferred_cards,
             arena_id=arena_id,
             trophies=trophies,
+            opponent_evolved_cards=opponent_evolved_cards,
         )
 
     # Fallback when user_deck is missing: build counters, then force an attack card.
@@ -367,6 +350,7 @@ def suggest_counter_deck(
         preferred=preferred_cards,
         arena_id=arena_id,
         trophies=trophies,
+        opponent_evolved_cards=opponent_evolved_cards,
     )
 
 
@@ -379,6 +363,7 @@ def _apply_threat_coverage(
     preferred: list[str],
     arena_id: int | None,
     trophies: int | None,
+    opponent_evolved_cards: set[str],
 ) -> list[str]:
     """Post-pass: critical threat coverage (esp. reliable anti-air)."""
     from bot.services.counter_threat_coverage import ensure_counter_threat_coverage
@@ -391,6 +376,7 @@ def _apply_threat_coverage(
         preferred=preferred,
         arena_id=arena_id,
         trophies=trophies,
+        evolved_cards=opponent_evolved_cards,
     )
     if report.repaired:
         logger.info(
@@ -406,26 +392,21 @@ def _apply_threat_coverage(
     return fixed[:8]
 
 
-_GROUND_COUNTERS = {"Inferno Tower", "Tesla", "Cannon", "Tombstone"}
-
-_GROUND_ANTI_AIR = frozenset({
-    "Musketeer", "Hunter", "Archers", "Firecracker", "Wizard", "Executioner",
-    "Electro Wizard", "Ice Wizard", "Magic Archer", "Dart Goblin", "Princess",
-    "Zappies", "Rascals", "Little Prince", "Archer Queen", "Witch",
-})
-
-
 def _skip_without_opponent_air(card: str) -> bool:
     """Не брать чистый анти-воздух, если у соперника нет воздуха."""
-    if card in _GROUND_COUNTERS or card in _GROUND_ANTI_AIR:
+    # CardProfile is the SoT: ground buildings and ground ranged troops can
+    # still answer ground matchups, unlike a dedicated flying AA unit.
+    if is_building(card) or (card_can_target_air(card) and not card_is_flying(card)):
         return False
-    return _is_anti_air_specialist(card) or card in _FLYING_TROOPS
+    return _is_anti_air_specialist(card)
 
 
-def _key_threats(opponent_deck: list[str]) -> list[str]:
+def _key_threats(
+    opponent_deck: list[str], *, evolved_cards: set[str] | None = None,
+) -> list[str]:
     threats: list[str] = []
     danger = (
-        _EXTRA_THREATS | _SUPPORT_THREATS | _CHAMPION_THREATS | _SPAM_THREATS | _AIR_OFFENSE
+        _EXTRA_THREATS | _SUPPORT_THREATS | _CHAMPION_THREATS | _SPAM_THREATS
     )
 
     for card in opponent_deck:
@@ -436,9 +417,9 @@ def _key_threats(opponent_deck: list[str]) -> list[str]:
         if card in danger and card not in threats:
             threats.append(card)
 
-    if _deck_has_air(opponent_deck):
+    if _deck_has_air(opponent_deck, evolved_cards=evolved_cards):
         for card in opponent_deck:
-            if card in _AIR_OFFENSE and card not in threats:
+            if _is_airborne(card, evolved_cards) and card not in threats:
                 threats.append(card)
 
     return list(dict.fromkeys(threats))
@@ -774,18 +755,28 @@ def _trim_excess(
     return out
 
 
-def _deck_has_air(deck: list[str]) -> bool:
-    from bot.services.card_data import card_is_flying
+def _is_airborne(card: str, evolved_cards: set[str] | None = None) -> bool:
+    if card_is_flying(card):
+        return True
+    if card not in set(evolved_cards or ()):
+        return False
+    from bot.services.card_knowledge import evolution_has_role
 
-    return any(c in _AIR_OFFENSE or card_is_flying(c) for c in deck)
+    return evolution_has_role(card, "flying")
+
+
+def _deck_has_air(deck: list[str], *, evolved_cards: set[str] | None = None) -> bool:
+    return any(_is_airborne(c, evolved_cards) for c in deck)
 
 
 def _is_anti_air_specialist(card: str) -> bool:
-    # Splash/hybrid air answers stay useful vs ground; pure flyers are specialists.
-    return card in _ANTI_AIR and card not in {
-        "Baby Dragon", "Wizard", "Electro Wizard", "Executioner", "Electro Dragon",
-        "Witch", "Ice Wizard", "Hunter", "Magic Archer",
-    }
+    # A flying anti-air troop that has no splash is a narrow answer when the
+    # opponent has no air. Roles come from CardProfile/cards.json.
+    return (
+        card_is_flying(card)
+        and card_can_target_air(card)
+        and not card_has_role(card, "splash")
+    )
 
 
 def build_synergy_deck(

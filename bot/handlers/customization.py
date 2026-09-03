@@ -124,6 +124,11 @@ async def counter_deck_detail(callback: CallbackQuery, user: User) -> None:
             preferred,
             user_deck=opp.get("user_deck"),
             trophies=user.trophies,
+            opponent_evolved_cards={
+                str(card.get("name"))
+                for card in opp.get("deck_cards", [])
+                if card.get("name") and int(card.get("evolution_level") or 0) >= 1
+            },
         )
 
         text = (

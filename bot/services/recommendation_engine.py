@@ -1360,20 +1360,35 @@ class RecommendationEngine:
                 return cached
 
         db = get_database()
-
-        if len(original) != 8:
+        unknown_cards = [card for card in original if db.get_card(card) is None]
+        if len(original) != 8 or len(set(original)) != len(original) or unknown_cards:
             from bot.services.deck_evaluator.models import empty_evaluation_report
 
             intent = DeckIntentEngine.infer(original, archetype=archetype or "Meta")
+            if unknown_cards:
+                invalid_reason = "В колоде есть неизвестные карты"
+                invalid_issue = "unknown_cards"
+            elif len(set(original)) != len(original):
+                invalid_reason = "В колоде есть одинаковые карты"
+                invalid_issue = "duplicate_cards"
+            else:
+                invalid_reason = "Нужна полная колода из 8 карт"
+                invalid_issue = "deck_size"
             empty_plan = GamePlan(
                 how_to_win="",
                 primary_threat="",
                 when_to_attack="",
                 key_cards=[],
                 core_combinations=[],
-                critical_weaknesses=["Нужна полная колода из 8 карт"],
+                critical_weaknesses=[invalid_reason],
             )
-            evaluation = empty_evaluation_report(original)
+            # Never "repair" input here: the original deck remains the only deck
+            # in the result until a valid 8-card request reaches the improver.
+            evaluation = empty_evaluation_report(
+                original,
+                reason=invalid_reason,
+                issue=invalid_issue,
+            )
             balance = _balance_issues_from_evaluation(evaluation)
             result = RecommendationResult(
                 intent=intent,
@@ -1390,7 +1405,7 @@ class RecommendationEngine:
                     primary_win=intent.primary_win,
                     why_gaps=_why_gaps_from_evaluation(evaluation),
                     why_picks=[],
-                    rejected=["Нужна полная колода из 8 карт"],
+                    rejected=[invalid_reason],
                     pick_explanations=[],
                 ),
                 candidate_ranking=CandidateRanking(),

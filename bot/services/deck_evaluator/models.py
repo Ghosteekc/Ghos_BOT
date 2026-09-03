@@ -103,10 +103,11 @@ def empty_evaluation_report(
     deck: list[str] | tuple[str, ...] | None = None,
     *,
     reason: str = "Нужна полная колода из 8 карт",
+    issue: str = "deck_size",
 ) -> EvaluationReport:
     """Минимальный отчёт при невалидном входе."""
     zero = AxisScore(score=0.0, notes=(reason,))
-    fail = ConstraintScore(passed=False, score=0.0, issues=("deck_size",), messages=(reason,))
+    fail = ConstraintScore(passed=False, score=0.0, issues=(issue,), messages=(reason,))
     cards = tuple(deck or ())
     return EvaluationReport(
         deck=cards,

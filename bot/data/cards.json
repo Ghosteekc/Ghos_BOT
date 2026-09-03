@@ -33,6 +33,7 @@
       "roles": [
         "air_defense",
         "anti_swarm",
+        "flying",
         "splash"
       ]
     },
@@ -40,6 +41,7 @@
       "elixir": 5,
       "type": "troop",
       "roles": [
+        "flying",
         "win_condition"
       ]
     },
@@ -83,6 +85,7 @@
       "roles": [
         "air_defense",
         "cycle",
+        "flying",
         "swarm"
       ]
     },
@@ -205,6 +208,7 @@
       "type": "troop",
       "roles": [
         "air_defense",
+        "flying",
         "splash"
       ]
     },
@@ -306,7 +310,8 @@
       "elixir": 4,
       "type": "troop",
       "roles": [
-        "air_defense"
+        "air_defense",
+        "flying"
       ]
     },
     "Freeze": {
@@ -521,6 +526,7 @@
         "anti_tank",
         "defensive",
         "dps",
+        "flying",
         "support"
       ]
     },
@@ -547,6 +553,7 @@
       "elixir": 7,
       "type": "troop",
       "roles": [
+        "flying",
         "tank",
         "win_condition"
       ]
@@ -601,7 +608,8 @@
       "elixir": 3,
       "type": "troop",
       "roles": [
-        "air_defense"
+        "air_defense",
+        "flying"
       ]
     },
     "Mighty Miner": {
@@ -639,6 +647,7 @@
       "type": "troop",
       "roles": [
         "air_defense",
+        "flying",
         "swarm"
       ]
     },
@@ -646,7 +655,8 @@
       "elixir": 3,
       "type": "troop",
       "roles": [
-        "air_defense"
+        "air_defense",
+        "flying"
       ]
     },
     "Mirror": {
@@ -815,6 +825,9 @@
       "type": "troop",
       "roles": [
         "win_condition"
+      ],
+      "evolution_roles": [
+        "flying"
       ]
     },
     "Royal Recruits": {
@@ -851,6 +864,7 @@
       "roles": [
         "air_defense",
         "anti_swarm",
+        "flying",
         "splash"
       ]
     },

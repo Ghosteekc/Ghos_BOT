@@ -769,6 +769,11 @@ async def counter_deck(index: int, user: User = Depends(require_linked_player)) 
         preferred,
         user_deck=opp.get("user_deck"),
         trophies=user.trophies,
+        opponent_evolved_cards={
+            str(card.get("name"))
+            for card in opp.get("deck_cards", [])
+            if card.get("name") and int(card.get("evolution_level") or 0) >= 1
+        },
     )
 
     return CounterDeckResponse(
