@@ -61,3 +61,35 @@ def test_spells_have_no_incoming_counters() -> None:
 
     assert card_counters_target("Monk", "Fireball") is None
     assert card_counters_target("Rocket", "The Log") is None
+
+
+def test_confirmed_counter_policy_overrides_deckshop_snapshot() -> None:
+    from bot.services.card_matchups import card_counters_target, counters_in_deck
+
+    assert card_counters_target("Hog Rider", "Valkyrie") is None
+    assert card_counters_target("Mighty Miner", "Valkyrie") == "strong"
+    assert card_counters_target("Tornado", "Goblin Barrel") == "strong"
+
+    strong, partial = counters_in_deck(
+        "Valkyrie", ["Hog Rider", "Mighty Miner", "Valkyrie"]
+    )
+    assert strong == ["Mighty Miner", "Valkyrie"]
+    assert partial == []
+
+    strong, partial = counters_in_deck(
+        "Goblin Barrel", ["Tornado", "Fireball", "The Log"]
+    )
+    assert "Tornado" in strong
+
+
+def test_primary_win_conditions_are_not_generic_counter_sources() -> None:
+    from bot.services.card_matchups import card_counters_target, get_matchups
+
+    # Снимок знает эту связь, но слой Cards Knowledge не отдаёт её как контру.
+    assert "Giant" in get_matchups("P.E.K.K.A").counters_strong
+    assert card_counters_target("P.E.K.K.A", "Giant") is None
+    for card in ("Mortar", "X-Bow", "Goblin Barrel"):
+        assert card_counters_target(card, "Knight") is None
+
+    # Вторичное давление сохраняет явно подтверждённую защитную роль.
+    assert card_counters_target("Mighty Miner", "Valkyrie") == "strong"

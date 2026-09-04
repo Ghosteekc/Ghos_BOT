@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bot.services.card_data import is_pure_spell
+from bot.services.card_data import is_primary_win_condition, is_pure_spell
 from bot.services.card_matchups import (
     calculate_deck_synergy,
     counters_in_deck,
@@ -30,6 +30,13 @@ def _dedupe(items: list[str], limit: int = 8) -> list[str]:
 
 def _analyze_own_card(card: str, own_deck: list[str], opp_deck: list[str]) -> dict:
     label = ru(card)
+
+    # Главная атакующая карта не является «контрой» других карт. Её роль в
+    # сравнении колод — создавать давление на башню; ответы на угрозы ищутся
+    # среди защитных карт колоды.
+    if is_primary_win_condition(card):
+        return _note(card, "neutral", f"{label} — атакующая карта")
+
     strong_opp, partial_opp = targets_countered_by(card, opp_deck)
     opp_strong, opp_partial = counters_in_deck(card, opp_deck)
 

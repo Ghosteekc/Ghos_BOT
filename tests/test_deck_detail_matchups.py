@@ -35,9 +35,9 @@ def test_no_effective_counters_for_cycle_fodder() -> None:
     assert _suggested_counters("Skeletons") == []
 
 
-def test_deckshop_building_answers_are_used_without_win_condition_filter() -> None:
-    assert "Hog Rider" in _effective_counters(HOG_2_6, "Tesla")
-    assert "Hog Rider" in _effective_counters(HOG_2_6, "Cannon")
+def test_win_condition_is_not_presented_as_a_generic_counter() -> None:
+    assert "Hog Rider" not in _effective_counters(HOG_2_6, "Tesla")
+    assert "Hog Rider" not in _effective_counters(HOG_2_6, "Cannon")
 
 
 def test_real_answers_still_work() -> None:

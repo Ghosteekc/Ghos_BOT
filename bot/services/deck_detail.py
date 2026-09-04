@@ -118,7 +118,7 @@ def _analyze_opponent_card_matchups(deck_cards: list[str], deck_battles: list[di
                     "games": total,
                     "reason": (
                         "Есть ответ ("
-                        f"{', '.join(card_name_ru(c, short=True) or c for c in counters[:2])}"
+                        f"{', '.join(card_name_ru(c, short=True) or c for c in counters[:3])}"
                         ")"
                     ),
                 })

@@ -2,8 +2,9 @@
 
 Источник контров: DeckShop offline snapshot.
 
-Единственное правило Ghosteek поверх снимка: заклинание может контрить
-другую карту, но само не имеет входящей карты-контры.
+Правила Ghosteek поверх снимка: заклинание может контрить другую карту,
+но само не имеет входящей карты-контры; основная атакующая карта не
+выдаётся за защитную контру.
 
 Синергии: DeckShop → SYNERGIES из card_data.
 Snapshot читается только с диска — без HTTP к DeckShop.
@@ -13,8 +14,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bot.data.card_counter_policy import (
+    COUNTER_SOURCES_EXCLUDED,
+    COUNTER_TIER_OVERRIDES,
+    MIRROR_ANSWER_TIERS,
+)
 from bot.services.card_data import (
     SYNERGIES,
+    is_primary_win_condition,
     is_pure_spell,
 )
 from bot.services.card_names_ru import card_name_ru
@@ -149,9 +156,13 @@ def counters_in_deck(threat: str, deck: list[str]) -> tuple[list[str], list[str]
     strong: list[str] = []
     partial: list[str] = []
     for card in deck:
-        if card == threat:
-            continue
-        tier = card_counters_target(card, threat)
+        # Саму карту не записываем в граф контр, но в колоде она может быть
+        # зеркальным защитным ответом (например, Валькирия на Валькирию).
+        tier = (
+            MIRROR_ANSWER_TIERS.get(card)
+            if card == threat
+            else card_counters_target(card, threat)
+        )
         if tier == "strong":
             strong.append(card)
         elif tier == "partial":
@@ -164,9 +175,21 @@ def card_counters_target(counter_card: str, target: str) -> str | None:
     if counter_card == target:
         return None
 
+    if counter_card in COUNTER_SOURCES_EXCLUDED:
+        return None
+
+    # Win condition — план атаки на башню, не универсальный защитный ответ.
+    # Вторичное давление (например, Mighty Miner) не исключаем: такие карты
+    # могут быть подтверждённой контрой в обороне.
+    if is_primary_win_condition(counter_card):
+        return None
+
     # Заклинание может контрить карту, но само не имеет входящей контры.
     if is_pure_spell(target):
         return None
+    override = COUNTER_TIER_OVERRIDES.get(counter_card, {}).get(target)
+    if override:
+        return override
     return _deckshop_counter_tier(counter_card, target)
 
 
