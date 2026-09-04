@@ -1167,6 +1167,7 @@ class MetaWarResponse(BaseModel):
     status: str
     message: str | None = None
     source: str = ""
+    source_kind: str = ""
     source_url: str = ""
     updated_at: str | None = None
     sample_note: str = ""

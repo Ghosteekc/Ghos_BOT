@@ -33,3 +33,18 @@ def test_observation_skips_non_ladder_cache_row():
         trophy_change=None,
     )
     assert observation_from_battle_cache_row(row) is None
+
+
+def test_observation_skips_zero_trophy_delta_cache_row():
+    row = BattleCache(
+        player_tag="#aaa",
+        battle_time="20260818T120000.000z",
+        result="win",
+        user_deck="A,B,C,D,E,F,G,H",
+        opponent_deck="",
+        user_deck_json="",
+        opponent_name="",
+        opponent_tag="#BBB",
+        trophy_change=0,
+    )
+    assert observation_from_battle_cache_row(row) is None

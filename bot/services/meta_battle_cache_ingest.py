@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import settings
 from bot.models.database import BattleCache
+from bot.services.battle_time import normalize_battle_time
 from bot.services.card_icons import deck_card_info_from_parsed, parse_deck_cards_json
+from bot.services.clash_api import normalize_tag
 from bot.services.meta_stats import (
     MODE_TROPHIES,
     cards_csv,
@@ -36,8 +38,23 @@ def _cards_from_cache_row(row: BattleCache) -> list[dict[str, Any]] | None:
 
 
 def observation_from_battle_cache_row(row: BattleCache) -> dict[str, Any] | None:
-    """Ladder battle cached from a linked Ghosteek user (trophyChange present)."""
-    if row.trophy_change is None:
+    """Verified Trophy Road battle cached from a linked Ghosteek user.
+
+    ``BattleCache`` does not retain the original game-mode name.  A non-zero
+    trophy delta is therefore the only reliable mode signal available here;
+    accepting zero/missing values would mix cached, ranked, and casual rows
+    into Trophy Road statistics.
+    """
+    try:
+        trophy_change = int(row.trophy_change) if row.trophy_change is not None else 0
+    except (TypeError, ValueError):
+        return None
+    if trophy_change == 0:
+        return None
+
+    player_tag = normalize_tag(row.player_tag)
+    battle_time = normalize_battle_time(row.battle_time)
+    if not player_tag or not battle_time:
         return None
 
     parsed = _cards_from_cache_row(row)
@@ -58,10 +75,10 @@ def observation_from_battle_cache_row(row: BattleCache) -> dict[str, Any] | None
         result = "draw"
 
     return {
-        "dedupe_key": observation_dedupe_key(row.player_tag, row.battle_time, MODE_TROPHIES),
-        "player_tag": row.player_tag,
+        "dedupe_key": observation_dedupe_key(player_tag, battle_time, MODE_TROPHIES),
+        "player_tag": player_tag,
         "opponent_tag": (row.opponent_tag or "").strip(),
-        "battle_time": row.battle_time,
+        "battle_time": battle_time,
         "mode": MODE_TROPHIES,
         "trophy_count": None,
         "deck_hash": deck_hash,

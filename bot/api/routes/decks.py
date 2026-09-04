@@ -47,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.battle_service import BATTLE_LOG_LIMIT, get_cached_stats, load_and_persist
 
 from bot.services.battle_cache_reader import get_battles_for_trophy_chart, get_battles_for_winrate_chart
-from bot.services.card_icons import deck_card_info_from_parsed
+from bot.services.card_icons import cards_from_team, deck_card_info_from_parsed
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_card_info
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.card_data import get_card_elixir
@@ -159,6 +159,25 @@ def _user_current_deck(battles: list, tag: str) -> list[str]:
             deck = [c.get("name") for c in team.get("cards", []) if c.get("name")]
             if len(deck) == 8:
                 return deck
+    return []
+
+
+def _latest_played_user_deck(battles: list, tag: str) -> list[dict]:
+    """Return the user's newest complete deck that was actually played.
+
+    A Clash profile's ``currentDeck`` is only an equipped loadout.  It may
+    never have appeared in battle history, so it must not be used as the
+    player's deck in a matchup comparison.
+    """
+    tag_norm = normalize_tag(tag)
+    for battle in battles:
+        team = (battle.get("team") or [{}])[0] or {}
+        team_tag = team.get("tag") or ""
+        if not team_tag or normalize_tag(team_tag) != tag_norm:
+            continue
+        parsed = cards_from_team(team)
+        if len(parsed) == 8:
+            return parsed
     return []
 
 
@@ -534,30 +553,16 @@ async def compare_user_deck(
     if len(ref_cards) != 8:
         raise HTTPException(status_code=400, detail="Нужно ровно 8 карт для сравнения")
 
-    battles = await _get_battles(user)
-    profile_deck = await _fetch_profile_current_deck(user.player_tag or "")
-    if len(profile_deck) == 8:
-        user_cards = [c["name"] for c in profile_deck]
-        user_infos = _parsed_to_deck_card_infos(profile_deck)
-    else:
-        user_cards = _user_current_deck(battles, user.player_tag or "")
-        if len(user_cards) != 8:
-            raise HTTPException(
-                status_code=404,
-                detail="Не найдена ваша текущая колода в последних боях",
-            )
-        # Prefer evo/hero from the matching battle team payload.
-        user_infos = await _cards_to_deck_infos(user_cards)
-        tag_norm = normalize_tag(user.player_tag or "")
-        for battle in battles:
-            team = battle.get("team", [{}])[0]
-            if team.get("tag") and normalize_tag(team.get("tag", "")) == tag_norm:
-                from bot.services.card_icons import cards_from_team
-
-                parsed = cards_from_team(team)
-                if len(parsed) == 8 and [c["name"] for c in parsed] == user_cards:
-                    user_infos = _parsed_to_deck_card_infos(parsed)
-                    break
+    live_battles = await _get_battles(user)
+    battles = await load_full_battles(user.player_tag or "", live_battles)
+    played_deck = _latest_played_user_deck(battles, user.player_tag or "")
+    if len(played_deck) != 8:
+        raise HTTPException(
+            status_code=404,
+            detail="Не найдена ваша сыгранная колода в истории боёв",
+        )
+    user_cards = [card["name"] for card in played_deck]
+    user_infos = _parsed_to_deck_card_infos(played_deck)
 
     result = compare_decks(user_cards, ref_cards)
     from bot.services.meta_analyzer import _guess_deck_name

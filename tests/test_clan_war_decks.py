@@ -6,11 +6,15 @@ from bot.services.clan_war_decks import (
 )
 
 
-def test_clan_war_snapshot_empty_is_unavailable():
+def test_clan_war_snapshot_empty_is_unavailable(tmp_path, monkeypatch):
+    import bot.services.clan_war_decks as clan_war_decks
+
+    monkeypatch.setattr(clan_war_decks, "SNAPSHOT_PATH", tmp_path / "missing.json")
     snap = load_clan_war_snapshot()
     assert snap["available"] is False
     assert snap["decks"] == []
     assert snap["source"] == ""
+    assert snap["source_kind"] == ""
     assert "КВ" in (snap["message"] or "")
 
 

@@ -20,6 +20,16 @@ SAMPLE_NOTE = (
 )
 
 
+def _snapshot_is_stale(updated_at: datetime | None, *, now: datetime | None = None) -> bool:
+    """Whether the persisted sample is older than its advertised refresh window."""
+    if updated_at is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return now - updated_at > timedelta(hours=max(1, settings.meta_refresh_hours))
+
+
 def _cards_from_aggregate(row: MetaDeckAggregate) -> list[dict[str, Any]]:
     if row.cards_json:
         try:
@@ -181,9 +191,18 @@ async def get_ladder_meta(mode: str) -> dict[str, Any]:
         "429" in snapshot_source
         or ":error:" in snapshot_source
     )
+    only_low_sample = bool(decks) and all(item["low_sample"] for item in decks)
+    snapshot_stale = _snapshot_is_stale(updated_at)
     if decks:
-        status = "stale" if collector_failed else "ok"
-        message = "Мета временно не обновлена." if collector_failed else None
+        if collector_failed or snapshot_stale:
+            status = "stale"
+            message = "Мета временно не обновлена; показана последняя накопленная выборка."
+        elif only_low_sample:
+            status = "insufficient"
+            message = "Предварительная мета — мало боёв в выборке, данные накапливаются."
+        else:
+            status = "ok"
+            message = None
     elif any(row.total_games > 0 for row in rows):
         status = "insufficient"
         message = (
@@ -241,13 +260,24 @@ async def get_clan_wars_meta() -> dict[str, Any]:
             "deck_link": build_deck_share_link(names),
         })
     available = bool(snap["available"])
+    source_kind = snap.get("source_kind") or ""
+    curated = source_kind == "curated"
     return {
         "mode": "clan_wars",
-        "status": "ok" if available else "unavailable",
-        "message": None if available else snap.get("message"),
+        "status": "curated" if available and curated else ("ok" if available else "unavailable"),
+        "message": (
+            "Показаны базовые рекомендации для КВ, а не статистика боёв."
+            if available and curated
+            else (None if available else snap.get("message"))
+        ),
         "source": snap.get("source") or "",
+        "source_kind": source_kind,
         "source_url": snap.get("source_url") or "",
         "updated_at": snap.get("updated_at"),
-        "sample_note": "Колоды КВ из выборки Ghosteek или базовой подборки, если боёв КВ ещё нет.",
+        "sample_note": (
+            "Колоды КВ из выборки Ghosteek."
+            if not curated
+            else "Базовая подборка КВ; показатели популярности и винрейта не рассчитываются."
+        ),
         "decks": decks,
     }

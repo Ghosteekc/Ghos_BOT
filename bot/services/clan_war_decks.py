@@ -31,6 +31,7 @@ def load_clan_war_snapshot() -> dict[str, Any]:
     if not SNAPSHOT_PATH.exists():
         return {
             "available": False,
+            "source_kind": "",
             "source": "",
             "source_url": "",
             "updated_at": None,
@@ -43,6 +44,7 @@ def load_clan_war_snapshot() -> dict[str, Any]:
         logger.warning("Clan-war snapshot unreadable: %s", exc)
         return {
             "available": False,
+            "source_kind": "",
             "source": "",
             "source_url": "",
             "updated_at": None,
@@ -67,8 +69,10 @@ def load_clan_war_snapshot() -> dict[str, Any]:
         })
 
     available = bool(source) and bool(cleaned)
+    source_kind = "curated" if source == FALLBACK_SOURCE_LABEL else "sample"
     return {
         "available": available,
+        "source_kind": source_kind if available else "",
         "source": source,
         "source_url": str(raw.get("source_url") or "").strip(),
         "updated_at": raw.get("updated_at"),
@@ -147,7 +151,11 @@ async def refresh_clan_war_snapshot(
     min_games: int = 2,
     limit: int = 12,
 ) -> dict[str, Any]:
-    """Scan player battlelogs for clan-war battles and persist top decks."""
+    """Scan player battlelogs for clan-war battles and persist top decks.
+
+    The curated fallback is deliberately tagged separately from a battlelog
+    sample.  It is a set of recommendations, never clan-war statistics.
+    """
     counts: Counter[str] = Counter()
     deck_cards: dict[str, list[str]] = {}
     sem = asyncio.Semaphore(max(1, concurrency))
