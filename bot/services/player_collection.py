@@ -6,6 +6,7 @@ import logging
 import re
 
 from bot.services.card_data import get_card_elixir
+from bot.services.card_knowledge import canonical_card_names
 from bot.services.card_level import to_display_level, to_display_max_level
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_registry import ensure_cards_loaded, get_card_info, resolve_card_icon, resolve_card_name
@@ -17,12 +18,29 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower()
 
 
-def _mastery_card_name(badge_name: str) -> str:
-    resolved = resolve_card_name(badge_name.removeprefix("Mastery"))
+# These mastery badges are not playable cards. The API may return them beside
+# the real card's mastery badge; showing them creates duplicate fake cards.
+_NON_CARD_MASTERY_BADGES = frozenset({
+    "elitearcher",
+    "snowball",
+    "angrybarbarians",
+    "darkwitch",
+    "minisparkys",
+    "skeletonballoon",
+    "witchmother",
+})
+
+
+def _mastery_card_name(badge_name: str) -> str | None:
+    raw = badge_name.removeprefix("Mastery").strip()
+    badge_key = re.sub(r"[^a-z0-9]", "", raw.lower())
+    if badge_key in _NON_CARD_MASTERY_BADGES:
+        return None
+
+    resolved = resolve_card_name(raw)
     if resolved:
         return resolved
-    raw = badge_name.removeprefix("Mastery")
-    return re.sub(r"\s+", " ", re.sub(r"(?<!^)(?=[A-Z])", " ", raw)).strip()
+    return None
 
 
 def _parse_card_upgrades(owned_raw: dict, info: dict | None = None) -> dict:
@@ -353,12 +371,15 @@ async def build_player_collection(player: dict) -> dict:
                 "icon_hero": info.get("hero_icon") or base,
             })
 
-    mastery_entries: list[dict] = []
+    mastery_by_card: dict[str, dict] = {}
+    canonical_cards = canonical_card_names()
     for badge in badges:
         bname = badge.get("name") or ""
         if not bname.startswith("Mastery"):
             continue
         card_en = _mastery_card_name(bname)
+        if card_en is None or card_en not in canonical_cards:
+            continue
         info = get_card_info(card_en) or {}
         owned_raw = player_cards.get(_normalize_name(card_en))
         base, icon_evo, icon_hero = _resolve_icons(owned_raw, info or {})
@@ -378,7 +399,7 @@ async def build_player_collection(player: dict) -> dict:
         target = badge.get("target")
         target_int = int(target) if target is not None else None
         pct = round(progress / target_int * 100, 1) if target_int and target_int > 0 else 100.0
-        mastery_entries.append({
+        entry = {
             "card_name": card_en,
             "card_name_ru": card_name_ru(card_en),
             "icon": _primary_icon(base, icon_evo, icon_hero, mode),
@@ -392,7 +413,14 @@ async def build_player_collection(player: dict) -> dict:
             "target": target_int,
             "progress_percent": min(100.0, pct),
             "next_hint": _mastery_next_hint(level, progress, target_int, max_level),
-        })
+        }
+        existing = mastery_by_card.get(card_en)
+        if existing is None or (entry["level"], entry["progress"]) > (
+            existing["level"], existing["progress"]
+        ):
+            mastery_by_card[card_en] = entry
+
+    mastery_entries = list(mastery_by_card.values())
     mastery_entries.sort(key=lambda x: (-x["level"], x["card_name_ru"]))
 
     owned_cards = sum(1 for c in card_entries if c["owned"])
