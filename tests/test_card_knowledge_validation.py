@@ -50,19 +50,14 @@ def test_all_card_relationships_resolve_to_catalog_cards() -> None:
     assert validate_card_knowledge() == []
 
 
-def test_rocket_is_a_strong_counter_to_elixir_collector() -> None:
+def test_rocket_uses_deckshop_counter_data() -> None:
     from bot.services.card_matchups import card_counters_target
 
-    assert card_counters_target("Rocket", "Elixir Collector") == "strong"
+    assert card_counters_target("Rocket", "Hog Rider") == "strong"
 
 
-def test_rocket_counter_targets_are_explicit_and_exclusive() -> None:
-    from bot.services.card_knowledge import canonical_card_names
+def test_spells_have_no_incoming_counters() -> None:
     from bot.services.card_matchups import card_counters_target
 
-    assert {
-        target
-        for target in canonical_card_names()
-        if card_counters_target("Rocket", target) == "strong"
-    } == {"Sparky", "Witch", "Elixir Collector", "Elite Barbarians"}
-    assert card_counters_target("Rocket", "Tesla") is None
+    assert card_counters_target("Monk", "Fireball") is None
+    assert card_counters_target("Rocket", "The Log") is None

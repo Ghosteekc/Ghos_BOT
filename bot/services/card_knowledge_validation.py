@@ -30,7 +30,6 @@ def validate_card_knowledge() -> list[str]:
     from bot.data.deckshop_counters import DECKSHOP_COUNTERS
     from bot.services.card_data import (
         COUNTERS,
-        EXCLUSIVE_COUNTER_TARGETS,
         MANUAL_COUNTERS_DENIED,
         MANUAL_COUNTERS_PARTIAL,
         MANUAL_COUNTERS_STRONG,
@@ -50,7 +49,6 @@ def validate_card_knowledge() -> list[str]:
 
     for label, relations in (
         ("COUNTERS", COUNTERS),
-        ("EXCLUSIVE_COUNTER_TARGETS", EXCLUSIVE_COUNTER_TARGETS),
         ("SYNERGIES", SYNERGIES),
         ("MANUAL_COUNTERS_STRONG", MANUAL_COUNTERS_STRONG),
         ("MANUAL_COUNTERS_PARTIAL", MANUAL_COUNTERS_PARTIAL),
@@ -69,7 +67,7 @@ def validate_card_knowledge() -> list[str]:
         if not isinstance(row, dict):
             errors.append(f"DECKSHOP_COUNTERS: {source!r} row must be an object")
             continue
-        for field in ("counters_vs_attack", "synergy_offense"):
+        for field in ("counters_vs_attack", "counters_vs_defense", "synergy_offense"):
             tiers = row.get(field) or {}
             if not isinstance(tiers, dict):
                 errors.append(f"DECKSHOP_COUNTERS: {source!r}.{field} must be an object")
@@ -80,9 +78,17 @@ def validate_card_knowledge() -> list[str]:
                 if not isinstance(targets, list):
                     errors.append(f"DECKSHOP_COUNTERS: {source!r}.{field}.{tier} must be a list")
                     continue
+                if len(targets) != len(set(targets)):
+                    errors.append(
+                        f"DECKSHOP_COUNTERS: {source!r}.{field}.{tier} contains duplicate cards"
+                    )
                 for target in targets:
                     if target not in known_names:
                         errors.append(
                             f"DECKSHOP_COUNTERS: {source!r}.{field} references unknown card {target!r}"
+                        )
+                    elif target == source and field.startswith("counters_"):
+                        errors.append(
+                            f"DECKSHOP_COUNTERS: {source!r}.{field} must not contain a self-counter"
                         )
     return errors

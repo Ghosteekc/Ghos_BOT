@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from bot.services.card_data import (
-    COUNTERS,
     WIN_CONDITIONS,
     card_has_role,
     get_card_elixir,
@@ -150,18 +149,7 @@ def _opp_has_air(opp: list[str]) -> bool:
 
 
 def _spell_answers_target(spell: str, target: str) -> bool:
-    if spell in (COUNTERS.get(target) or []):
-        return True
-    if card_counters_target(spell, target) in {"strong", "partial"}:
-        return True
-    # Явные hold-пары, которые логичны по роли даже без записи в COUNTERS.
-    if spell == "Poison" and target in {"Graveyard", "Goblin Barrel", "Skeleton Barrel"}:
-        return True
-    if spell == "Fireball" and target in _SPELL_HOLD_TARGETS["Fireball"]:
-        return True
-    if spell == "Earthquake" and (is_building(target) or target in _DEFENSIVE_BUILDINGS | _SIEGE):
-        return True
-    return False
+    return card_counters_target(spell, target) in {"strong", "partial"}
 
 
 @dataclass

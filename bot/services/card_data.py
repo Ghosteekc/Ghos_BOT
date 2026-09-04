@@ -320,23 +320,17 @@ POINT_TARGET_COUNTERS = {
     "Cannon", "Tesla", "Tombstone", "Inferno Tower", "Mega Knight",
 }
 
-# На заклинания нет карты-контры, кроме Монаха — отражает Фаербол и Ракету
-SPELL_CARD_COUNTERS: dict[str, list[str]] = {
-    "Fireball": ["Monk"],
-    "Rocket": ["Monk"],
-}
-
 # Заклинания против зданий: Фаербол — частично, Землетряс — сильно.
 SPELL_COUNTERS_BUILDINGS_STRONG = {"Earthquake"}
 SPELL_COUNTERS_BUILDINGS_PARTIAL = {"Fireball"}
 
-# «Мыши» и скелеты (мелкий спам) — для исключений у атакующих карт
+# «Мыши» и скелеты (мелкий спам) — legacy deck heuristics.
 MICE_AND_SKELETONS = frozenset({
     "Minions", "Skeletons", "Bats", "Spear Goblins", "Skeleton Army",
     "Goblins", "Fire Spirit", "Ice Spirit", "Electro Spirit", "Skeletons",
 })
 
-# Win-condition атакующие карты не контрят никого, кроме явных исключений
+# Legacy deck heuristics; counter resolver uses DeckShop snapshot directly.
 OFFENSE_COUNTER_ALLOWED: dict[str, frozenset[str]] = {
     "Goblin Giant": MICE_AND_SKELETONS,
     "Bandit": MICE_AND_SKELETONS,
@@ -355,15 +349,8 @@ OFFENSE_COUNTER_ALLOWED: dict[str, frozenset[str]] = {
     }),
 }
 
-# Явные контры не дополняются legacy/role fallback. Ракета — value spell,
-# а не универсальная контра зданий: связь зависит от конкретной цели.
-EXCLUSIVE_COUNTER_TARGETS: dict[str, frozenset[str]] = {
-    "Rocket": frozenset({"Sparky", "Witch", "Elixir Collector", "Elite Barbarians"}),
-}
-
-# Ручные правки поверх DeckShop (кого карта реально контрит)
+# Legacy manual relations. Counter resolver uses the DeckShop snapshot directly.
 MANUAL_COUNTERS_STRONG: dict[str, frozenset[str]] = {
-    "Rocket": EXCLUSIVE_COUNTER_TARGETS["Rocket"],
     "Guards": frozenset({"P.E.K.K.A", "Mini P.E.K.K.A", "Ronin", "Prince", "Dark Prince", "Golden Knight"}),
     "Little Prince": frozenset({
         "Mega Knight", "Mini P.E.K.K.A", "P.E.K.K.A", "Prince", "Dark Prince",
@@ -495,11 +482,6 @@ def is_pure_spell(name: str) -> bool:
     from bot.services.card_profile import get_card_profile
 
     return get_card_profile(name).is_pure_spell
-
-
-def card_counters_for_spell(spell: str) -> list[str]:
-    """Карты, которые контрят заклинание (единственное исключение — Монах)."""
-    return list(SPELL_CARD_COUNTERS.get(spell, []))
 
 
 def is_building(name: str) -> bool:

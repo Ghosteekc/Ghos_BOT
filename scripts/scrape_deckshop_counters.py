@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import re
 import time
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT_PATH = ROOT / "bot" / "data" / "deckshop_counters.py"
 
 BASE_URL = "https://www.deckshop.pro/ru/card/detail/{slug}"
-STATS_URL = "https://www.deckshop.pro/ru/card/stats"
+CARD_LIST_URL = "https://www.deckshop.pro/ru/card/list"
 USER_AGENT = "GhosteekBot/1.0 (counter research; +https://github.com/Ghosteekc/Ghos_BOT)"
 
 CARD_ANCHOR = re.compile(
@@ -213,6 +214,17 @@ def _parse_card_page(slug: str, html: str, index: dict[str, str]) -> dict:
             # unknown list — treat as counters if only one exists
             counters[list_id] = bucket
 
+    # DeckShop occasionally repeats cards inside relationship blocks. A card
+    # cannot counter or synergize with itself, so keep the snapshot graph clean.
+    for bucket in (*counters.values(), *synergy.values()):
+        strong = list(dict.fromkeys(target for target in bucket["strong"] if target != card_name))
+        bucket["strong"] = strong
+        bucket["partial"] = list(dict.fromkeys(
+            target
+            for target in bucket["partial"]
+            if target != card_name and target not in strong
+        ))
+
     # Normalize primary keys
     def _pick(mapping: dict, *keys: str) -> dict[str, list[str]] | None:
         for key in keys:
@@ -260,28 +272,44 @@ def _add_anti_counters(cards: dict[str, dict]) -> None:
 
 
 def fetch_all_slugs() -> list[str]:
-    html = _fetch(STATS_URL)
+    # /card/stats can lag behind the public catalog. The list page is the
+    # authoritative inventory used by DeckShop itself (currently 122 cards).
+    html = _fetch(CARD_LIST_URL)
     slugs = sorted(set(re.findall(r"/card/detail/([a-z0-9-]+)", html)))
     return slugs
 
 
-def scrape(slugs: list[str], delay: float = 0.35) -> dict[str, dict]:
+def scrape(slugs: list[str], delay: float = 0.35, workers: int = 1) -> dict[str, dict]:
     index = _build_name_index()
     out: dict[str, dict] = {}
     total = len(slugs)
-    for i, slug in enumerate(slugs, 1):
+    def fetch_one(i: int, slug: str) -> tuple[int, str, dict | None, str | None]:
         url = BASE_URL.format(slug=slug)
         try:
             html = _fetch(url)
-            data = _parse_card_page(slug, html, index)
+            return i, slug, _parse_card_page(slug, html, index), None
+        except urllib.error.HTTPError as e:
+            return i, slug, None, f"HTTP {e.code}"
+        except Exception as e:
+            return i, slug, None, str(e)
+
+    if workers <= 1:
+        results = []
+        for i, slug in enumerate(slugs, 1):
+            results.append(fetch_one(i, slug))
+            if i < total:
+                time.sleep(delay)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(fetch_one, i, slug) for i, slug in enumerate(slugs, 1)]
+            results = [future.result() for future in as_completed(futures)]
+
+    for i, slug, data, error in sorted(results):
+        if data is not None:
             out[data["name"]] = data
             print(f"[{i}/{total}] {data['name']} — counters {data['counter_count']}")
-        except urllib.error.HTTPError as e:
-            print(f"[{i}/{total}] SKIP {slug}: HTTP {e.code}")
-        except Exception as e:
-            print(f"[{i}/{total}] ERROR {slug}: {e}")
-        if i < total:
-            time.sleep(delay)
+        else:
+            print(f"[{i}/{total}] SKIP {slug}: {error}")
     return out
 
 
@@ -344,6 +372,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--slug", action="append", help="Scrape only specific slug(s)")
     parser.add_argument("--delay", type=float, default=0.35)
+    parser.add_argument("--workers", type=int, default=1, help="Concurrent public requests (default: 1)")
     args = parser.parse_args()
 
     if args.slug:
@@ -353,7 +382,7 @@ def main() -> None:
         slugs = fetch_all_slugs()
         print(f"Found {len(slugs)} slugs")
 
-    cards = scrape(slugs, delay=args.delay)
+    cards = scrape(slugs, delay=args.delay, workers=max(1, args.workers))
     _add_anti_counters(cards)
     write_module(cards, slugs)
 

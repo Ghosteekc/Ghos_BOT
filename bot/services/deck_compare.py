@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bot.services.card_data import card_counters_for_spell, is_pure_spell
+from bot.services.card_data import is_pure_spell
 from bot.services.card_matchups import (
     calculate_deck_synergy,
     counters_in_deck,
@@ -142,7 +142,7 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict:
     ref_worse: list[str] = []
 
     for threat in ref_cards:
-        if is_pure_spell(threat) and not card_counters_for_spell(threat):
+        if is_pure_spell(threat):
             continue
         t = ru(threat)
         strong, partial = counters_in_deck(threat, user_cards)
@@ -157,7 +157,7 @@ def compare_decks(user_cards: list[str], ref_cards: list[str]) -> dict:
             ref_better.append(f"{t} в колоде арены сложнее остановить")
 
     for threat in user_cards:
-        if is_pure_spell(threat) and not card_counters_for_spell(threat):
+        if is_pure_spell(threat):
             continue
         t = ru(threat)
         strong, partial = counters_in_deck(threat, ref_cards)

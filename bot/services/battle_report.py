@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from bot.services.card_data import (
-    COUNTERS,
     POINT_TARGET_COUNTERS,
     WIN_CONDITIONS,
     card_has_role,
@@ -134,7 +133,14 @@ def _generic_counters(threat: str) -> list[str]:
 
 
 def _counter_list(threat: str) -> list[str]:
-    return COUNTERS.get(threat) or _generic_counters(threat)
+    """Canonical counter list from the shared DeckShop-backed resolver."""
+    from bot.services.card_knowledge import canonical_card_names
+    from bot.services.card_matchups import card_counters_target
+
+    cards = sorted(canonical_card_names())
+    strong = [card for card in cards if card_counters_target(card, threat) == "strong"]
+    partial = [card for card in cards if card_counters_target(card, threat) == "partial"]
+    return strong + partial
 
 
 def _damage_score(

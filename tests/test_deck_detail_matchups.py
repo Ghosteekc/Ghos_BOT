@@ -1,4 +1,4 @@
-"""Mine deck matchup reasons: no cycle counters, no wincon-as-building-answer."""
+"""Mine deck matchup reasons: snapshot-backed counters and no cycle advice."""
 
 from __future__ import annotations
 
@@ -35,12 +35,9 @@ def test_no_effective_counters_for_cycle_fodder() -> None:
     assert _suggested_counters("Skeletons") == []
 
 
-def test_buildings_not_answered_by_attacking_wincons() -> None:
-    # Legacy COUNTERS lists Hog vs Tesla/Cannon — must not surface as «Есть ответ».
-    assert "Hog Rider" not in _effective_counters(HOG_2_6, "Tesla")
-    assert "Hog Rider" not in _effective_counters(HOG_2_6, "Cannon")
-    assert "Hog Rider" not in _suggested_counters("Tesla")
-    assert "Hog Rider" not in _suggested_counters("Cannon")
+def test_deckshop_building_answers_are_used_without_win_condition_filter() -> None:
+    assert "Hog Rider" in _effective_counters(HOG_2_6, "Tesla")
+    assert "Hog Rider" in _effective_counters(HOG_2_6, "Cannon")
 
 
 def test_real_answers_still_work() -> None:

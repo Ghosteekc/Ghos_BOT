@@ -1,10 +1,9 @@
 """Контры и синергии карт.
 
-Приоритет источников контров:
-1. Ручные правила (MANUAL_COUNTERS, spells, offense WC)
-2. DeckShop offline snapshot (если доступен)
-3. Legacy COUNTERS из card_data
-4. Роли карт (air_defense / anti_swarm / anti_tank)
+Источник контров: DeckShop offline snapshot.
+
+Единственное правило Ghosteek поверх снимка: заклинание может контрить
+другую карту, но само не имеет входящей карты-контры.
 
 Синергии: DeckShop → SYNERGIES из card_data.
 Snapshot читается только с диска — без HTTP к DeckShop.
@@ -15,25 +14,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from bot.services.card_data import (
-    COUNTERS,
-    EXCLUSIVE_COUNTER_TARGETS,
-    MANUAL_COUNTERS_DENIED,
-    MANUAL_COUNTERS_PARTIAL,
-    MANUAL_COUNTERS_STRONG,
-    OFFENSE_COUNTER_ALLOWED,
     SYNERGIES,
-    card_counters_for_spell,
-    is_building,
-    is_offense_win_condition,
-    is_point_target_threat,
     is_pure_spell,
-    is_spam_card,
-    spell_counter_tier_vs_building,
 )
 from bot.services.card_names_ru import card_name_ru
 from bot.services.deckshop_data import get_deckshop_status_summary, load_deckshop_snapshot
 
-# TODO(card-profile): _card_roles уже читает loader; callers ещё смешивают legacy COUNTERS/SYNERGIES.
+# TODO(card-profile): SYNERGIES remains legacy until its consumers migrate.
 
 
 @dataclass(frozen=True)
@@ -46,19 +33,6 @@ class CardMatchups:
     synergy_partial: frozenset[str]
 
 
-# Воздушные угрозы для role-fallback (без импорта counter_engine).
-_AIR_THREATS = frozenset({
-    "Minions", "Minion Horde", "Baby Dragon", "Mega Minion", "Inferno Dragon",
-    "Balloon", "Lava Hound", "Bats", "Skeleton Dragons", "Phoenix",
-    "Flying Machine", "Electro Dragon",
-})
-
-_ROLE_AIR = "air_defense"
-_ROLE_ANTI_SWARM = "anti_swarm"
-_ROLE_ANTI_TANK = "anti_tank"
-_ROLE_SPLASH = "splash"
-
-
 def _dedupe(names: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -67,13 +41,6 @@ def _dedupe(names: list[str]) -> list[str]:
             seen.add(name)
             out.append(name)
     return out
-
-
-def _apply_spell_counter_rules(name: str, strong: list[str], partial: list[str]) -> tuple[list[str], list[str]]:
-    """На заклинания нет карты-контры, кроме Монаха на Фаербол/Ракету."""
-    if is_pure_spell(name):
-        return _dedupe(card_counters_for_spell(name)), []
-    return strong, partial
 
 
 def _deckshop_counter_tier(counter_card: str, target: str) -> str | None:
@@ -94,63 +61,15 @@ def _tier(raw: dict | None) -> tuple[list[str], list[str]]:
     return _dedupe(raw.get("strong") or []), _dedupe(raw.get("partial") or [])
 
 
-def _card_roles(name: str) -> frozenset[str]:
-    # Единый источник ролей (cards.json) через CardProfile.
-    from bot.services.card_profile import get_card_profile
-
-    return get_card_profile(name).roles
-
-
-def _role_counter_tier(counter_card: str, target: str) -> str | None:
-    """Базовый fallback по ролям — слабее DeckShop/manual."""
-    roles = _card_roles(counter_card)
-    if not roles:
-        return None
-
-    if target in _AIR_THREATS:
-        if _ROLE_AIR in roles:
-            return "partial"
-        return None
-
-    if is_spam_card(target):
-        if _ROLE_ANTI_SWARM in roles or _ROLE_SPLASH in roles:
-            return "partial"
-        return None
-
-    if is_point_target_threat(target) or target in {
-        "Golem", "Giant", "Electro Giant", "P.E.K.K.A", "Ronin",
-    }:
-        if _ROLE_ANTI_TANK in roles:
-            return "partial"
-        # Дальний DPS / воздух / спам держат ближнего Ronin.
-        if target == "Ronin":
-            if (
-                _ROLE_AIR in roles
-                or "air_defense" in roles
-                or _ROLE_ANTI_SWARM in roles
-                or _ROLE_SPLASH in roles
-                or "ranged" in roles
-                or "air" in roles
-            ):
-                return "partial"
-            if is_spam_card(counter_card):
-                return "partial"
-        return None
-
-    if is_building(target):
-        if _ROLE_SPLASH in roles:
-            return "partial"
-
-    return None
-
-
 def _build_index(deckshop_counters: dict[str, dict]) -> dict[str, CardMatchups]:
     index: dict[str, CardMatchups] = {}
     for name, raw in deckshop_counters.items():
         if not isinstance(raw, dict):
             continue
-        strong, partial = _tier(raw.get("counters_vs_attack"))
-        strong, partial = _apply_spell_counter_rules(name, strong, partial)
+        attack_strong, attack_partial = _tier(raw.get("counters_vs_attack"))
+        defense_strong, defense_partial = _tier(raw.get("counters_vs_defense"))
+        strong = _dedupe(attack_strong + defense_strong)
+        partial = [target for target in _dedupe(attack_partial + defense_partial) if target not in strong]
         syn_strong, syn_partial = _tier(raw.get("synergy_offense"))
         if not syn_strong and not syn_partial and name in SYNERGIES:
             syn_strong = _dedupe(SYNERGIES[name])
@@ -245,45 +164,10 @@ def card_counters_target(counter_card: str, target: str) -> str | None:
     if counter_card == target:
         return None
 
-    if target in MANUAL_COUNTERS_DENIED.get(counter_card, ()):
-        return None
-
+    # Заклинание может контрить карту, но само не имеет входящей контры.
     if is_pure_spell(target):
-        if counter_card in card_counters_for_spell(target):
-            return "strong"
         return None
-
-    if target in MANUAL_COUNTERS_STRONG.get(counter_card, ()):
-        return "strong"
-    if target in MANUAL_COUNTERS_PARTIAL.get(counter_card, ()):
-        return "partial"
-
-    # Не выводим дополнительные контры из snapshot/ролей для карт с
-    # намеренно закрытым списком: это предотвращает превращение value spell
-    # в универсальный ответ.
-    if counter_card in EXCLUSIVE_COUNTER_TARGETS:
-        return None
-
-    allowed_offense = OFFENSE_COUNTER_ALLOWED.get(counter_card)
-    if allowed_offense is not None:
-        return "strong" if target in allowed_offense else None
-
-    if is_offense_win_condition(counter_card):
-        return None
-
-    tier = _deckshop_counter_tier(counter_card, target)
-    if tier:
-        return tier
-
-    if counter_card in COUNTERS.get(target, []):
-        return "strong"
-
-    if is_building(target):
-        tier = spell_counter_tier_vs_building(counter_card)
-        if tier:
-            return tier
-
-    return _role_counter_tier(counter_card, target)
+    return _deckshop_counter_tier(counter_card, target)
 
 
 def targets_countered_by(card: str, opponent_deck: list[str]) -> tuple[list[str], list[str]]:

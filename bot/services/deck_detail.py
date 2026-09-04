@@ -5,7 +5,8 @@ Recommendations — только через RecommendationEngine (без лок�
 
 from __future__ import annotations
 
-from bot.services.card_data import COUNTERS, is_building, is_pure_spell
+from bot.services.card_data import is_pure_spell
+from bot.services.card_knowledge import canonical_card_names
 from bot.services.card_matchups import card_counters_target, counters_in_deck
 from bot.services.card_names_ru import card_name_ru
 from bot.services.clash_api import normalize_tag
@@ -43,23 +44,10 @@ def _suggested_counters(threat: str, *, limit: int = 3) -> list[str]:
     """Подсказки «подойдут», без атакующих wincon как «контры» зданий и без цикла."""
     if is_pure_spell(threat) or _skip_counter_advice(threat):
         return []
-    out: list[str] = []
-    for candidate in COUNTERS.get(threat, []):
-        if candidate == threat:
-            continue
-        if card_counters_target(candidate, threat):
-            out.append(candidate)
-        if len(out) >= limit:
-            return out
-    if is_building(threat):
-        for spell in ("Earthquake", "Lightning", "Rocket", "Poison", "Fireball"):
-            if spell in out:
-                continue
-            if card_counters_target(spell, threat):
-                out.append(spell)
-            if len(out) >= limit:
-                break
-    return out[:limit]
+    candidates = sorted(canonical_card_names())
+    strong = [card for card in candidates if card_counters_target(card, threat) == "strong"]
+    partial = [card for card in candidates if card_counters_target(card, threat) == "partial"]
+    return (strong + partial)[:limit]
 
 
 def _filter_battles_for_deck(battles: list[dict], player_tag: str, cards: list[str]) -> list[dict]:
