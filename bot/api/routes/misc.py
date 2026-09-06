@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.api.deps import get_current_user, get_db, require_linked_player, require_pro
 from bot.api.schemas import (
+    CardCounterEntry,
+    CardCountersResponse,
     CardCatalogResponse,
     FavoriteDeckEntry,
     FavoritesResponse,
@@ -15,6 +17,8 @@ from bot.api.schemas import (
 )
 from bot.models.database import FavoriteDeck, User, async_session
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded, get_cards_catalog
+from bot.services.card_knowledge import resolve_canonical_card_name
+from bot.services.card_matchups import ru, strong_counter_relations
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag, validate_tag
 from bot.services.player_preview import build_player_preview
 from bot.services.user_settings import load_settings_response, update_user_settings
@@ -28,6 +32,26 @@ async def cards_catalog(user: User = Depends(get_current_user)) -> CardCatalogRe
     del user
     items = await get_cards_catalog()
     return CardCatalogResponse(cards=items)
+
+
+@router.get("/cards/{card_name}/counters", response_model=CardCountersResponse)
+async def card_counters(
+    card_name: str,
+    user: User = Depends(get_current_user),
+) -> CardCountersResponse:
+    """Карточка сильных контр для коллекции без обращения к Ghosteek AI."""
+    del user
+    card = resolve_canonical_card_name(card_name)
+    if card is None:
+        raise http_error("E006", status=404, message="Карта не найдена")
+
+    counters, countered_by = strong_counter_relations(card)
+    return CardCountersResponse(
+        card=card,
+        card_ru=ru(card, short=False),
+        counters=[CardCounterEntry(name=name, name_ru=ru(name, short=False)) for name in counters],
+        countered_by=[CardCounterEntry(name=name, name_ru=ru(name, short=False)) for name in countered_by],
+    )
 
 
 class FavoriteDeckPayload(BaseModel):

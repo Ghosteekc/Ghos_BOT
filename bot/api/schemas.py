@@ -771,6 +771,22 @@ class CardCatalogResponse(BaseModel):
     cards: list[CardCatalogEntry]
 
 
+class CardCounterEntry(BaseModel):
+    """Одна сильная связь контр из Cards Knowledge."""
+
+    name: str
+    name_ru: str = ""
+
+
+class CardCountersResponse(BaseModel):
+    """Сильные исходящие и входящие контры выбранной карты."""
+
+    card: str
+    card_ru: str = ""
+    counters: list[CardCounterEntry] = []
+    countered_by: list[CardCounterEntry] = []
+
+
 class FavoriteDeckEntry(BaseModel):
     cards: list[str]
     deck_link: str | None = None

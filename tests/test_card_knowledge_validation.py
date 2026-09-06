@@ -93,3 +93,15 @@ def test_primary_win_conditions_are_not_generic_counter_sources() -> None:
 
     # Вторичное давление сохраняет явно подтверждённую защитную роль.
     assert card_counters_target("Mighty Miner", "Valkyrie") == "strong"
+
+
+def test_collection_counter_relations_only_expose_strong_known_cards() -> None:
+    from bot.services.card_matchups import strong_counter_relations
+
+    counters, countered_by = strong_counter_relations("Valkyrie")
+    assert "Mighty Miner" in countered_by
+    assert "Hog Rider" not in countered_by
+    assert counters == sorted(counters)
+    assert countered_by == sorted(countered_by)
+    assert strong_counter_relations("Rocket")[1] == []
+    assert strong_counter_relations("Not A Card") == ([], [])

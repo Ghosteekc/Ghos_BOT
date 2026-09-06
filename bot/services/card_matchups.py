@@ -208,6 +208,30 @@ def targets_countered_by(card: str, opponent_deck: list[str]) -> tuple[list[str]
     return strong, partial
 
 
+def strong_counter_relations(card: str) -> tuple[list[str], list[str]]:
+    """Сильные контры карты и сильные ответы на неё из Cards Knowledge.
+
+    Возвращает ``(counters, countered_by)`` только для отображения в
+    коллекции. Частичные связи намеренно не выдаются как «лучшие контры».
+    """
+    from bot.services.card_knowledge import canonical_card_names
+
+    known = canonical_card_names()
+    if card not in known:
+        return [], []
+
+    candidates = sorted(name for name in known if name != card)
+    counters = [
+        target for target in candidates
+        if card_counters_target(card, target) == "strong"
+    ]
+    countered_by = [
+        source for source in candidates
+        if card_counters_target(source, card) == "strong"
+    ]
+    return counters, countered_by
+
+
 def synergy_between(a: str, b: str) -> str | None:
     """Есть ли синергия a→b: strong / partial / None."""
     if a == b:
