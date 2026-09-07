@@ -8,7 +8,8 @@
         "dps",
         "support",
         "win_condition"
-      ]
+      ],
+      "abilities": ["Cloaking Cape"]
     },
     "Archers": {
       "elixir": 3,
@@ -137,7 +138,8 @@
       "roles": [
         "tank",
         "win_condition"
-      ]
+      ],
+      "abilities": ["Gateway Grenade"]
     },
     "Bowler": {
       "elixir": 5,
@@ -431,7 +433,33 @@
       "elixir": 5,
       "type": "troop",
       "roles": [
-        "tank"
+        "air_defense",
+        "anti_tank",
+        "dps",
+        "support",
+        "tank",
+        "win_condition"
+      ],
+      "components": [
+        {
+          "id": "monster",
+          "roles": [
+            "tank",
+            "win_condition"
+          ],
+          "targets": "buildings"
+        },
+        {
+          "id": "doctor",
+          "roles": [
+            "air_defense",
+            "support"
+          ],
+          "targets": "air_ground"
+        }
+      ],
+      "abilities": [
+        "Lightning Link"
       ]
     },
     "Golden Knight": {
@@ -441,7 +469,8 @@
         "counterpush",
         "mini_tank",
         "win_condition"
-      ]
+      ],
+      "abilities": ["Dashing Dash"]
     },
     "Golem": {
       "elixir": 8,
@@ -573,7 +602,8 @@
         "air_defense",
         "dps",
         "support"
-      ]
+      ],
+      "abilities": ["Royal Rescue"]
     },
     "Lumberjack": {
       "elixir": 4,
@@ -622,7 +652,8 @@
         "mini_tank",
         "support",
         "win_condition"
-      ]
+      ],
+      "abilities": ["Explosive Escape"]
     },
     "Miner": {
       "elixir": 3,
@@ -672,7 +703,8 @@
       "type": "troop",
       "roles": [
         "support"
-      ]
+      ],
+      "abilities": ["Pensive Protection"]
     },
     "Mortar": {
       "elixir": 4,
@@ -874,7 +906,8 @@
       "roles": [
         "splash",
         "win_condition"
-      ]
+      ],
+      "abilities": ["Soul Summoning"]
     },
     "Skeletons": {
       "elixir": 1,
@@ -907,6 +940,27 @@
       "type": "troop",
       "roles": [
         "support"
+      ],
+      "forms": [
+        {
+          "id": "ground",
+          "elixir": 3,
+          "roles": [
+            "dps",
+            "mini_tank",
+            "support"
+          ]
+        },
+        {
+          "id": "air",
+          "elixir": 6,
+          "roles": [
+            "air_defense",
+            "dps",
+            "flying",
+            "support"
+          ]
+        }
       ]
     },
     "Suspicious Bush": {

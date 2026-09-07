@@ -109,4 +109,34 @@ def validate_card_catalog() -> list[str]:
             errors.append(
                 f"{name}: invalid evolution_roles {sorted(invalid_evolution_roles)!r}"
             )
+        abilities = data.get("abilities", [])
+        if not isinstance(abilities, list) or any(
+            not isinstance(ability, str) or not ability.strip() for ability in abilities
+        ):
+            errors.append(f"{name}: abilities must be a list of non-empty strings")
+        elif len(abilities) != len(set(abilities)):
+            errors.append(f"{name}: duplicate abilities")
+        for field in ("forms", "components"):
+            entries = data.get(field, [])
+            if not isinstance(entries, list):
+                errors.append(f"{name}: {field} must be a list")
+                continue
+            ids: set[str] = set()
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+                    errors.append(f"{name}: {field} entry must have string id")
+                    continue
+                entry_id = entry["id"].strip()
+                if not entry_id or entry_id in ids:
+                    errors.append(f"{name}: duplicate/empty {field} id")
+                ids.add(entry_id)
+                entry_roles = entry.get("roles")
+                if not isinstance(entry_roles, list) or not entry_roles:
+                    errors.append(f"{name}: {field}.{entry_id} roles must be non-empty list")
+                elif invalid := set(entry_roles) - CARD_ROLES:
+                    errors.append(f"{name}: {field}.{entry_id} invalid roles {sorted(invalid)!r}")
+                if field == "forms":
+                    form_elixir = entry.get("elixir")
+                    if isinstance(form_elixir, bool) or not isinstance(form_elixir, int) or not 0 <= form_elixir <= 10:
+                        errors.append(f"{name}: {field}.{entry_id} invalid elixir {form_elixir!r}")
     return errors

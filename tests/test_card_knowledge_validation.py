@@ -54,6 +54,7 @@ def test_rocket_uses_deckshop_counter_data() -> None:
     from bot.services.card_matchups import card_counters_target
 
     assert card_counters_target("Rocket", "Hog Rider") == "strong"
+    assert card_counters_target("Rocket", "Elixir Collector") == "strong"
 
 
 def test_spells_have_no_incoming_counters() -> None:
@@ -69,6 +70,9 @@ def test_confirmed_counter_policy_overrides_deckshop_snapshot() -> None:
     assert card_counters_target("Hog Rider", "Valkyrie") is None
     assert card_counters_target("Mighty Miner", "Valkyrie") == "strong"
     assert card_counters_target("Tornado", "Goblin Barrel") == "strong"
+    assert card_counters_target("Goblinstein", "Inferno Tower") == "strong"
+    assert card_counters_target("Clone", "Executioner") is None
+    assert card_counters_target("Mirror", "Executioner") is None
 
     strong, partial = counters_in_deck(
         "Valkyrie", ["Hog Rider", "Mighty Miner", "Valkyrie"]
@@ -104,4 +108,18 @@ def test_collection_counter_relations_only_expose_strong_known_cards() -> None:
     assert counters == sorted(counters)
     assert countered_by == sorted(countered_by)
     assert strong_counter_relations("Rocket")[1] == []
+    assert strong_counter_relations("Clone") == ([], [])
+    assert strong_counter_relations("Mirror") == ([], [])
+    assert set(strong_counter_relations("Elixir Collector")[1]) == {
+        "Earthquake", "Goblin Drill", "Lightning", "Miner", "Rocket", "Wall Breakers",
+    }
     assert strong_counter_relations("Not A Card") == ([], [])
+
+
+def test_cards_knowledge_records_composite_cards_and_champion_abilities() -> None:
+    cards = load_card_catalog()
+    assert {form["id"] for form in cards["Spirit Empress"]["forms"]} == {"ground", "air"}
+    assert "flying" in next(form for form in cards["Spirit Empress"]["forms"] if form["id"] == "air")["roles"]
+    assert {part["id"] for part in cards["Goblinstein"]["components"]} == {"monster", "doctor"}
+    assert cards["Goblinstein"]["abilities"] == ["Lightning Link"]
+    assert cards["Archer Queen"]["abilities"] == ["Cloaking Cape"]

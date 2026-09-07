@@ -175,21 +175,22 @@ def card_counters_target(counter_card: str, target: str) -> str | None:
     if counter_card == target:
         return None
 
-    if counter_card in COUNTER_SOURCES_EXCLUDED:
-        return None
-
-    # Win condition — план атаки на башню, не универсальный защитный ответ.
-    # Вторичное давление (например, Mighty Miner) не исключаем: такие карты
-    # могут быть подтверждённой контрой в обороне.
-    if is_primary_win_condition(counter_card):
-        return None
-
     # Заклинание может контрить карту, но само не имеет входящей контры.
     if is_pure_spell(target):
         return None
+
+    if counter_card in COUNTER_SOURCES_EXCLUDED:
+        return None
+
     override = COUNTER_TIER_OVERRIDES.get(counter_card, {}).get(target)
     if override:
         return override
+
+    # Win condition — план атаки на башню, а не универсальный защитный ответ.
+    # Точечные подтверждённые связи выше остаются допустимыми: например,
+    # Miner/Goblin Drill наказывают поставленный Elixir Collector.
+    if is_primary_win_condition(counter_card):
+        return None
     return _deckshop_counter_tier(counter_card, target)
 
 
