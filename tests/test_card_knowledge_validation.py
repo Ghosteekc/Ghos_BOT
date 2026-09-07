@@ -71,6 +71,8 @@ def test_confirmed_counter_policy_overrides_deckshop_snapshot() -> None:
     assert card_counters_target("Mighty Miner", "Valkyrie") == "strong"
     assert card_counters_target("Tornado", "Goblin Barrel") == "strong"
     assert card_counters_target("Goblinstein", "Inferno Tower") == "strong"
+    assert card_counters_target("Archers", "Bats") == "strong"
+    assert card_counters_target("Archers", "Minions") == "strong"
     assert card_counters_target("Clone", "Executioner") is None
     assert card_counters_target("Mirror", "Executioner") is None
 
@@ -97,6 +99,8 @@ def test_primary_win_conditions_are_not_generic_counter_sources() -> None:
 
     # Вторичное давление сохраняет явно подтверждённую защитную роль.
     assert card_counters_target("Mighty Miner", "Valkyrie") == "strong"
+    # Элитные варвары — явное исключение: это также сильный защитный бой.
+    assert card_counters_target("Elite Barbarians", "Giant") == "strong"
 
 
 def test_collection_counter_relations_only_expose_strong_known_cards() -> None:

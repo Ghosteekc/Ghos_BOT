@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from bot.data.card_counter_policy import (
+    COUNTER_SOURCES_ALLOWED,
     COUNTER_SOURCES_EXCLUDED,
     COUNTER_TIER_OVERRIDES,
     MIRROR_ANSWER_TIERS,
@@ -189,7 +190,7 @@ def card_counters_target(counter_card: str, target: str) -> str | None:
     # Win condition — план атаки на башню, а не универсальный защитный ответ.
     # Точечные подтверждённые связи выше остаются допустимыми: например,
     # Miner/Goblin Drill наказывают поставленный Elixir Collector.
-    if is_primary_win_condition(counter_card):
+    if is_primary_win_condition(counter_card) and counter_card not in COUNTER_SOURCES_ALLOWED:
         return None
     return _deckshop_counter_tier(counter_card, target)
 
