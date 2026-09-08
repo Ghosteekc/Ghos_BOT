@@ -267,8 +267,10 @@ SECONDARY_PRESSURE = {
 
 
 def is_primary_win_condition(name: str) -> bool:
-    """Главная угроза башне (Hog, Giant, Barrel…) — считает MAX_WINS."""
-    return name in WIN_CONDITIONS and name not in SECONDARY_PRESSURE
+    """Главная угроза башне, включая новые карты из канонического каталога."""
+    from bot.services.card_profile import get_card_profile
+
+    return name not in SECONDARY_PRESSURE and get_card_profile(name).is_offense_win_condition
 
 
 def is_secondary_pressure(name: str) -> bool:

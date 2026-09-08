@@ -120,10 +120,15 @@ class CardProfile:
 
     @property
     def is_offense_win_condition(self) -> bool:
-        """Primary attack win — совпадает с legacy WIN_CONDITIONS membership."""
-        from bot.services.card_data import WIN_CONDITIONS
+        """Основная атакующая роль с поддержкой новых карт из каталога."""
+        from bot.services.card_data import CARD_META, WIN_CONDITIONS
 
-        return self.name in WIN_CONDITIONS
+        # Existing deck logic still has a legacy primary-WC list.  Do not
+        # silently reclassify old cards while that migration is incomplete;
+        # newly released cards are absent from CARD_META and use cards.json.
+        if self.name in CARD_META:
+            return self.name in WIN_CONDITIONS
+        return "win_condition" in self.roles
 
 
 _SMALL_SPELL_META = frozenset({

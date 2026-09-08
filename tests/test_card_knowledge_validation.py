@@ -29,7 +29,7 @@ def test_airborne_cards_are_explicitly_tagged_in_catalog() -> None:
     cards = load_card_catalog()
     expected = {
         "Baby Dragon", "Balloon", "Bats", "Electro Dragon", "Flying Machine",
-        "Inferno Dragon", "Lava Hound", "Mega Minion", "Minion Horde", "Minions",
+        "Inferno Dragon", "Lava Hound", "Mega Minion", "Minion Giant", "Minion Horde", "Minions",
         "Phoenix", "Skeleton Barrel", "Skeleton Dragons",
     }
     assert {name for name, data in cards.items() if "flying" in data["roles"]} == expected
@@ -37,6 +37,20 @@ def test_airborne_cards_are_explicitly_tagged_in_catalog() -> None:
     assert "flying" not in cards["Royal Hogs"]["roles"]
     assert evolution_has_role("Royal Hogs", "flying")
     assert not evolution_has_role("Royal Hogs", "air_defense")
+
+
+def test_minion_giant_uses_its_official_api_name_and_catalog_roles() -> None:
+    from bot.services.card_data import is_primary_win_condition
+    from bot.services.card_names_ru import card_name_ru
+    from bot.services.card_profile import get_card_profile
+
+    card = get_card_profile("Minion Giant")
+    assert card.elixir == 4
+    assert card.card_type == "troop"
+    assert {"flying", "tank", "win_condition"}.issubset(card.roles)
+    assert card.is_offense_win_condition
+    assert is_primary_win_condition("Minion Giant")
+    assert card_name_ru("Minion Giant") == "Гиг-Миньон"
 
 
 def test_profile_initialization_reads_canonical_catalog_before_legacy_metadata() -> None:

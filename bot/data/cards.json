@@ -690,6 +690,15 @@
         "flying"
       ]
     },
+    "Minion Giant": {
+      "elixir": 4,
+      "type": "troop",
+      "roles": [
+        "flying",
+        "tank",
+        "win_condition"
+      ]
+    },
     "Mirror": {
       "elixir": 1,
       "type": "spell",
