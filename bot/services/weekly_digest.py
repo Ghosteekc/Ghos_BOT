@@ -455,6 +455,41 @@ def _format_trophy(delta: int) -> str:
     return str(delta)
 
 
+_RU_MONTHS_SHORT = (
+    "янв",
+    "фев",
+    "мар",
+    "апр",
+    "мая",
+    "июн",
+    "июл",
+    "авг",
+    "сен",
+    "окт",
+    "ноя",
+    "дек",
+)
+
+
+def _format_period(start: date, end: date) -> str:
+    """Compact Russian date range that remains readable in Telegram captions."""
+    start_label = f"{start.day} {_RU_MONTHS_SHORT[start.month - 1]}"
+    end_label = f"{end.day} {_RU_MONTHS_SHORT[end.month - 1]}"
+    if start == end:
+        return f"{start_label} {start.year}"
+    if start.year != end.year:
+        return f"{start_label} {start.year} — {end_label} {end.year}"
+    return f"{start_label} — {end_label} {end.year}"
+
+
+def _format_percent(value: Any) -> str:
+    """Use the Russian decimal separator without adding unnecessary zeroes."""
+    try:
+        return f"{float(value):g}".replace(".", ",")
+    except (TypeError, ValueError):
+        return "0"
+
+
 def _avg_elixir(deck: dict[str, Any]) -> float:
     cards = deck.get("deck_cards") or []
     if cards:
@@ -469,39 +504,40 @@ def _avg_elixir(deck: dict[str, Any]) -> float:
 
 
 def format_digest_caption(stats: WeekStats, player_name: str | None = None) -> str:
-    period = (
-        f"{stats.start.strftime('%d.%m')} - {stats.end.strftime('%d.%m')} - {stats.start.year}"
-    )
+    period = _format_period(stats.start, stats.end)
     lines = [
-        "👻Недельная сводка",
+        "👻 Недельная сводка",
         period,
         "",
-        f"⚔️ {stats.total} матчей",
-        f"🟢 {stats.wins}Поб / 🔴{stats.losses}Пор · {stats.winrate}%",
-        f"🏆 Кубки за неделю: {_format_trophy(stats.trophy_delta)}",
-        f"🔥 Лучшая серия побед: {stats.best_streak}",
+        f"⚔️ Матчи: {stats.total}",
+        f"🟢 Победы: {stats.wins}",
+        f"🔴 Поражения: {stats.losses}",
+        f"📈 Винрейт: {_format_percent(stats.winrate)}%",
+        "",
+        f"🏆 Кубки: {_format_trophy(stats.trophy_delta)}",
+        f"🔥 Серия побед: {stats.best_streak}",
     ]
     if stats.best_day_name and stats.best_day_wins:
         lines.append(
-            f"📅 Лучший день: {stats.best_day_name} ({stats.best_day_wins} побед)"
+            f"📅 Лучший день: {stats.best_day_name} — {stats.best_day_wins} побед"
         )
 
     if stats.best_deck:
         d = stats.best_deck
-        avg = _avg_elixir(d)
         lines.extend(
             [
                 "",
+                "🥇 Лучшая колода",
                 (
-                    f"🥇 Лучшая колода: {d.get('winrate', 0)}% "
-                    f"({d.get('total', 0)} матчей ⚡{avg})"
+                    f"📈 Винрейт: {_format_percent(d.get('winrate', 0))}% "
+                    f"· {d.get('total', 0)} матчей"
                 ),
             ]
         )
         if stats.best_deck_share:
-            lines.append(f"Доля игр этой колодой: {int(stats.best_deck_share)}%")
+            lines.append(f"🎯 Использование: {int(stats.best_deck_share)}%")
 
-    lines.extend(["", stats.form_note])
+    lines.extend(["", f"💬 {stats.form_note}"])
     # player_name reserved for future personalization; keep signature stable
     _ = player_name
     return "\n".join(lines)

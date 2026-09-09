@@ -3,12 +3,15 @@
 from datetime import date, datetime, timedelta, timezone
 
 from bot.services.weekly_digest import (
+    _format_period,
     current_week,
+    format_digest_caption,
     iso_week_key,
     previous_completed_week,
     seconds_until_digest_wake,
     target_week_for_now,
     week_bounds,
+    WeekStats,
 )
 
 MSK = timezone(timedelta(hours=3))
@@ -16,6 +19,55 @@ MSK = timezone(timedelta(hours=3))
 
 def _msk(y, m, d, h=0, mi=0) -> datetime:
     return datetime(y, m, d, h, mi, tzinfo=MSK)
+
+
+def test_digest_period_is_compact_and_mobile_readable():
+    assert _format_period(date(2026, 8, 31), date(2026, 9, 6)) == "31 авг — 6 сен 2026"
+
+
+def test_digest_period_keeps_both_years_when_range_crosses_year():
+    assert _format_period(date(2025, 12, 29), date(2026, 1, 4)) == "29 дек 2025 — 4 янв 2026"
+
+
+def test_digest_caption_uses_compact_mobile_layout():
+    stats = WeekStats(
+        week_key="2026-W36",
+        start=date(2026, 8, 31),
+        end=date(2026, 9, 6),
+        total=63,
+        wins=36,
+        losses=27,
+        winrate=57.1,
+        trophy_delta=0,
+        best_streak=7,
+        best_day_name="суббота",
+        best_day_wins=9,
+        best_deck={"winrate": 61.9, "total": 42},
+        best_deck_share=67,
+        form_note="Винрейт стабильный — продолжай в том же духе.",
+    )
+
+    assert format_digest_caption(stats) == "\n".join(
+        [
+            "👻 Недельная сводка",
+            "31 авг — 6 сен 2026",
+            "",
+            "⚔️ Матчи: 63",
+            "🟢 Победы: 36",
+            "🔴 Поражения: 27",
+            "📈 Винрейт: 57,1%",
+            "",
+            "🏆 Кубки: 0",
+            "🔥 Серия побед: 7",
+            "📅 Лучший день: суббота — 9 побед",
+            "",
+            "🥇 Лучшая колода",
+            "📈 Винрейт: 61,9% · 42 матчей",
+            "🎯 Использование: 67%",
+            "",
+            "💬 Винрейт стабильный — продолжай в том же духе.",
+        ]
+    )
 
 
 def test_week_bounds_are_monday_sunday():
