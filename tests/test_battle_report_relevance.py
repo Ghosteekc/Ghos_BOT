@@ -50,6 +50,34 @@ def test_opponent_tower_threats_prefer_win_condition_over_small_spell():
     assert set(find_opponent_threats(opp)) == {"Skeleton Barrel"}
 
 
+def test_battle_report_shows_all_deck_specific_counters_for_each_threat():
+    from bot.services.card_matchups import counters_in_deck
+    from bot.services.card_names_ru import card_name_ru
+
+    user = [
+        "Tesla", "Valkyrie", "Bowler", "Graveyard",
+        "Poison", "Barbarian Barrel", "Furnace", "Miner",
+    ]
+    opp = [
+        "Cannon", "Skeleton King", "Skeleton Barrel", "Mother Witch",
+        "Spear Goblins", "Inferno Tower", "Goblins", "X-Bow",
+    ]
+    assert "Barbarian Barrel" in counters_in_deck("Skeleton Barrel", user)[0]
+    analysis = analyze_battle_enhanced(
+        {"name": "Me", "tag": "#ME", "crowns": 1, "cards": [{"name": n} for n in user]},
+        {"name": "Opp", "tag": "#OP", "crowns": 0, "cards": [{"name": n} for n in opp]},
+    )
+    assert "Barbarian Barrel" in counters_in_deck("Skeleton Barrel", user)[0]
+
+    threat_label = card_name_ru("Skeleton Barrel")
+    line = next(reason for reason in analysis.reasons if threat_label in reason)
+    for card in (
+        "Barbarian Barrel", "Valkyrie", "Poison", "Furnace", "Tesla", "Bowler"
+    ):
+        assert card_name_ru(card) in line
+    assert "частичные:" in line
+
+
 def test_princess_is_tower_threat_in_rg_cycle():
     """Princess чипит башни и bait'ит Log — должна быть в угрозах, Ice Golem нет."""
     user = [

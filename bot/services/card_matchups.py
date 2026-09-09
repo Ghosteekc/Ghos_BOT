@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from bot.data.card_counter_policy import (
+    COUNTER_DISPLAY_PRIORITY,
     COUNTER_SOURCES_ALLOWED,
     COUNTER_SOURCES_EXCLUDED,
     COUNTER_TIER_OVERRIDES,
@@ -168,7 +169,17 @@ def counters_in_deck(threat: str, deck: list[str]) -> tuple[list[str], list[str]
             strong.append(card)
         elif tier == "partial":
             partial.append(card)
-    return _dedupe(strong), _dedupe(partial)
+    return (
+        _prioritize_counter_display(threat, _dedupe(strong)),
+        _prioritize_counter_display(threat, _dedupe(partial)),
+    )
+
+
+def _prioritize_counter_display(threat: str, cards: list[str]) -> list[str]:
+    """Order equally-tiered confirmed counters for concise UI surfaces."""
+    preferred = COUNTER_DISPLAY_PRIORITY.get(threat, ())
+    priority = {card: index for index, card in enumerate(preferred)}
+    return sorted(cards, key=lambda card: priority.get(card, len(priority)))
 
 
 def card_counters_target(counter_card: str, target: str) -> str | None:

@@ -85,6 +85,16 @@ def calculate_matchup_score(user_deck: list[str], opponent_deck: list[str]) -> f
     return float(evaluate_matchup(user_deck, opponent_deck).score)
 
 
+def _all_counter_labels(strong: list[str], partial: list[str]) -> str:
+    """Keep all deck-specific answers visible and distinguish partial counters."""
+    sections: list[str] = []
+    if strong:
+        sections.append("сильные: " + ru_list(strong, limit=len(strong)))
+    if partial:
+        sections.append("частичные: " + ru_list(partial, limit=len(partial)))
+    return "; ".join(sections)
+
+
 def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
     user_deck = extract_deck(user_team)
     opponent_deck = extract_deck(opponent_team)
@@ -103,18 +113,25 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
         strong, partial = counters_in_deck(threat, user_deck)
         t_ru = ru(threat)
         if strong:
+            labels = _all_counter_labels(strong, partial)
             if won:
-                reasons.append(f"✅ {t_ru} — контра: {ru_list(strong)}")
+                reasons.append(f"✅ {t_ru} — контры: {labels}")
             else:
                 reasons.append(
-                    f"⚠️ {t_ru} — контра есть ({ru_list(strong)}), но не сработала вовремя",
+                    f"⚠️ {t_ru} — контры есть ({labels}), но не сработали вовремя",
                 )
         elif partial:
             missing_counters.extend(partial[:2])
             if won:
-                reasons.append(f"🎯 Победа без полной контры на {t_ru} (есть только {ru_list(partial)})")
+                reasons.append(
+                    f"🎯 Победа без полной контры на {t_ru} "
+                    f"(частичные: {ru_list(partial, limit=len(partial))})"
+                )
             else:
-                reasons.append(f"⚠️ Слабая контра на {t_ru}: {ru_list(partial)}")
+                reasons.append(
+                    f"⚠️ Слабые контры на {t_ru}: "
+                    f"{ru_list(partial, limit=len(partial))}"
+                )
         else:
             from bot.services.card_matchups import get_matchups
 

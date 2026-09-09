@@ -143,6 +143,20 @@ def _counter_list(threat: str) -> list[str]:
     return strong + partial
 
 
+def _available_counter_labels(strong: list[str], partial: list[str]) -> str:
+    """Show every confirmed answer in the player's deck without overstating partials."""
+    sections: list[str] = []
+    if strong:
+        sections.append(
+            "сильные: " + ", ".join(card_name_ru(card) for card in strong)
+        )
+    if partial:
+        sections.append(
+            "частичные: " + ", ".join(card_name_ru(card) for card in partial)
+        )
+    return "; ".join(sections)
+
+
 def _damage_score(
     card: str,
     *,
@@ -390,14 +404,13 @@ def _build_reasons(
 
     for threat in analysis.opponent_threats:
         strong, partial = counters_in_deck(threat, analysis.user_deck)
-        user_has = strong or partial
-        if user_has:
-            labels = ", ".join(card_name_ru(c) for c in user_has[:2])
+        if strong or partial:
+            labels = _available_counter_labels(strong, partial)
             if analysis.won:
-                reasons.append(f"Счётчик на «{card_name_ru(threat)}»: {labels}.")
+                reasons.append(f"Контры на «{card_name_ru(threat)}»: {labels}.")
             else:
                 reasons.append(
-                    f"Счётчик на «{card_name_ru(threat)}» был ({labels}), "
+                    f"Контры на «{card_name_ru(threat)}» были ({labels}), "
                     f"но сыграл слабо или не вовремя."
                 )
         else:

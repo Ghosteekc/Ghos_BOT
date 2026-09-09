@@ -39,3 +39,10 @@ COUNTER_TIER_OVERRIDES: dict[str, dict[str, str]] = {
 MIRROR_ANSWER_TIERS: dict[str, str] = {
     "Valkyrie": "strong",
 }
+
+# Когда несколько карт имеют одинаковый tier, UI показывает только первые
+# ответы. Эти приоритеты выбирают наиболее прямой и экономный ответ из уже
+# подтверждённых связей DeckShop; tier и сам факт контры они не меняют.
+COUNTER_DISPLAY_PRIORITY: dict[str, tuple[str, ...]] = {
+    "Skeleton Barrel": ("Barbarian Barrel",),
+}

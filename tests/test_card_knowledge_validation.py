@@ -102,6 +102,17 @@ def test_confirmed_counter_policy_overrides_deckshop_snapshot() -> None:
     assert "Tornado" in strong
 
 
+def test_skeleton_barrel_display_prioritizes_barbarian_barrel() -> None:
+    from bot.services.card_matchups import counters_in_deck
+
+    strong, partial = counters_in_deck(
+        "Skeleton Barrel",
+        ["Tesla", "Valkyrie", "Bowler", "Poison", "Barbarian Barrel", "Furnace"],
+    )
+    assert strong[:3] == ["Barbarian Barrel", "Valkyrie", "Poison"]
+    assert partial == ["Tesla", "Bowler"]
+
+
 def test_primary_win_conditions_are_not_generic_counter_sources() -> None:
     from bot.services.card_matchups import card_counters_target, get_matchups
 
