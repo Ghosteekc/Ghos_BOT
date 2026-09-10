@@ -48,8 +48,7 @@ _DROP_ORIGINS: list[tuple[int, int]] = [
 ]
 
 _TITLE = "ЛУЧШАЯ КОЛОДА НЕДЕЛИ"
-# #d3a92c
-_TITLE_FILL = (211, 169, 44, 255)
+_TITLE_FILL = (255, 255, 255, 255)
 _TITLE_OUTLINE = (18, 28, 70, 255)
 _ELIXIR_PINK = (224, 64, 251)
 _EVO_BADGE = (232, 121, 249, 255)
