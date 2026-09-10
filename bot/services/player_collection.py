@@ -427,8 +427,26 @@ async def build_player_collection(player: dict) -> dict:
     collection_stats = build_collection_stats_from_entries(card_entries)
     collection_stats["collection_level"] += _tower_troops_collection_points(player)
 
+    # ``currentDeck`` is the only player-owned signal the public profile API
+    # exposes for cards the player has actively equipped. Preserve its order,
+    # but do not guess when the payload is incomplete or a name cannot be
+    # resolved to the card catalog.
+    current_deck_raw = player.get("currentDeck") or []
+    current_deck: list[str] = []
+    if isinstance(current_deck_raw, list) and len(current_deck_raw) == 8:
+        resolved_deck = [
+            resolve_card_name(str(entry.get("name") or ""))
+            for entry in current_deck_raw
+            if isinstance(entry, dict)
+        ]
+        if len(resolved_deck) == 8 and all(resolved_deck):
+            current_deck = [name for name in resolved_deck if name is not None]
+        else:
+            logger.warning("Ignoring incomplete currentDeck in player collection payload")
+
     return {
         "cards": card_entries,
+        "current_deck": current_deck,
         "cards_owned": owned_cards,
         "cards_total": len(card_entries),
         "masteries": mastery_entries,

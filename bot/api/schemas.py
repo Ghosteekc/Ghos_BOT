@@ -96,6 +96,7 @@ class CollectionMasteryEntry(BaseModel):
 
 class PlayerCollectionResponse(BaseModel):
     cards: list[CollectionCardEntry]
+    current_deck: list[str] = []
     cards_owned: int
     cards_total: int
     masteries: list[CollectionMasteryEntry]
@@ -108,6 +109,28 @@ class PlayerCollectionResponse(BaseModel):
     rare_count: int = 0
     common_count: int = 0
     cards_by_level: list[CardLevelCount] = []
+
+
+class MetaUpgradePriorityCard(BaseModel):
+    name: str
+    name_ru: str = ""
+    icon: str = ""
+    level: int
+    recommended_level: int
+    deficit: int
+    meta_deck_count: int
+    observed_games: int
+    meta_win_rate: float | None = None
+
+
+class MetaUpgradeRecommendationsResponse(BaseModel):
+    status: str
+    message: str | None = None
+    arena: int
+    recommended_level: int
+    updated_at: str | None = None
+    sample_note: str = ""
+    cards: list[MetaUpgradePriorityCard] = []
 
 
 class BattleLeagueBadge(BaseModel):

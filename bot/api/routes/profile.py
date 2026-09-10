@@ -9,6 +9,7 @@ from bot.api.schemas import (
     HomeResponse,
     LeagueInfo,
     PlayerCollectionResponse,
+    MetaUpgradeRecommendationsResponse,
     ProfileResponse,
     StatsOverviewResponse,
     SubscriptionInfo,
@@ -191,6 +192,30 @@ async def get_player_collection(
 
     data = await build_player_collection(player)
     return PlayerCollectionResponse(**data)
+
+
+@router.get("/profile/upgrade-priorities", response_model=MetaUpgradeRecommendationsResponse)
+async def get_upgrade_priorities(
+    user: User = Depends(require_linked_player),
+) -> MetaUpgradeRecommendationsResponse:
+    """Prioritize underleveled cards in the equipped deck using current meta."""
+    from bot.services.meta_query import get_ladder_meta
+    from bot.services.meta_stats import MODE_TROPHIES
+    from bot.services.meta_upgrade_recommendations import build_meta_upgrade_recommendations
+
+    client = ClashRoyaleClient()
+    try:
+        player = await client.get_player(user.player_tag or "")
+    except ClashRoyaleAPIError as e:
+        raise http_error_from_clash(e, status=502) from e
+    finally:
+        await client.close()
+
+    collection = await build_player_collection(player)
+    meta = await get_ladder_meta(MODE_TROPHIES)
+    return MetaUpgradeRecommendationsResponse(
+        **build_meta_upgrade_recommendations(collection, player, meta)
+    )
 
 
 @router.get("/health")
