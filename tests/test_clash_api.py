@@ -2,15 +2,37 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 from bot.services.clash_api import (
+    ClashRoyaleClient,
     ClashRoyaleAPIError,
     _config_error_message,
     _is_retryable_http_status,
     _parse_retry_after_header,
     _retry_delay_seconds,
 )
+
+
+async def _run_clan_endpoint_shapes() -> None:
+    client = object.__new__(ClashRoyaleClient)
+    paths: list[str] = []
+
+    async def fake_request(path: str):
+        paths.append(path)
+        if path.endswith("/members"):
+            return {"items": [{"tag": "#A", "name": "Alpha"}]}
+        return {"tag": "#CLAN", "name": "Ghosteek"}
+
+    client._request = fake_request
+    assert (await client.get_clan("CLAN"))["name"] == "Ghosteek"
+    assert (await client.get_clan_members("#CLAN"))[0]["name"] == "Alpha"
+    assert paths == ["/clans/%23CLAN", "/clans/%23CLAN/members"]
+
+
+def test_clan_endpoint_shapes() -> None:
+    asyncio.run(_run_clan_endpoint_shapes())
 
 
 def test_config_error_on_401() -> None:

@@ -58,6 +58,35 @@ class ProfileResponse(BaseModel):
     subscription: SubscriptionInfo
 
 
+class ClanOverviewResponse(BaseModel):
+    tag: str
+    name: str
+    description: str | None = None
+    members: int | None = None
+    clan_score: int | None = None
+    clan_war_trophies: int | None = None
+    required_trophies: int | None = None
+    donations_per_week: int | None = None
+
+
+class ClanMemberResponse(BaseModel):
+    tag: str
+    name: str
+    role: str
+    trophies: int
+    donations: int
+    donations_received: int
+    clan_rank: int | None = None
+    previous_clan_rank: int | None = None
+
+
+class ClanProfileResponse(BaseModel):
+    status: Literal["available", "no_clan"]
+    clan: ClanOverviewResponse | None = None
+    members: list[ClanMemberResponse] = []
+    activity_basis: str | None = None
+
+
 class CollectionCardEntry(BaseModel):
     name: str
     name_ru: str

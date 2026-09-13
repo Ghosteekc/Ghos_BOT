@@ -322,6 +322,25 @@ class ClashRoyaleClient:
         logger.debug("CR API player fetched tag=%s name=%s", normalized, data.get("name", "?"))
         return data
 
+    async def get_clan(self, tag: str) -> dict:
+        """Return the live clan record from the official Clash Royale API."""
+        normalized = normalize_tag(tag)
+        data = await self._request(f"/clans/{encode_tag(tag)}")
+        if not isinstance(data, dict):
+            raise ClashRoyaleAPIError("Некорректный ответ профиля клана.", 500)
+        logger.debug("CR API clan fetched tag=%s name=%s", normalized, data.get("name", "?"))
+        return data
+
+    async def get_clan_members(self, tag: str) -> list[dict]:
+        """Return the current member list from the official Clash Royale API."""
+        normalized = normalize_tag(tag)
+        data = await self._request(f"/clans/{encode_tag(tag)}/members")
+        items = data.get("items") if isinstance(data, dict) else None
+        if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+            raise ClashRoyaleAPIError("Некорректный ответ состава клана.", 500)
+        logger.debug("CR API clan members fetched tag=%s members=%s", normalized, len(items))
+        return items
+
     async def fetch_battlelog_raw(self, tag: str) -> list:
         normalized = normalize_tag(tag)
         data = await self._request(f"/players/{encode_tag(tag)}/battlelog")

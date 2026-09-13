@@ -6,6 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.api.deps import get_current_user, get_db, get_subscription_info, require_linked_player
 from bot.api.schemas import (
+    ClanMemberResponse,
+    ClanOverviewResponse,
+    ClanProfileResponse,
     HomeResponse,
     LeagueInfo,
     PlayerCollectionResponse,
@@ -29,12 +32,59 @@ from bot.services.battle_service import (
 from bot.services.battle_session_cache import get_session_battles, is_fresh
 from bot.services.player_collection import build_player_collection, build_collection_stats_from_player
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
+from bot.services.clan_profile import ClanMemberSort, get_player_clan_snapshot, sort_members
 from bot.services.league_info import build_league_info
 from bot.user_errors import http_error_from_clash
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["profile"])
+
+
+@router.get("/profile/clan", response_model=ClanProfileResponse)
+async def get_my_clan(
+    sort: ClanMemberSort = "rank",
+    user: User = Depends(get_current_user),
+) -> ClanProfileResponse:
+    """Return one grounded, cached clan view without per-member player requests."""
+    if not user.player_tag:
+        return ClanProfileResponse(status="no_clan")
+
+    try:
+        snapshot = await get_player_clan_snapshot(user.player_tag)
+    except ClashRoyaleAPIError as exc:
+        raise http_error_from_clash(exc) from exc
+
+    if snapshot is None:
+        return ClanProfileResponse(status="no_clan")
+
+    return ClanProfileResponse(
+        status="available",
+        clan=ClanOverviewResponse(
+            tag=snapshot.tag,
+            name=snapshot.name,
+            description=snapshot.description,
+            members=snapshot.members,
+            clan_score=snapshot.clan_score,
+            clan_war_trophies=snapshot.clan_war_trophies,
+            required_trophies=snapshot.required_trophies,
+            donations_per_week=snapshot.donations_per_week,
+        ),
+        members=[
+            ClanMemberResponse(
+                tag=member.tag,
+                name=member.name,
+                role=member.role,
+                trophies=member.trophies,
+                donations=member.donations,
+                donations_received=member.donations_received,
+                clan_rank=member.clan_rank,
+                previous_clan_rank=member.previous_clan_rank,
+            )
+            for member in sort_members(snapshot.member_list, sort)
+        ],
+        activity_basis="Донаты за текущую неделю",
+    )
 
 
 def _player_avatar_url(player: dict) -> tuple[str | None, str | None]:
