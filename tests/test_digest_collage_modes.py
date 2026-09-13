@@ -1,9 +1,9 @@
 """Digest collage card selection keeps evo/hero from mine slots / restored cache."""
 from __future__ import annotations
 
-from PIL import ImageFont
+from PIL import Image, ImageFont
 
-from bot.services.deck_collage import _elixir_font
+from bot.services.deck_collage import _draw_hero_card_frame, _elixir_font
 from bot.services.weekly_digest import collage_cards_for_deck, _deck_upgrade_score
 
 
@@ -39,6 +39,17 @@ def test_elixir_font_uses_bundled_truetype_not_bitmap_default():
     font = _elixir_font(34)
     bbox = font.getbbox("4")
     assert bbox[3] - bbox[1] >= 18
+
+
+def test_hero_card_frame_uses_the_shared_gold_treatment():
+    canvas = Image.new("RGBA", (120, 150), (0, 0, 0, 0))
+
+    _draw_hero_card_frame(canvas, (0, 0, 120, 150))
+
+    red, green, blue, alpha = canvas.getpixel((25, 10))
+    assert alpha > 0
+    assert red > blue
+    assert green > blue
 
 
 def test_collage_uses_restored_cache_modes():

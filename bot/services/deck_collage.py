@@ -55,6 +55,8 @@ _EVO_BADGE = (232, 121, 249, 255)
 _EVO_BADGE_DARK = (126, 34, 206, 255)
 _HERO_BADGE = (253, 230, 138, 255)
 _HERO_BADGE_DARK = (217, 119, 6, 255)
+_HERO_FRAME_GOLD = (234, 179, 8, 255)
+_HERO_FRAME_HIGHLIGHT = (255, 239, 165, 255)
 
 
 def _font(size: int) -> ImageFont.ImageFont:
@@ -378,6 +380,31 @@ def _draw_upgrade_badge(
     canvas.alpha_composite(layer)
 
 
+def _draw_hero_card_frame(canvas: Image.Image, slot: tuple[int, int, int, int]) -> None:
+    """Add the shared gold Hero treatment without relying on icon-specific artwork."""
+    x, y, w, h = slot
+    inset = 10  # Matches _fit_card_contain's safe area inside the slot background.
+    frame = (x + inset, y + inset, x + w - inset - 1, y + h - inset - 1)
+    radius = 14
+
+    glow_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(glow_layer).rounded_rectangle(
+        frame, radius=radius, outline=(*_HERO_FRAME_GOLD[:3], 150), width=5
+    )
+    canvas.alpha_composite(glow_layer.filter(ImageFilter.GaussianBlur(radius=3)))
+
+    frame_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(frame_layer)
+    draw.rounded_rectangle(frame, radius=radius, outline=_HERO_FRAME_GOLD, width=3)
+    draw.rounded_rectangle(
+        (frame[0] + 2, frame[1] + 2, frame[2] - 2, frame[3] - 2),
+        radius=radius - 2,
+        outline=_HERO_FRAME_HIGHLIGHT,
+        width=1,
+    )
+    canvas.alpha_composite(frame_layer)
+
+
 async def render_deck_collage(cards: list[dict]) -> bytes | None:
     """Build PNG: clean BG → centered card icons → evo/hero badges → elixir → title."""
     if not cards:
@@ -406,6 +433,8 @@ async def render_deck_collage(cards: list[dict]) -> bytes | None:
         canvas.alpha_composite(arts[idx], dest=(x, y))
         is_hero = bool(card.get("is_hero"))
         is_evo = (not is_hero) and int(card.get("evolution_level") or 0) >= 1
+        if is_hero:
+            _draw_hero_card_frame(canvas, (x, y, fw, fh))
         _draw_upgrade_badge(canvas, (x, y, fw, fh), is_hero=is_hero, is_evo=is_evo)
         name = (card.get("name") or "").strip()
         elixir = int(card.get("cost") or (get_card_elixir(name) if name else 0) or 0)

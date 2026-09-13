@@ -167,6 +167,7 @@ async def _run_route_states() -> None:
             user=SimpleNamespace(player_tag="#PLAYER"),
         )
         assert result.status == "available"
+        assert result.current_player_tag == "#PLAYER"
         assert result.clan is not None and result.clan.name == "Ghosteek"
         assert [member.tag for member in result.members] == ["#A", "#B", "#C"]
         assert result.activity_basis == "Донаты за текущую неделю"

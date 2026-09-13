@@ -60,6 +60,7 @@ async def get_my_clan(
 
     return ClanProfileResponse(
         status="available",
+        current_player_tag=user.player_tag,
         clan=ClanOverviewResponse(
             tag=snapshot.tag,
             name=snapshot.name,

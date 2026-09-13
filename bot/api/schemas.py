@@ -82,6 +82,7 @@ class ClanMemberResponse(BaseModel):
 
 class ClanProfileResponse(BaseModel):
     status: Literal["available", "no_clan"]
+    current_player_tag: str | None = None
     clan: ClanOverviewResponse | None = None
     members: list[ClanMemberResponse] = []
     activity_basis: str | None = None
