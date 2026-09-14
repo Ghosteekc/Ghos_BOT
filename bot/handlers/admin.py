@@ -95,7 +95,7 @@ async def cmd_deckshop_check(message: Message) -> None:
     from bot.services.deckshop_data import format_deckshop_status
 
     text = format_deckshop_status()
-    await message.answer("📦 DeckShop\n" + text.replace("DeckShop snapshot", "Snapshot"))
+    await message.answer("📦 Локальная база контров\n" + text.replace("Локальная база контров\n", ""))
 
 
 @router.message(Command("sync_now"))

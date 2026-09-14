@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Проверка целостности и свежести offline-снимка DeckShop.
+"""Проверка целостности и свежести локальной базы контров.
 
 Usage:
     python scripts/check_deckshop_data.py
@@ -29,7 +29,7 @@ from bot.services.deckshop_data import (  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check DeckShop offline snapshot")
+    parser = argparse.ArgumentParser(description="Check local counter database")
     parser.add_argument(
         "--max-age",
         type=int,

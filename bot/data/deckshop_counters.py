@@ -1,23 +1,18 @@
 """
-Справочник контров и синергий карт (offline snapshot DeckShop).
+Локальная база контров и синергий карт.
 
-Источник: https://www.deckshop.pro/ru/
-Обновлён (UTC): 2026-09-04T15:45:48Z
-Карт в файле: 122
+Это сохранённый снимок, используемый только с диска: приложение не содержит
+ссылок или сетевых запросов к внешнему источнику. Обновлён (UTC):
+2026-09-04T15:45:48Z. Карт в файле: 122.
 
-Обновление:
-  python scripts/scrape_deckshop_counters.py
-  python scripts/deckshop_add_anticounters.py  # опционально
-Проверка свежести:
-  python scripts/check_deckshop_data.py
-
+Проверка целостности: python scripts/check_deckshop_data.py
 Рантайм: bot/services/deckshop_data.py (graceful fallback без HTTP).
 """
 
 from __future__ import annotations
 
 DECKSHOP_SOURCE = {
-    "site": "https://www.deckshop.pro/ru/",
+    "storage": "local_snapshot",
     "scraped_at": "2026-09-04T15:45:48Z",
     "card_slugs_seen": 122,
     "cards_parsed": 122,
@@ -29,7 +24,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "archer-queen",
         "name": "Archer Queen",
         "name_ru": "Королева лучниц",
-        "url": "https://www.deckshop.pro/ru/card/detail/archer-queen",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -227,7 +221,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "archers",
         "name": "Archers",
         "name_ru": "Лучницы",
-        "url": "https://www.deckshop.pro/ru/card/detail/archers",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -463,7 +456,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "arrows",
         "name": "Arrows",
         "name_ru": "Стрелы",
-        "url": "https://www.deckshop.pro/ru/card/detail/arrows",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -681,7 +673,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "baby-dragon",
         "name": "Baby Dragon",
         "name_ru": "Дракончик",
-        "url": "https://www.deckshop.pro/ru/card/detail/baby-dragon",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -923,7 +914,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "balloon",
         "name": "Balloon",
         "name_ru": "Шар",
-        "url": "https://www.deckshop.pro/ru/card/detail/balloon",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -1156,7 +1146,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "bandit",
         "name": "Bandit",
         "name_ru": "Бандитка",
-        "url": "https://www.deckshop.pro/ru/card/detail/bandit",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -1396,7 +1385,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "barbarian-barrel",
         "name": "Barbarian Barrel",
         "name_ru": "Варварская бочка",
-        "url": "https://www.deckshop.pro/ru/card/detail/barbarian-barrel",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -1634,7 +1622,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "barbarian-hut",
         "name": "Barbarian Hut",
         "name_ru": "Хижина варваров",
-        "url": "https://www.deckshop.pro/ru/card/detail/barbarian-hut",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -1858,7 +1845,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "barbarians",
         "name": "Barbarians",
         "name_ru": "Варвары",
-        "url": "https://www.deckshop.pro/ru/card/detail/barbarians",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -2034,7 +2020,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "bats",
         "name": "Bats",
         "name_ru": "Летучие мыши",
-        "url": "https://www.deckshop.pro/ru/card/detail/bats",
         "not_killed_by_spells": [
             "Earthquake",
             "Barbarian Barrel",
@@ -2265,7 +2250,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "battle-healer",
         "name": "Battle Healer",
         "name_ru": "Целительница-воин",
-        "url": "https://www.deckshop.pro/ru/card/detail/battle-healer",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -2514,7 +2498,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "battle-ram",
         "name": "Battle Ram",
         "name_ru": "Боевой таран",
-        "url": "https://www.deckshop.pro/ru/card/detail/battle-ram",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -2736,7 +2719,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "berserker",
         "name": "Berserker",
         "name_ru": "Берсеркша",
-        "url": "https://www.deckshop.pro/ru/card/detail/berserker",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -2900,7 +2882,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "bomb-tower",
         "name": "Bomb Tower",
         "name_ru": "Башня-бомбежка",
-        "url": "https://www.deckshop.pro/ru/card/detail/bomb-tower",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -3093,7 +3074,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "bomber",
         "name": "Bomber",
         "name_ru": "Подрывник",
-        "url": "https://www.deckshop.pro/ru/card/detail/bomber",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -3309,7 +3289,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "boss-bandit",
         "name": "Boss Bandit",
         "name_ru": "Главная бандитка",
-        "url": "https://www.deckshop.pro/ru/card/detail/boss-bandit",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -3485,7 +3464,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "bowler",
         "name": "Bowler",
         "name_ru": "Вышибала",
-        "url": "https://www.deckshop.pro/ru/card/detail/bowler",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -3716,7 +3694,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "cannon",
         "name": "Cannon",
         "name_ru": "Пушка",
-        "url": "https://www.deckshop.pro/ru/card/detail/cannon",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -3937,7 +3914,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "cannon-cart",
         "name": "Cannon Cart",
         "name_ru": "Повозка с пушкой",
-        "url": "https://www.deckshop.pro/ru/card/detail/cannon-cart",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -4179,7 +4155,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "clone",
         "name": "Clone",
         "name_ru": "Клон",
-        "url": "https://www.deckshop.pro/ru/card/detail/clone",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -4359,7 +4334,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "dark-prince",
         "name": "Dark Prince",
         "name_ru": "Темный принц",
-        "url": "https://www.deckshop.pro/ru/card/detail/dark-prince",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -4605,7 +4579,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "dart-goblin",
         "name": "Dart Goblin",
         "name_ru": "Гоблин с дротиками",
-        "url": "https://www.deckshop.pro/ru/card/detail/dart-goblin",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -4847,7 +4820,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "earthquake",
         "name": "Earthquake",
         "name_ru": "Землетрясение",
-        "url": "https://www.deckshop.pro/ru/card/detail/earthquake",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -5052,7 +5024,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "electro-dragon",
         "name": "Electro Dragon",
         "name_ru": "Электродракон",
-        "url": "https://www.deckshop.pro/ru/card/detail/electro-dragon",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -5278,7 +5249,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "electro-giant",
         "name": "Electro Giant",
         "name_ru": "Электрогигант",
-        "url": "https://www.deckshop.pro/ru/card/detail/electro-giant",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -5467,7 +5437,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "electro-spirit",
         "name": "Electro Spirit",
         "name_ru": "Электрический дух",
-        "url": "https://www.deckshop.pro/ru/card/detail/electro-spirit",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -5662,7 +5631,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "electro-wizard",
         "name": "Electro Wizard",
         "name_ru": "Громовержец",
-        "url": "https://www.deckshop.pro/ru/card/detail/electro-wizard",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -5907,7 +5875,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "elite-barbarians",
         "name": "Elite Barbarians",
         "name_ru": "Элитные варвары",
-        "url": "https://www.deckshop.pro/ru/card/detail/elite-barbarians",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -6114,7 +6081,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "elixir-collector",
         "name": "Elixir Collector",
         "name_ru": "Сборщик эликсира",
-        "url": "https://www.deckshop.pro/ru/card/detail/elixir-collector",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [],
@@ -6260,7 +6226,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "elixir-golem",
         "name": "Elixir Golem",
         "name_ru": "Эликсирный голем",
-        "url": "https://www.deckshop.pro/ru/card/detail/elixir-golem",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -6480,7 +6445,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "executioner",
         "name": "Executioner",
         "name_ru": "Палач",
-        "url": "https://www.deckshop.pro/ru/card/detail/executioner",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -6679,7 +6643,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "fire-spirit",
         "name": "Fire Spirit",
         "name_ru": "Огненный дух",
-        "url": "https://www.deckshop.pro/ru/card/detail/fire-spirit",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -6892,7 +6855,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "fireball",
         "name": "Fireball",
         "name_ru": "Огненный шар",
-        "url": "https://www.deckshop.pro/ru/card/detail/fireball",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -7105,7 +7067,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "firecracker",
         "name": "Firecracker",
         "name_ru": "Огненная лучница",
-        "url": "https://www.deckshop.pro/ru/card/detail/firecracker",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -7345,7 +7306,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "fisherman",
         "name": "Fisherman",
         "name_ru": "Рыбак",
-        "url": "https://www.deckshop.pro/ru/card/detail/fisherman",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -7564,7 +7524,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "flying-machine",
         "name": "Flying Machine",
         "name_ru": "Летучка",
-        "url": "https://www.deckshop.pro/ru/card/detail/flying-machine",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -7793,7 +7752,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "freeze",
         "name": "Freeze",
         "name_ru": "Заморозка",
-        "url": "https://www.deckshop.pro/ru/card/detail/freeze",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -7970,7 +7928,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "furnace",
         "name": "Furnace",
         "name_ru": "Печь",
-        "url": "https://www.deckshop.pro/ru/card/detail/furnace",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -8199,7 +8156,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "giant",
         "name": "Giant",
         "name_ru": "Гигант",
-        "url": "https://www.deckshop.pro/ru/card/detail/giant",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -8433,7 +8389,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "giant-skeleton",
         "name": "Giant Skeleton",
         "name_ru": "Гигантский скелет",
-        "url": "https://www.deckshop.pro/ru/card/detail/giant-skeleton",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -8667,7 +8622,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "giant-snowball",
         "name": "Giant Snowball",
         "name_ru": "Гигантский снежок",
-        "url": "https://www.deckshop.pro/ru/card/detail/giant-snowball",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -8917,7 +8871,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblin-barrel",
         "name": "Goblin Barrel",
         "name_ru": "Гоблинская бочка",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblin-barrel",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -9124,7 +9077,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblin-cage",
         "name": "Goblin Cage",
         "name_ru": "Клетка с гоблином",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblin-cage",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -9358,7 +9310,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblin-curse",
         "name": "Goblin Curse",
         "name_ru": "Проклятие гоблинов",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblin-curse",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -9527,7 +9478,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblin-demolisher",
         "name": "Goblin Demolisher",
         "name_ru": "Гоблин-подрывник",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblin-demolisher",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -9732,7 +9682,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblin-drill",
         "name": "Goblin Drill",
         "name_ru": "Гоблинский бур",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblin-drill",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -9952,7 +9901,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblin-gang",
         "name": "Goblin Gang",
         "name_ru": "Банда гоблинов",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblin-gang",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -10175,7 +10123,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblin-giant",
         "name": "Goblin Giant",
         "name_ru": "Гоблин-гигант",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblin-giant",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -10401,7 +10348,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblin-hut",
         "name": "Goblin Hut",
         "name_ru": "Хижина гоблинов",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblin-hut",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -10632,7 +10578,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblin-machine",
         "name": "Goblin Machine",
         "name_ru": "Гоблинская машина",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblin-machine",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -10801,7 +10746,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblins",
         "name": "Goblins",
         "name_ru": "Гоблины",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblins",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -11011,7 +10955,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "goblinstein",
         "name": "Goblinstein",
         "name_ru": "Гоблинштейн",
-        "url": "https://www.deckshop.pro/ru/card/detail/goblinstein",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -11166,7 +11109,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "golden-knight",
         "name": "Golden Knight",
         "name_ru": "Золотой рыцарь",
-        "url": "https://www.deckshop.pro/ru/card/detail/golden-knight",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -11379,7 +11321,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "golem",
         "name": "Golem",
         "name_ru": "Голем",
-        "url": "https://www.deckshop.pro/ru/card/detail/golem",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -11603,7 +11544,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "graveyard",
         "name": "Graveyard",
         "name_ru": "Кладбище",
-        "url": "https://www.deckshop.pro/ru/card/detail/graveyard",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -11824,7 +11764,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "guards",
         "name": "Guards",
         "name_ru": "Стражи",
-        "url": "https://www.deckshop.pro/ru/card/detail/guards",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -12037,7 +11976,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "heal-spirit",
         "name": "Heal Spirit",
         "name_ru": "Дух исцеления",
-        "url": "https://www.deckshop.pro/ru/card/detail/heal-spirit",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -12240,7 +12178,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "hog-rider",
         "name": "Hog Rider",
         "name_ru": "Всадник на кабане",
-        "url": "https://www.deckshop.pro/ru/card/detail/hog-rider",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -12481,7 +12418,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "hunter",
         "name": "Hunter",
         "name_ru": "Охотник",
-        "url": "https://www.deckshop.pro/ru/card/detail/hunter",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -12702,7 +12638,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "ice-golem",
         "name": "Ice Golem",
         "name_ru": "Ледяной голем",
-        "url": "https://www.deckshop.pro/ru/card/detail/ice-golem",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -12946,7 +12881,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "ice-spirit",
         "name": "Ice Spirit",
         "name_ru": "Ледяной дух",
-        "url": "https://www.deckshop.pro/ru/card/detail/ice-spirit",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -13199,7 +13133,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "ice-wizard",
         "name": "Ice Wizard",
         "name_ru": "Ледяной колдун",
-        "url": "https://www.deckshop.pro/ru/card/detail/ice-wizard",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -13436,7 +13369,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "inferno-dragon",
         "name": "Inferno Dragon",
         "name_ru": "Пламенный дракон",
-        "url": "https://www.deckshop.pro/ru/card/detail/inferno-dragon",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -13639,7 +13571,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "inferno-tower",
         "name": "Inferno Tower",
         "name_ru": "Адская башня",
-        "url": "https://www.deckshop.pro/ru/card/detail/inferno-tower",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -13858,7 +13789,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "knight",
         "name": "Knight",
         "name_ru": "Рыцарь",
-        "url": "https://www.deckshop.pro/ru/card/detail/knight",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -14099,7 +14029,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "lava-hound",
         "name": "Lava Hound",
         "name_ru": "Адская гончая",
-        "url": "https://www.deckshop.pro/ru/card/detail/lava-hound",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -14303,7 +14232,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "lightning",
         "name": "Lightning",
         "name_ru": "Молния",
-        "url": "https://www.deckshop.pro/ru/card/detail/lightning",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -14475,7 +14403,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "little-prince",
         "name": "Little Prince",
         "name_ru": "Маленький принц",
-        "url": "https://www.deckshop.pro/ru/card/detail/little-prince",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -14677,7 +14604,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "lumberjack",
         "name": "Lumberjack",
         "name_ru": "Дровосек",
-        "url": "https://www.deckshop.pro/ru/card/detail/lumberjack",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -14927,7 +14853,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "magic-archer",
         "name": "Magic Archer",
         "name_ru": "Магический лучник",
-        "url": "https://www.deckshop.pro/ru/card/detail/magic-archer",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -15150,7 +15075,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "mega-knight",
         "name": "Mega Knight",
         "name_ru": "Мегарыцарь",
-        "url": "https://www.deckshop.pro/ru/card/detail/mega-knight",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -15374,7 +15298,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "mega-minion",
         "name": "Mega Minion",
         "name_ru": "Мегаминьон",
-        "url": "https://www.deckshop.pro/ru/card/detail/mega-minion",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -15611,7 +15534,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "mighty-miner",
         "name": "Mighty Miner",
         "name_ru": "Шустрый шахтер",
-        "url": "https://www.deckshop.pro/ru/card/detail/mighty-miner",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -15782,7 +15704,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "miner",
         "name": "Miner",
         "name_ru": "Шахтер",
-        "url": "https://www.deckshop.pro/ru/card/detail/miner",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -16012,7 +15933,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "mini-pekka",
         "name": "Mini P.E.K.K.A",
         "name_ru": "Мини-П.Е.К.К.А",
-        "url": "https://www.deckshop.pro/ru/card/detail/mini-pekka",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -16248,7 +16168,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "minion-horde",
         "name": "Minion Horde",
         "name_ru": "Орда миньонов",
-        "url": "https://www.deckshop.pro/ru/card/detail/minion-horde",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -16434,7 +16353,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "minions",
         "name": "Minions",
         "name_ru": "Миньоны",
-        "url": "https://www.deckshop.pro/ru/card/detail/minions",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -16664,7 +16582,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "mirror",
         "name": "Mirror",
         "name_ru": "Зеркало",
-        "url": "https://www.deckshop.pro/ru/card/detail/mirror",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [],
@@ -16878,7 +16795,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "monk",
         "name": "Monk",
         "name_ru": "Монах",
-        "url": "https://www.deckshop.pro/ru/card/detail/monk",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -17057,7 +16973,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "mortar",
         "name": "Mortar",
         "name_ru": "Мортира",
-        "url": "https://www.deckshop.pro/ru/card/detail/mortar",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -17277,7 +17192,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "mother-witch",
         "name": "Mother Witch",
         "name_ru": "Ведьмина бабушка",
-        "url": "https://www.deckshop.pro/ru/card/detail/mother-witch",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -17493,7 +17407,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "musketeer",
         "name": "Musketeer",
         "name_ru": "Мушкетер",
-        "url": "https://www.deckshop.pro/ru/card/detail/musketeer",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -17727,7 +17640,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "night-witch",
         "name": "Night Witch",
         "name_ru": "Ночная ведьма",
-        "url": "https://www.deckshop.pro/ru/card/detail/night-witch",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -17936,7 +17848,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "pekka",
         "name": "P.E.K.K.A",
         "name_ru": "П.Е.К.К.А.",
-        "url": "https://www.deckshop.pro/ru/card/detail/pekka",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -18149,7 +18060,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "phoenix",
         "name": "Phoenix",
         "name_ru": "Феникс",
-        "url": "https://www.deckshop.pro/ru/card/detail/phoenix",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -18332,7 +18242,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "poison",
         "name": "Poison",
         "name_ru": "Яд",
-        "url": "https://www.deckshop.pro/ru/card/detail/poison",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -18536,7 +18445,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "prince",
         "name": "Prince",
         "name_ru": "Принц",
-        "url": "https://www.deckshop.pro/ru/card/detail/prince",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -18768,7 +18676,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "princess",
         "name": "Princess",
         "name_ru": "Принцесса",
-        "url": "https://www.deckshop.pro/ru/card/detail/princess",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -18983,7 +18890,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "rage",
         "name": "Rage",
         "name_ru": "Ярость",
-        "url": "https://www.deckshop.pro/ru/card/detail/rage",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [],
@@ -19158,7 +19064,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "ram-rider",
         "name": "Ram Rider",
         "name_ru": "Всадница на баране",
-        "url": "https://www.deckshop.pro/ru/card/detail/ram-rider",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -19389,7 +19294,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "rascals",
         "name": "Rascals",
         "name_ru": "Разбойники",
-        "url": "https://www.deckshop.pro/ru/card/detail/rascals",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -19585,7 +19489,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "rocket",
         "name": "Rocket",
         "name_ru": "Ракета",
-        "url": "https://www.deckshop.pro/ru/card/detail/rocket",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -19750,7 +19653,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "ronin",
         "name": "Ronin",
         "name_ru": "Ronin",
-        "url": "https://www.deckshop.pro/ru/card/detail/ronin",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -19910,7 +19812,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "royal-delivery",
         "name": "Royal Delivery",
         "name_ru": "Королевская почта",
-        "url": "https://www.deckshop.pro/ru/card/detail/royal-delivery",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -20137,7 +20038,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "royal-ghost",
         "name": "Royal Ghost",
         "name_ru": "Королевский призрак",
-        "url": "https://www.deckshop.pro/ru/card/detail/royal-ghost",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -20355,7 +20255,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "royal-giant",
         "name": "Royal Giant",
         "name_ru": "Королевский гигант",
-        "url": "https://www.deckshop.pro/ru/card/detail/royal-giant",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -20586,7 +20485,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "royal-hogs",
         "name": "Royal Hogs",
         "name_ru": "Королевские кабаны",
-        "url": "https://www.deckshop.pro/ru/card/detail/royal-hogs",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -20803,7 +20701,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "royal-recruits",
         "name": "Royal Recruits",
         "name_ru": "Королевские рекруты",
-        "url": "https://www.deckshop.pro/ru/card/detail/royal-recruits",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -21008,7 +20905,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "rune-giant",
         "name": "Rune Giant",
         "name_ru": "Руническая гигантша",
-        "url": "https://www.deckshop.pro/ru/card/detail/rune-giant",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -21186,7 +21082,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "skeleton-army",
         "name": "Skeleton Army",
         "name_ru": "Армия скелетов",
-        "url": "https://www.deckshop.pro/ru/card/detail/skeleton-army",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -21387,7 +21282,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "skeleton-barrel",
         "name": "Skeleton Barrel",
         "name_ru": "Бочка со скелетами",
-        "url": "https://www.deckshop.pro/ru/card/detail/skeleton-barrel",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -21623,7 +21517,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "skeleton-dragons",
         "name": "Skeleton Dragons",
         "name_ru": "Костяные драконы",
-        "url": "https://www.deckshop.pro/ru/card/detail/skeleton-dragons",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -21857,7 +21750,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "skeleton-king",
         "name": "Skeleton King",
         "name_ru": "Король скелетов",
-        "url": "https://www.deckshop.pro/ru/card/detail/skeleton-king",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -22054,7 +21946,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "skeletons",
         "name": "Skeletons",
         "name_ru": "Скелеты",
-        "url": "https://www.deckshop.pro/ru/card/detail/skeletons",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -22274,7 +22165,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "sparky",
         "name": "Sparky",
         "name_ru": "Спарки",
-        "url": "https://www.deckshop.pro/ru/card/detail/sparky",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -22500,7 +22390,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "spear-goblins",
         "name": "Spear Goblins",
         "name_ru": "Гоблины-копейщики",
-        "url": "https://www.deckshop.pro/ru/card/detail/spear-goblins",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -22735,7 +22624,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "spirit-empress",
         "name": "Spirit Empress",
         "name_ru": "Императрица духов",
-        "url": "https://www.deckshop.pro/ru/card/detail/spirit-empress",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -22894,7 +22782,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "suspicious-bush",
         "name": "Suspicious Bush",
         "name_ru": "Подозрительный куст",
-        "url": "https://www.deckshop.pro/ru/card/detail/suspicious-bush",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [],
@@ -23045,7 +22932,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "tesla",
         "name": "Tesla",
         "name_ru": "Тесла",
-        "url": "https://www.deckshop.pro/ru/card/detail/tesla",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -23259,7 +23145,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "the-log",
         "name": "The Log",
         "name_ru": "Бревно",
-        "url": "https://www.deckshop.pro/ru/card/detail/the-log",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -23503,7 +23388,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "three-musketeers",
         "name": "Three Musketeers",
         "name_ru": "Три мушкетера",
-        "url": "https://www.deckshop.pro/ru/card/detail/three-musketeers",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -23703,7 +23587,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "tombstone",
         "name": "Tombstone",
         "name_ru": "Надгробие",
-        "url": "https://www.deckshop.pro/ru/card/detail/tombstone",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -23908,7 +23791,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "tornado",
         "name": "Tornado",
         "name_ru": "Торнадо",
-        "url": "https://www.deckshop.pro/ru/card/detail/tornado",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -24135,7 +24017,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "valkyrie",
         "name": "Valkyrie",
         "name_ru": "Валькирия",
-        "url": "https://www.deckshop.pro/ru/card/detail/valkyrie",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -24375,7 +24256,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "vines",
         "name": "Vines",
         "name_ru": "Vines",
-        "url": "https://www.deckshop.pro/ru/card/detail/vines",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -24591,7 +24471,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "void",
         "name": "Void",
         "name_ru": "Бездна",
-        "url": "https://www.deckshop.pro/ru/card/detail/void",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -24751,7 +24630,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "wall-breakers",
         "name": "Wall Breakers",
         "name_ru": "Стенобои",
-        "url": "https://www.deckshop.pro/ru/card/detail/wall-breakers",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -24946,7 +24824,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "witch",
         "name": "Witch",
         "name_ru": "Ведьма",
-        "url": "https://www.deckshop.pro/ru/card/detail/witch",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -25157,7 +25034,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "wizard",
         "name": "Wizard",
         "name_ru": "Колдун",
-        "url": "https://www.deckshop.pro/ru/card/detail/wizard",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -25368,7 +25244,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "x-bow",
         "name": "X-Bow",
         "name_ru": "Арбалет",
-        "url": "https://www.deckshop.pro/ru/card/detail/x-bow",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",
@@ -25581,7 +25456,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "zap",
         "name": "Zap",
         "name_ru": "Разряд",
-        "url": "https://www.deckshop.pro/ru/card/detail/zap",
         "not_killed_by_spells": [],
         "counters_vs_attack": {
             "strong": [
@@ -25835,7 +25709,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
         "slug": "zappies",
         "name": "Zappies",
         "name_ru": "Мини-генераторы",
-        "url": "https://www.deckshop.pro/ru/card/detail/zappies",
         "not_killed_by_spells": [
             "Freeze",
             "Tornado",

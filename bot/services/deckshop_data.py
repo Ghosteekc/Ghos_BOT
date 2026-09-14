@@ -1,4 +1,4 @@
-"""Безопасный доступ к offline-снимку DeckShop (без HTTP в рантайме)."""
+"""Безопасный доступ к локальной базе контров (без HTTP в рантайме)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ class DeckshopSnapshotStatus:
     available: bool
     status: str  # ok | missing | corrupt | empty
     scraped_at: str | None
-    site: str | None
     cards_count: int
     card_slugs_seen: int | None = None
     cards_parsed: int | None = None
@@ -32,7 +31,6 @@ class DeckshopSnapshotStatus:
             "available": self.available,
             "status": self.status,
             "scraped_at": self.scraped_at,
-            "site": self.site,
             "cards_count": self.cards_count,
             "card_slugs_seen": self.card_slugs_seen,
             "cards_parsed": self.cards_parsed,
@@ -73,7 +71,6 @@ def load_deckshop_snapshot() -> tuple[dict[str, dict], dict[str, Any], DeckshopS
             available=False,
             status="missing",
             scraped_at=None,
-            site=None,
             cards_count=0,
             load_error=f"file not found: {SNAPSHOT_PATH.name}",
         )
@@ -93,7 +90,6 @@ def load_deckshop_snapshot() -> tuple[dict[str, dict], dict[str, Any], DeckshopS
             available=False,
             status="corrupt",
             scraped_at=None,
-            site=None,
             cards_count=0,
             load_error=str(exc),
         )
@@ -108,7 +104,6 @@ def load_deckshop_snapshot() -> tuple[dict[str, dict], dict[str, Any], DeckshopS
             available=False,
             status="corrupt",
             scraped_at=source.get("scraped_at"),
-            site=source.get("site"),
             cards_count=0,
             load_error="DECKSHOP_COUNTERS is not a dict",
         )
@@ -123,7 +118,6 @@ def load_deckshop_snapshot() -> tuple[dict[str, dict], dict[str, Any], DeckshopS
         available=bool(counters),
         status=file_status,
         scraped_at=scraped_at,
-        site=source.get("site"),
         cards_count=len(counters),
         card_slugs_seen=source.get("card_slugs_seen"),
         cards_parsed=source.get("cards_parsed"),
@@ -146,7 +140,6 @@ def check_deckshop_snapshot(*, max_age_days: int = DEFAULT_MAX_AGE_DAYS) -> Deck
         available=bool(counters),
         status=file_status,
         scraped_at=scraped_at,
-        site=source.get("site"),
         cards_count=len(counters),
         card_slugs_seen=source.get("card_slugs_seen"),
         cards_parsed=source.get("cards_parsed"),
@@ -172,10 +165,8 @@ def get_deckshop_status_summary() -> dict[str, Any]:
 
 def format_deckshop_status(status: DeckshopSnapshotStatus | None = None) -> str:
     status = status or check_deckshop_snapshot()
-    lines = ["DeckShop snapshot"]
+    lines = ["Локальная база контров"]
     lines.append(f"- Status: {status.status}")
-    if status.site:
-        lines.append(f"- Source: {status.site}")
     if status.scraped_at:
         lines.append(f"- Updated: {status.scraped_at}")
     if status.age_days is not None:
@@ -186,7 +177,7 @@ def format_deckshop_status(status: DeckshopSnapshotStatus | None = None) -> str:
     if status.load_error:
         lines.append(f"- Error: {status.load_error}")
     if status.stale:
-        lines.append("WARN: snapshot is stale. Run: python scripts/scrape_deckshop_counters.py")
+        lines.append("WARN: локальный снимок давно не обновлялся.")
     elif status.status == "ok":
         lines.append("OK: snapshot is available.")
     elif status.status in {"missing", "corrupt", "empty"}:
