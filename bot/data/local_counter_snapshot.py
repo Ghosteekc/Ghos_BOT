@@ -5,13 +5,13 @@
 ссылок или сетевых запросов к внешнему источнику. Обновлён (UTC):
 2026-09-04T15:45:48Z. Карт в файле: 122.
 
-Проверка целостности: python scripts/check_deckshop_data.py
-Рантайм: bot/services/deckshop_data.py (graceful fallback без HTTP).
+Проверка целостности: python scripts/check_local_counter_data.py
+Рантайм: bot/services/local_counter_data.py (graceful fallback без HTTP).
 """
 
 from __future__ import annotations
 
-DECKSHOP_SOURCE = {
+LOCAL_COUNTER_SOURCE = {
     "storage": "local_snapshot",
     "scraped_at": "2026-09-04T15:45:48Z",
     "card_slugs_seen": 122,
@@ -19,7 +19,7 @@ DECKSHOP_SOURCE = {
 }
 
 # card name (English) -> counter/synergy breakdown
-DECKSHOP_COUNTERS: dict[str, dict] = {
+LOCAL_COUNTERS: dict[str, dict] = {
     "Archer Queen": {
         "slug": "archer-queen",
         "name": "Archer Queen",
@@ -25942,6 +25942,6 @@ DECKSHOP_COUNTERS: dict[str, dict] = {
 }
 
 
-def get_deckshop_counters(card_name: str) -> dict | None:
-    """Return DeckShop counter data for a card (lookup by English name)."""
-    return DECKSHOP_COUNTERS.get(card_name)
+def get_local_counter_snapshot(card_name: str) -> dict | None:
+    """Return Local counter database counter data for a card (lookup by English name)."""
+    return LOCAL_COUNTERS.get(card_name)

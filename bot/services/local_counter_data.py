@@ -10,11 +10,11 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_MAX_AGE_DAYS = 30
-SNAPSHOT_PATH = Path(__file__).resolve().parents[1] / "data" / "deckshop_counters.py"
+SNAPSHOT_PATH = Path(__file__).resolve().parents[1] / "data" / "local_counter_snapshot.py"
 
 
 @dataclass(frozen=True)
-class DeckshopSnapshotStatus:
+class LocalCounterSnapshotStatus:
     available: bool
     status: str  # ok | missing | corrupt | empty
     scraped_at: str | None
@@ -64,10 +64,10 @@ def _age_days(scraped_at: str | None) -> float | None:
 
 
 @lru_cache(maxsize=1)
-def load_deckshop_snapshot() -> tuple[dict[str, dict], dict[str, Any], DeckshopSnapshotStatus]:
+def load_local_counter_snapshot() -> tuple[dict[str, dict], dict[str, Any], LocalCounterSnapshotStatus]:
     """Загрузить snapshot с диска. Никогда не бросает исключений."""
     if not SNAPSHOT_PATH.exists():
-        status = DeckshopSnapshotStatus(
+        status = LocalCounterSnapshotStatus(
             available=False,
             status="missing",
             scraped_at=None,
@@ -78,7 +78,7 @@ def load_deckshop_snapshot() -> tuple[dict[str, dict], dict[str, Any], DeckshopS
 
     try:
         spec = importlib.util.spec_from_file_location(
-            "bot.data.deckshop_counters_snapshot",
+            "bot.data.local_counter_snapshot_snapshot",
             SNAPSHOT_PATH,
         )
         if spec is None or spec.loader is None:
@@ -86,7 +86,7 @@ def load_deckshop_snapshot() -> tuple[dict[str, dict], dict[str, Any], DeckshopS
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
     except Exception as exc:
-        status = DeckshopSnapshotStatus(
+        status = LocalCounterSnapshotStatus(
             available=False,
             status="corrupt",
             scraped_at=None,
@@ -95,17 +95,17 @@ def load_deckshop_snapshot() -> tuple[dict[str, dict], dict[str, Any], DeckshopS
         )
         return {}, {}, status
 
-    source = getattr(mod, "DECKSHOP_SOURCE", {}) or {}
-    counters = getattr(mod, "DECKSHOP_COUNTERS", None)
+    source = getattr(mod, "LOCAL_COUNTER_SOURCE", {}) or {}
+    counters = getattr(mod, "LOCAL_COUNTERS", None)
     if not isinstance(source, dict):
         source = {}
     if not isinstance(counters, dict):
-        status = DeckshopSnapshotStatus(
+        status = LocalCounterSnapshotStatus(
             available=False,
             status="corrupt",
             scraped_at=source.get("scraped_at"),
             cards_count=0,
-            load_error="DECKSHOP_COUNTERS is not a dict",
+            load_error="LOCAL_COUNTERS is not a dict",
         )
         return {}, source, status
 
@@ -114,7 +114,7 @@ def load_deckshop_snapshot() -> tuple[dict[str, dict], dict[str, Any], DeckshopS
     stale = age is not None and age > DEFAULT_MAX_AGE_DAYS
     file_status = "empty" if not counters else "ok"
 
-    status = DeckshopSnapshotStatus(
+    status = LocalCounterSnapshotStatus(
         available=bool(counters),
         status=file_status,
         scraped_at=scraped_at,
@@ -127,8 +127,8 @@ def load_deckshop_snapshot() -> tuple[dict[str, dict], dict[str, Any], DeckshopS
     return counters, source, status
 
 
-def check_deckshop_snapshot(*, max_age_days: int = DEFAULT_MAX_AGE_DAYS) -> DeckshopSnapshotStatus:
-    counters, source, status = load_deckshop_snapshot()
+def check_local_counter_snapshot(*, max_age_days: int = DEFAULT_MAX_AGE_DAYS) -> LocalCounterSnapshotStatus:
+    counters, source, status = load_local_counter_snapshot()
     if status.status in {"missing", "corrupt"}:
         return status
 
@@ -136,7 +136,7 @@ def check_deckshop_snapshot(*, max_age_days: int = DEFAULT_MAX_AGE_DAYS) -> Deck
     age = _age_days(scraped_at)
     stale = age is not None and age > max_age_days
     file_status = "empty" if not counters else "ok"
-    return DeckshopSnapshotStatus(
+    return LocalCounterSnapshotStatus(
         available=bool(counters),
         status=file_status,
         scraped_at=scraped_at,
@@ -149,22 +149,22 @@ def check_deckshop_snapshot(*, max_age_days: int = DEFAULT_MAX_AGE_DAYS) -> Deck
     )
 
 
-def get_deckshop_counters() -> dict[str, dict]:
-    counters, _, _ = load_deckshop_snapshot()
+def get_local_counter_snapshot() -> dict[str, dict]:
+    counters, _, _ = load_local_counter_snapshot()
     return counters
 
 
-def get_deckshop_source() -> dict[str, Any]:
-    _, source, _ = load_deckshop_snapshot()
+def get_local_counter_source() -> dict[str, Any]:
+    _, source, _ = load_local_counter_snapshot()
     return dict(source)
 
 
-def get_deckshop_status_summary() -> dict[str, Any]:
-    return check_deckshop_snapshot().as_dict()
+def get_local_counter_status_summary() -> dict[str, Any]:
+    return check_local_counter_snapshot().as_dict()
 
 
-def format_deckshop_status(status: DeckshopSnapshotStatus | None = None) -> str:
-    status = status or check_deckshop_snapshot()
+def format_local_counter_status(status: LocalCounterSnapshotStatus | None = None) -> str:
+    status = status or check_local_counter_snapshot()
     lines = ["Локальная база контров"]
     lines.append(f"- Status: {status.status}")
     if status.scraped_at:

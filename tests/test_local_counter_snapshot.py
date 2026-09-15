@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from bot.services.deckshop_data import load_deckshop_snapshot
+from bot.services.local_counter_data import load_local_counter_snapshot
 
 
 def test_counter_snapshot_is_local_and_keeps_all_card_relations() -> None:
-    counters, source, status = load_deckshop_snapshot()
+    counters, source, status = load_local_counter_snapshot()
 
     assert status.available is True
     assert len(counters) == 122

@@ -1,13 +1,13 @@
 """Контры и синергии карт.
 
-Источник контров: DeckShop offline snapshot.
+Источник контров: Local counter database offline snapshot.
 
 Правила Ghosteek поверх снимка: заклинание может контрить другую карту,
 но само не имеет входящей карты-контры; основная атакующая карта не
 выдаётся за защитную контру.
 
-Синергии: DeckShop → SYNERGIES из card_data.
-Snapshot читается только с диска — без HTTP к DeckShop.
+Синергии: Local counter database → SYNERGIES из card_data.
+Snapshot читается только с диска — без HTTP к Local counter database.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from bot.services.card_data import (
     is_pure_spell,
 )
 from bot.services.card_names_ru import card_name_ru
-from bot.services.deckshop_data import get_deckshop_status_summary, load_deckshop_snapshot
+from bot.services.local_counter_data import get_local_counter_status_summary, load_local_counter_snapshot
 
 # TODO(card-profile): SYNERGIES remains legacy until its consumers migrate.
 
@@ -52,8 +52,8 @@ def _dedupe(names: list[str]) -> list[str]:
     return out
 
 
-def _deckshop_counter_tier(counter_card: str, target: str) -> str | None:
-    """DeckShop counters_vs_attack: counter_card бьёт target."""
+def _local_counter_counter_tier(counter_card: str, target: str) -> str | None:
+    """Local counter database counters_vs_attack: counter_card бьёт target."""
     row = _matchups().get(counter_card)
     if not row:
         return None
@@ -70,9 +70,9 @@ def _tier(raw: dict | None) -> tuple[list[str], list[str]]:
     return _dedupe(raw.get("strong") or []), _dedupe(raw.get("partial") or [])
 
 
-def _build_index(deckshop_counters: dict[str, dict]) -> dict[str, CardMatchups]:
+def _build_index(local_counter_snapshot: dict[str, dict]) -> dict[str, CardMatchups]:
     index: dict[str, CardMatchups] = {}
-    for name, raw in deckshop_counters.items():
+    for name, raw in local_counter_snapshot.items():
         if not isinstance(raw, dict):
             continue
         attack_strong, attack_partial = _tier(raw.get("counters_vs_attack"))
@@ -116,7 +116,7 @@ def _build_index(deckshop_counters: dict[str, dict]) -> dict[str, CardMatchups]:
     return index
 
 
-_DECKSHOP_COUNTERS, _DECKSHOP_SOURCE, _DECKSHOP_STATUS = load_deckshop_snapshot()
+_LOCAL_COUNTERS, _LOCAL_COUNTER_SOURCE, _LOCAL_COUNTER_STATUS = load_local_counter_snapshot()
 # Ленивая индексация: _build_index вызывает is_pure_spell → get_card_profile.
 # Eager init на import ломал роли через цикл deck_builder package.
 _MATCHUPS: dict[str, CardMatchups] | None = None
@@ -125,17 +125,17 @@ _MATCHUPS: dict[str, CardMatchups] | None = None
 def _matchups() -> dict[str, CardMatchups]:
     global _MATCHUPS
     if _MATCHUPS is None:
-        _MATCHUPS = _build_index(_DECKSHOP_COUNTERS)
+        _MATCHUPS = _build_index(_LOCAL_COUNTERS)
     return _MATCHUPS
 
 
-def deckshop_matchup_status() -> dict:
+def local_counter_matchup_status() -> dict:
     """Metadata snapshot для API/админки."""
-    return get_deckshop_status_summary()
+    return get_local_counter_status_summary()
 
 
-def deckshop_available() -> bool:
-    return _DECKSHOP_STATUS.available
+def local_counter_available() -> bool:
+    return _LOCAL_COUNTER_STATUS.available
 
 
 def get_matchups(card: str) -> CardMatchups | None:
@@ -203,7 +203,7 @@ def card_counters_target(counter_card: str, target: str) -> str | None:
     # Miner/Goblin Drill наказывают поставленный Elixir Collector.
     if is_primary_win_condition(counter_card) and counter_card not in COUNTER_SOURCES_ALLOWED:
         return None
-    return _deckshop_counter_tier(counter_card, target)
+    return _local_counter_counter_tier(counter_card, target)
 
 
 def targets_countered_by(card: str, opponent_deck: list[str]) -> tuple[list[str], list[str]]:

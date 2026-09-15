@@ -64,7 +64,7 @@ def test_all_card_relationships_resolve_to_catalog_cards() -> None:
     assert validate_card_knowledge() == []
 
 
-def test_rocket_uses_deckshop_counter_data() -> None:
+def test_rocket_uses_local_counter_counter_data() -> None:
     from bot.services.card_matchups import card_counters_target
 
     assert card_counters_target("Rocket", "Hog Rider") == "strong"
@@ -78,7 +78,7 @@ def test_spells_have_no_incoming_counters() -> None:
     assert card_counters_target("Rocket", "The Log") is None
 
 
-def test_confirmed_counter_policy_overrides_deckshop_snapshot() -> None:
+def test_confirmed_counter_policy_overrides_local_counter_snapshot() -> None:
     from bot.services.card_matchups import card_counters_target, counters_in_deck
 
     assert card_counters_target("Hog Rider", "Valkyrie") is None

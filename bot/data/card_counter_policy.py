@@ -1,6 +1,6 @@
-"""Точечная политика Ghosteek поверх снимка контр DeckShop.
+"""Точечная политика Ghosteek поверх снимка контр Local counter database.
 
-DeckShop остаётся базовым источником связей. Здесь хранятся только
+Local counter database остаётся базовым источником связей. Здесь хранятся только
 подтверждённые продуктовые поправки, которые не должны теряться при
 следующем обновлении снимка.
 """
@@ -16,7 +16,7 @@ COUNTER_SOURCES_EXCLUDED = frozenset({"Clone", "Hog Rider", "Mirror"})
 # это не отменяет запрет для Хога и атакующих зданий.
 COUNTER_SOURCES_ALLOWED = frozenset({"Elite Barbarians"})
 
-# Подтверждённые ответы, отсутствующие в снимке DeckShop.
+# Подтверждённые ответы, отсутствующие в снимке Local counter database.
 COUNTER_TIER_OVERRIDES: dict[str, dict[str, str]] = {
     # Лучницы уверенно разбирают лёгкие воздушные отряды; в снимке эти
     # взаимодействия были занижены до partial.
@@ -42,7 +42,7 @@ MIRROR_ANSWER_TIERS: dict[str, str] = {
 
 # Когда несколько карт имеют одинаковый tier, UI показывает только первые
 # ответы. Эти приоритеты выбирают наиболее прямой и экономный ответ из уже
-# подтверждённых связей DeckShop; tier и сам факт контры они не меняют.
+# подтверждённых связей Local counter database; tier и сам факт контры они не меняют.
 COUNTER_DISPLAY_PRIORITY: dict[str, tuple[str, ...]] = {
     "Skeleton Barrel": ("Barbarian Barrel",),
 }

@@ -133,7 +133,7 @@ def _generic_counters(threat: str) -> list[str]:
 
 
 def _counter_list(threat: str) -> list[str]:
-    """Canonical counter list from the shared DeckShop-backed resolver."""
+    """Canonical counter list from the shared Local counter database-backed resolver."""
     from bot.services.card_knowledge import canonical_card_names
     from bot.services.card_matchups import card_counters_target
 

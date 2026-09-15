@@ -86,15 +86,15 @@ async def cmd_admin_sub(message: Message) -> None:
     )
 
 
-@router.message(Command("deckshop_check"))
-async def cmd_deckshop_check(message: Message) -> None:
+@router.message(Command("local_counter_check"))
+async def cmd_local_counter_check(message: Message) -> None:
     if not _is_admin(message.from_user.id):
         await message.answer("🔒 Команда доступна только администратору.")
         return
 
-    from bot.services.deckshop_data import format_deckshop_status
+    from bot.services.local_counter_data import format_local_counter_status
 
-    text = format_deckshop_status()
+    text = format_local_counter_status()
     await message.answer("📦 Локальная база контров\n" + text.replace("Локальная база контров\n", ""))
 
 

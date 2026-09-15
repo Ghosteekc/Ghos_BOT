@@ -16,13 +16,13 @@ and deck-link IDs. It does not replace the local knowledge catalog's roles.
 
 `bot.services.card_data` still duplicates card names and part of the semantic
 knowledge (`CARD_META`, `WIN_CONDITIONS`, `COUNTERS`, `SYNERGIES`, and manual
-counter overrides). `bot/data/deckshop_counters.py` is a separate offline
+counter overrides). `bot/data/local_counter_snapshot.py` is a separate offline
 snapshot for counter and synergy tiers. These remain compatibility inputs;
 they are not alternative sources for card identity, elixir, type, or roles.
 
 Do not migrate or edit Deck Intelligence algorithms when changing card facts.
 First update `cards.json`, then run `validate_card_knowledge()` to detect stale
-references in legacy relationships, display-name maps, DeckShop snapshot, and
+references in legacy relationships, display-name maps, Local counter database snapshot, and
 known synergy pairs. Counter tiers stay contextual (`strong` / `partial`) and
 must not be presented as unconditional facts.
 

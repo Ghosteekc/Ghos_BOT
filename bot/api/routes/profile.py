@@ -271,13 +271,13 @@ async def get_upgrade_priorities(
 
 @router.get("/health")
 async def health() -> dict:
-    from bot.services.deckshop_data import get_deckshop_status_summary
+    from bot.services.local_counter_data import get_local_counter_status_summary
 
     return {
         "status": "ok",
         "stats_days": 14,
         "ladder_only_daily_trophies": True,
-        "deckshop": get_deckshop_status_summary(),
+        "local_counter": get_local_counter_status_summary(),
     }
 
 

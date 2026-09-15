@@ -131,7 +131,7 @@ CARD_META: dict[str, dict] = {
     "Rage": {"elixir": 2, "type": "spell", "role": "spell"},
 }
 
-# TODO(card-profile): COUNTERS дублирует DeckShop snapshot — legacy fallback.
+# TODO(card-profile): COUNTERS дублирует Local counter database snapshot — legacy fallback.
 COUNTERS: dict[str, list[str]] = {
     "Hog Rider": [
         "Cannon", "Tesla", "Tornado", "Tombstone", "Bowler", "Barbarians",
@@ -208,7 +208,7 @@ COUNTERS: dict[str, list[str]] = {
     "Tornado": ["Balloon", "Lava Hound", "Miner", "Goblin Barrel"],
 }
 
-# TODO(card-profile): SYNERGIES дублирует DeckShop / decks.json synergyPairs.
+# TODO(card-profile): SYNERGIES дублирует Local counter database / decks.json synergyPairs.
 SYNERGIES: dict[str, list[str]] = {
     "Hog Rider": ["Ice Golem", "Ice Spirit", "Skeletons", "Musketeer", "Cannon", "Fireball"],
     "Balloon": ["Lumberjack", "Freeze", "Baby Dragon", "Tornado", "Miner"],
@@ -332,7 +332,7 @@ MICE_AND_SKELETONS = frozenset({
     "Goblins", "Fire Spirit", "Ice Spirit", "Electro Spirit", "Skeletons",
 })
 
-# Legacy deck heuristics; counter resolver uses DeckShop snapshot directly.
+# Legacy deck heuristics; counter resolver uses Local counter database snapshot directly.
 OFFENSE_COUNTER_ALLOWED: dict[str, frozenset[str]] = {
     "Goblin Giant": MICE_AND_SKELETONS,
     "Bandit": MICE_AND_SKELETONS,
@@ -351,14 +351,14 @@ OFFENSE_COUNTER_ALLOWED: dict[str, frozenset[str]] = {
     }),
 }
 
-# Legacy manual relations. Counter resolver uses the DeckShop snapshot directly.
+# Legacy manual relations. Counter resolver uses the Local counter database snapshot directly.
 MANUAL_COUNTERS_STRONG: dict[str, frozenset[str]] = {
     "Guards": frozenset({"P.E.K.K.A", "Mini P.E.K.K.A", "Ronin", "Prince", "Dark Prince", "Golden Knight"}),
     "Little Prince": frozenset({
         "Mega Knight", "Mini P.E.K.K.A", "P.E.K.K.A", "Prince", "Dark Prince",
         "Knight", "Valkyrie", "Bandit", "Mega Minion", "Barbarians", "Ronin",
     }),
-    # Валькирия — надёжный стоп даш-чемпионов и ближних танков (DeckShop часто ставит partial).
+    # Валькирия — надёжный стоп даш-чемпионов и ближних танков (Local counter database часто ставит partial).
     "Valkyrie": frozenset({
         "Golden Knight", "Boss Bandit", "Bandit", "Royal Ghost", "Dark Prince",
         "Prince", "Lumberjack", "Mighty Miner",
@@ -401,7 +401,7 @@ MANUAL_COUNTERS_PARTIAL: dict[str, frozenset[str]] = {
     "Guards": frozenset({"Boss Bandit", "Mighty Miner"}),
 }
 
-# DeckShop / роли иногда помечают хрупкий спам как «контра» на даш/сплэш —
+# Local counter database / роли иногда помечают хрупкий спам как «контра» на даш/сплэш —
 # такие пары запрещаем (иначе в UI «опасная карта → ответ: мыши»).
 MANUAL_COUNTERS_DENIED: dict[str, frozenset[str]] = {
     "Bats": frozenset({

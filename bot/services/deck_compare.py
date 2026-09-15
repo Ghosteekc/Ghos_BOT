@@ -1,4 +1,4 @@
-"""Сравнение колод на основе локальных контр и синергий (DeckShop → card_matchups)."""
+"""Сравнение колод на основе локальных контр и синергий (Local counter database → card_matchups)."""
 
 from __future__ import annotations
 

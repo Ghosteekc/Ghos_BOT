@@ -27,7 +27,7 @@ def _relation_errors(
 
 def validate_card_knowledge() -> list[str]:
     """Validate catalog, human names and all current relationship snapshots."""
-    from bot.data.deckshop_counters import DECKSHOP_COUNTERS
+    from bot.data.local_counter_snapshot import LOCAL_COUNTERS
     from bot.services.card_data import (
         COUNTERS,
         MANUAL_COUNTERS_DENIED,
@@ -61,34 +61,34 @@ def validate_card_knowledge() -> list[str]:
             if name not in known_names:
                 errors.append(f"KNOWN_SYNERGY_PAIRS: unknown card {name!r}")
 
-    for source, row in DECKSHOP_COUNTERS.items():
+    for source, row in LOCAL_COUNTERS.items():
         if source not in known_names:
-            errors.append(f"DECKSHOP_COUNTERS: unknown source {source!r}")
+            errors.append(f"LOCAL_COUNTERS: unknown source {source!r}")
         if not isinstance(row, dict):
-            errors.append(f"DECKSHOP_COUNTERS: {source!r} row must be an object")
+            errors.append(f"LOCAL_COUNTERS: {source!r} row must be an object")
             continue
         for field in ("counters_vs_attack", "counters_vs_defense", "synergy_offense"):
             tiers = row.get(field) or {}
             if not isinstance(tiers, dict):
-                errors.append(f"DECKSHOP_COUNTERS: {source!r}.{field} must be an object")
+                errors.append(f"LOCAL_COUNTERS: {source!r}.{field} must be an object")
                 continue
             for tier, targets in tiers.items():
                 if tier not in {"strong", "partial"}:
-                    errors.append(f"DECKSHOP_COUNTERS: {source!r}.{field} invalid tier {tier!r}")
+                    errors.append(f"LOCAL_COUNTERS: {source!r}.{field} invalid tier {tier!r}")
                 if not isinstance(targets, list):
-                    errors.append(f"DECKSHOP_COUNTERS: {source!r}.{field}.{tier} must be a list")
+                    errors.append(f"LOCAL_COUNTERS: {source!r}.{field}.{tier} must be a list")
                     continue
                 if len(targets) != len(set(targets)):
                     errors.append(
-                        f"DECKSHOP_COUNTERS: {source!r}.{field}.{tier} contains duplicate cards"
+                        f"LOCAL_COUNTERS: {source!r}.{field}.{tier} contains duplicate cards"
                     )
                 for target in targets:
                     if target not in known_names:
                         errors.append(
-                            f"DECKSHOP_COUNTERS: {source!r}.{field} references unknown card {target!r}"
+                            f"LOCAL_COUNTERS: {source!r}.{field} references unknown card {target!r}"
                         )
                     elif target == source and field.startswith("counters_"):
                         errors.append(
-                            f"DECKSHOP_COUNTERS: {source!r}.{field} must not contain a self-counter"
+                            f"LOCAL_COUNTERS: {source!r}.{field} must not contain a self-counter"
                         )
     return errors
