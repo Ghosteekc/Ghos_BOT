@@ -31,6 +31,22 @@ def test_is_ladder_requires_nonzero_trophy_change():
     assert not is_ladder_1v1(_ladder("A", 0))
 
 
+def test_ranked_progression_is_never_trophy_road():
+    battle = _ladder("League opponent", 30)
+    battle["type"] = "pathOfLegend"
+    battle["gameMode"] = {"name": "Ranked1v1_NewArena"}
+
+    assert not is_ladder_1v1(battle)
+
+
+def test_unknown_cached_delta_is_not_trophy_road():
+    battle = _ladder("Unknown", 30)
+    battle["type"] = "cached"
+    battle["gameMode"] = {}
+
+    assert not is_ladder_1v1(battle)
+
+
 def test_build_last_results_uses_newest_battles_not_oldest():
     # Newest-first log (Clash API order): 20 ladder battles.
     battles = [

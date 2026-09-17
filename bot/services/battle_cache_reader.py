@@ -34,11 +34,12 @@ def row_to_battle_dict(row: BattleCache, player_tag: str) -> dict:
     opp_name = (row.opponent_name or "").strip() or "Соперник"
     opp_tag = normalize_tag(row.opponent_tag or "")
     trophy_change = row.trophy_change
-    has_trophy = trophy_change is not None and int(trophy_change) != 0
+    battle_type = (getattr(row, "battle_type", None) or "cached").strip()
+    game_mode = (getattr(row, "game_mode", None) or "").strip()
     return {
-        # Cached stubs without trophies stay excluded from ladder charts.
-        "type": "PvP" if has_trophy else "cached",
-        "gameMode": {"name": "Ladder"} if has_trophy else {},
+        # Legacy cache rows have no source mode and must not be shown as Trophy Road.
+        "type": battle_type,
+        "gameMode": {"name": game_mode} if game_mode else {},
         "battleTime": row.battle_time,
         "gameDuration": 180,
         "team": [{

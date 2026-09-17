@@ -165,6 +165,15 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
     except (TypeError, ValueError):
         trophy_change = None
 
+    raw_game_mode = battle.get("gameMode")
+    if isinstance(raw_game_mode, dict):
+        game_mode = str(raw_game_mode.get("name") or raw_game_mode.get("id") or "").strip() or None
+    elif raw_game_mode is not None:
+        game_mode = str(raw_game_mode).strip() or None
+    else:
+        game_mode = None
+    battle_type = str(battle.get("type") or "").strip() or None
+
     return {
         "player_tag": normalize_tag(player_tag),
         "battle_time": battle_time,
@@ -175,6 +184,8 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
         "opponent_name": opp_name,
         "opponent_tag": opp_tag,
         "trophy_change": trophy_change,
+        "battle_type": battle_type,
+        "game_mode": game_mode,
         "analysis": analysis_text,
     }
 
@@ -207,6 +218,11 @@ async def _insert_battle_row(session, row: dict) -> bool:
         if new_trophy is not None and battle_row.trophy_change != int(new_trophy):
             battle_row.trophy_change = int(new_trophy)
             updated = True
+        for field in ("battle_type", "game_mode"):
+            incoming = row.get(field)
+            if incoming and getattr(battle_row, field, None) != incoming:
+                setattr(battle_row, field, incoming)
+                updated = True
         # Backfill / OR-upgrade evo-hero JSON on existing name-only rows
         incoming_json = (row.get("user_deck_json") or "").strip()
         if incoming_json:

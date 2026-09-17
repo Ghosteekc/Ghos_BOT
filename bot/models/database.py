@@ -181,6 +181,9 @@ class BattleCache(Base):
     opponent_name: Mapped[str] = mapped_column(String(100), default="", server_default="")
     opponent_tag: Mapped[str] = mapped_column(String(20), default="", server_default="")
     trophy_change: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Source battle-log classification. Never infer Trophy Road from a delta alone.
+    battle_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    game_mode: Mapped[str | None] = mapped_column(String(100), nullable=True)
     analysis: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -444,6 +447,7 @@ async def init_db() -> None:
 
     await _migrate_battle_cache_opponent()
     await _migrate_battle_cache_trophy()
+    await _migrate_battle_cache_mode()
     # Must run before dedup: ORM select(BattleCache) requires user_deck_json column
     await _migrate_battle_cache_user_deck_json()
     await _migrate_tracked_mine_decks_cards_json()
@@ -539,6 +543,18 @@ async def _migrate_battle_cache_trophy() -> None:
         if not await _column_exists(conn, "battle_cache", "trophy_change"):
             await conn.execute(text("ALTER TABLE battle_cache ADD COLUMN trophy_change INTEGER"))
             logging.getLogger(__name__).info("Added 'trophy_change' column to battle_cache")
+
+
+async def _migrate_battle_cache_mode() -> None:
+    """Keep the source mode so league progression cannot become Trophy Road."""
+    async with engine.begin() as conn:
+        for column, ddl in (
+            ("battle_type", "ALTER TABLE battle_cache ADD COLUMN battle_type VARCHAR(50)"),
+            ("game_mode", "ALTER TABLE battle_cache ADD COLUMN game_mode VARCHAR(100)"),
+        ):
+            if not await _column_exists(conn, "battle_cache", column):
+                await conn.execute(text(ddl))
+                logging.getLogger(__name__).info("Added '%s' column to battle_cache", column)
 
 
 async def _migrate_battle_cache_opponent() -> None:

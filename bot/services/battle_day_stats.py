@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 from bot.services.battle_time import battle_day_key, battle_time_from_record, today_key_msk
 
-_LADDER_1V1_TYPES = frozenset({"pvp", "pathoflegend"})
 _EXCLUDED_BATTLE_TYPES = frozenset({
     "trail",
     "twovstwo",
@@ -19,7 +18,7 @@ _EXCLUDED_BATTLE_TYPES = frozenset({
     "boatbattle",
     "cached",
 })
-_LADDER_GAME_MODES = frozenset({"ladder", "pathoflegend", "seasonal", "ranked"})
+_TROPHY_ROAD_GAME_MODES = frozenset({"ladder"})
 
 
 def _normalize_battle_type(raw: str | None) -> str:
@@ -69,34 +68,30 @@ def ranked_battle_sides(battle: dict) -> tuple[bool, dict | None, dict | None]:
 
 
 def is_ladder_1v1(battle: dict) -> bool:
-    """Ladder 1v1 battles that award trophies (excludes 2v2, classic, casual)."""
+    """Only explicitly identified Trophy Road 1v1 battles.
+
+    A non-zero ``trophyChange`` is not sufficient: Path of Legend also reports
+    progression deltas. Unknown legacy cache rows therefore stay excluded.
+    """
     team = battle.get("team") or []
     if len(team) != 1:
         return False
 
-    battle_type = _normalize_battle_type(battle.get("type"))
-    if battle_type in _EXCLUDED_BATTLE_TYPES:
+    if is_ranked_1v1(battle):
         return False
-    if _is_casual_game_mode(battle):
+
+    battle_type = _normalize_battle_type(battle.get("type"))
+    if battle_type != "pvp" or battle_type in _EXCLUDED_BATTLE_TYPES:
+        return False
+    mode_key = _game_mode_key(battle)
+    if mode_key not in _TROPHY_ROAD_GAME_MODES:
         return False
 
     trophy_change = team[0].get("trophyChange")
-    if trophy_change is not None:
-        try:
-            # Non-zero delta is the strongest ladder signal — keep even if gameMode renamed.
-            return int(trophy_change) != 0
-        except (TypeError, ValueError):
-            return False
-
-    if battle_type not in _LADDER_1V1_TYPES:
+    try:
+        return trophy_change is not None and int(trophy_change) != 0
+    except (TypeError, ValueError):
         return False
-
-    mode_key = _game_mode_key(battle)
-    if battle_type == "pvp" and mode_key and mode_key not in _LADDER_GAME_MODES:
-        return False
-
-    # Older/partial payloads: still count as ladder if trophies are present.
-    return team[0].get("startingTrophies") is not None
 
 
 def _is_casual_game_mode(battle: dict) -> bool:

@@ -16,6 +16,7 @@ from bot.services.battle_time import battle_time_from_record, battle_times_equal
 def _sample_battle(battle_time: str = "20250717T120000.000Z") -> dict:
     return {
         "type": "pvp",
+        "gameMode": {"name": "Ladder"},
         "battleTime": battle_time,
         "team": [
             {
@@ -63,6 +64,8 @@ async def _run_persist_dedup() -> None:
     assert saved_variant == 0
     assert len(rows) == 1
     assert rows[0].battle_time == "20250717T120000.000Z"
+    assert rows[0].battle_type == "pvp"
+    assert rows[0].game_mode == "Ladder"
 
     await engine.dispose()
 
