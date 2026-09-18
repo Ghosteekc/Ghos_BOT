@@ -339,7 +339,7 @@ def _draw_title(canvas: Image.Image) -> None:
         canvas,
         _TITLE,
         font_size=46,
-        center_y=78,
+        center_y=58,
         fill=_TITLE_FILL,
         outline_radius=3,
     )
