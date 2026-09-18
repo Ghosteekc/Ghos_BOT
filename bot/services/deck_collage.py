@@ -22,29 +22,29 @@ _ASSETS = Path(__file__).resolve().parents[1] / "assets"
 _BG_PATH = _ASSETS / "digest_bg.png"
 _TITLE_FONT_PATH = _ASSETS / "Supercell-Magic.ttf"
 
-# digest_bg.png is 894×808: gold frame OUTERS are 165×208.
+# digest_bg.png is 894×685: gold frame OUTERS are 165×208.
 # Inner content rects — cards are contained+centered here (no stretch, no overflow).
 _SLOT_INNERS: list[tuple[int, int, int, int]] = [
-    (68, 298, 159, 202),
-    (268, 298, 159, 202),
-    (467, 298, 159, 202),
-    (667, 298, 159, 202),
-    (68, 552, 159, 202),
-    (268, 552, 159, 202),
-    (467, 552, 159, 202),
-    (667, 552, 159, 202),
+    (68, 176, 159, 202),
+    (268, 176, 159, 202),
+    (467, 176, 159, 202),
+    (667, 176, 159, 202),
+    (68, 430, 159, 202),
+    (268, 430, 159, 202),
+    (467, 430, 159, 202),
+    (667, 430, 159, 202),
 ]
 
 # Elixir drop anchor (top-left) on each slot — overlaps frame corner like the reference.
 _DROP_ORIGINS: list[tuple[int, int]] = [
-    (58, 285),
-    (258, 285),
-    (457, 285),
-    (657, 285),
-    (58, 539),
-    (258, 539),
-    (457, 539),
-    (657, 539),
+    (58, 163),
+    (258, 163),
+    (457, 163),
+    (657, 163),
+    (58, 417),
+    (258, 417),
+    (457, 417),
+    (657, 417),
 ]
 
 _TITLE = "ЛУЧШАЯ КОЛОДА НЕДЕЛИ"
