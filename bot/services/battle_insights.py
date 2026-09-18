@@ -3,8 +3,12 @@
 from collections import Counter
 
 from bot.services.battle_report import analyze_battle_list_item
+from bot.services.card_data import WIN_CONDITIONS, card_has_role
+from bot.services.card_matchups import counters_in_deck
+from bot.services.card_names_ru import card_name_ru
 from bot.services.clash_api import normalize_tag
 from bot.services.deck_analyzer import extract_deck
+from bot.services.tactical_matchup import analyze_tactical_matchup
 
 
 def build_battle_insight(battle: dict, player_tag: str) -> dict | None:
@@ -62,6 +66,115 @@ def build_battle_insight(battle: dict, player_tag: str) -> dict | None:
     }
 
 
+def _win_conditions(deck: list[str]) -> list[str]:
+    return [
+        card_name_ru(card, short=True) or card
+        for card in deck
+        if card in WIN_CONDITIONS or card_has_role(card, "win_condition")
+    ]
+
+
+def _tactical_lines(user_deck: list[str], opponent_deck: list[str]) -> list[str]:
+    """Small, deterministic playbook for this exact pair of played decks."""
+    report = analyze_tactical_matchup(user_deck, opponent_deck)
+    lines: list[str] = []
+    for bucket in (
+        report.critical_interactions,
+        report.pressure_points,
+        report.best_openings,
+        report.early_game,
+        report.worst_mistakes,
+    ):
+        for line in bucket:
+            if line and line not in lines:
+                lines.append(line)
+            if len(lines) >= 3:
+                return lines
+    return lines
+
+
+def build_loss_threats(
+    battles: list[dict],
+    player_tag: str,
+    *,
+    scan_limit: int = 40,
+    limit: int = 4,
+) -> list[dict]:
+    """Aggregate recurring enemy threats and the actual deck answers used in losses.
+
+    Each row keeps a representative played matchup, so a counter is never
+    presented as available merely because it existed in another deck.
+    """
+    tag = normalize_tag(player_tag)
+    grouped: dict[str, dict] = {}
+
+    for battle in battles[:scan_limit]:
+        team = battle.get("team", [{}])[0]
+        opponent = battle.get("opponent", [{}])[0]
+        team_tag = team.get("tag") or ""
+        if team_tag and normalize_tag(team_tag) != tag:
+            continue
+        # A draw is not evidence of a loss pattern. Keep this aggregation to
+        # actual losses only, independently of how a caller presents draws.
+        if int(team.get("crowns") or 0) >= int(opponent.get("crowns") or 0):
+            continue
+
+        user_deck = extract_deck(team)
+        opponent_deck = extract_deck(opponent)
+        if len(user_deck) != 8 or len(opponent_deck) != 8:
+            continue
+
+        try:
+            analysis = analyze_battle_list_item(
+                team,
+                opponent,
+                duration=int(battle.get("gameDuration") or 0),
+            )
+        except Exception:
+            continue
+
+        for threat in analysis.opponent_threats:
+            if not threat:
+                continue
+            row = grouped.get(threat)
+            if row is None:
+                try:
+                    strong, partial = counters_in_deck(threat, user_deck)
+                    tactics = _tactical_lines(user_deck, opponent_deck)
+                except Exception:
+                    # A malformed matchup must not make the whole loss report
+                    # unavailable or produce a guessed counter recommendation.
+                    strong, partial, tactics = [], [], []
+                row = {
+                    "card": threat,
+                    "card_ru": card_name_ru(threat, short=True) or threat,
+                    "losses": 0,
+                    "strong_counters": [card_name_ru(card, short=True) or card for card in strong],
+                    "partial_counters": [card_name_ru(card, short=True) or card for card in partial],
+                    "win_conditions": _win_conditions(user_deck),
+                    "tactics": tactics,
+                }
+                grouped[threat] = row
+            row["losses"] += 1
+
+    def _rank(item: dict) -> tuple[int, int, int]:
+        return (
+            int(item["losses"]),
+            len(item["strong_counters"]),
+            len(item["partial_counters"]),
+        )
+
+    result = sorted(grouped.values(), key=_rank, reverse=True)[:limit]
+    for row in result:
+        if row["strong_counters"]:
+            row["counter_status"] = "strong"
+        elif row["partial_counters"]:
+            row["counter_status"] = "partial"
+        else:
+            row["counter_status"] = "missing"
+    return result
+
+
 def build_insights_report(
     battles: list[dict],
     player_tag: str,
@@ -107,6 +220,7 @@ def build_insights_report(
     return {
         "insights": insights,
         "patterns": patterns,
+        "threats": build_loss_threats(battles, player_tag),
         "sample_size": len(insights),
         "wins": wins,
         "losses": losses,

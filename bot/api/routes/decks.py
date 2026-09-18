@@ -689,7 +689,7 @@ async def random_deck(
 async def battle_insights(user: User = Depends(require_linked_player)) -> InsightsResponse:
     battles = await _get_battles(user)
     if not battles:
-        return InsightsResponse(insights=[], patterns=[], sample_size=0, wins=0, losses=0)
+        return InsightsResponse(insights=[], patterns=[], threats=[], sample_size=0, wins=0, losses=0)
 
     try:
         report = await asyncio.to_thread(
@@ -700,7 +700,7 @@ async def battle_insights(user: User = Depends(require_linked_player)) -> Insigh
             losses_only=True,
         )
     except Exception:
-        report = {"insights": [], "patterns": [], "sample_size": 0, "wins": 0, "losses": 0}
+        report = {"insights": [], "patterns": [], "threats": [], "sample_size": 0, "wins": 0, "losses": 0}
     return InsightsResponse(**report)
 
 

@@ -916,9 +916,21 @@ class BattleInsightEntry(BaseModel):
     timestamp: str = ""
 
 
+class LossThreatInsight(BaseModel):
+    card: str
+    card_ru: str
+    losses: int
+    counter_status: str
+    strong_counters: list[str] = []
+    partial_counters: list[str] = []
+    win_conditions: list[str] = []
+    tactics: list[str] = []
+
+
 class InsightsResponse(BaseModel):
     insights: list[BattleInsightEntry]
     patterns: list[str] = []
+    threats: list[LossThreatInsight] = []
     sample_size: int = 0
     wins: int = 0
     losses: int = 0
