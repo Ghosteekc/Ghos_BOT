@@ -13,6 +13,7 @@ from bot.services.weekly_digest import (
     week_bounds,
     WeekStats,
 )
+from bot.services.deck_collage import format_best_deck_collage_stats
 
 MSK = timezone(timedelta(hours=3))
 
@@ -29,7 +30,7 @@ def test_digest_period_keeps_both_years_when_range_crosses_year():
     assert _format_period(date(2025, 12, 29), date(2026, 1, 4)) == "29 дек 2025 — 4 янв 2026"
 
 
-def test_digest_caption_uses_compact_mobile_layout():
+def test_digest_caption_keeps_best_deck_statistics_on_the_collage():
     stats = WeekStats(
         week_key="2026-W36",
         start=date(2026, 8, 31),
@@ -61,12 +62,15 @@ def test_digest_caption_uses_compact_mobile_layout():
             "🔥 Серия побед: 7",
             "📅 Лучший день: суббота — 9 побед",
             "",
-            "🥇 Лучшая колода",
-            "📈 Винрейт: 61,9% · 42 матчей",
-            "🎯 Использование: 67%",
-            "",
             "💬 Винрейт стабильный — продолжай в том же духе.",
         ]
+    )
+
+
+def test_best_deck_collage_stats_are_compact_and_use_russian_decimal_separator():
+    assert format_best_deck_collage_stats(61.9, 42, 67) == (
+        "ВИНРЕЙТ 61,9% · 42 МАТЧЕЙ",
+        "ИСПОЛЬЗОВАНИЕ 67%",
     )
 
 

@@ -522,21 +522,6 @@ def format_digest_caption(stats: WeekStats, player_name: str | None = None) -> s
             f"📅 Лучший день: {stats.best_day_name} — {stats.best_day_wins} побед"
         )
 
-    if stats.best_deck:
-        d = stats.best_deck
-        lines.extend(
-            [
-                "",
-                "🥇 Лучшая колода",
-                (
-                    f"📈 Винрейт: {_format_percent(d.get('winrate', 0))}% "
-                    f"· {d.get('total', 0)} матчей"
-                ),
-            ]
-        )
-        if stats.best_deck_share:
-            lines.append(f"🎯 Использование: {int(stats.best_deck_share)}%")
-
     lines.extend(["", f"💬 {stats.form_note}"])
     # player_name reserved for future personalization; keep signature stable
     _ = player_name
@@ -678,7 +663,12 @@ async def send_digest_to_user(
                 or_merge_modes_onto(profile, [profile, cards], clamp=False)
             )
         try:
-            photo_bytes = await render_deck_collage(cards)
+            photo_bytes = await render_deck_collage(
+                cards,
+                winrate=float(stats.best_deck.get("winrate") or 0),
+                matches=int(stats.best_deck.get("total") or 0),
+                usage_percent=stats.best_deck_share,
+            )
         except Exception:
             logger.exception("Deck collage failed user_id=%s", user.id)
 

@@ -22,7 +22,7 @@ _ASSETS = Path(__file__).resolve().parents[1] / "assets"
 _BG_PATH = _ASSETS / "digest_bg.png"
 _TITLE_FONT_PATH = _ASSETS / "Supercell-Magic.ttf"
 
-# Clean digest_bg.png (894×678): gold frame OUTERS are 165×208.
+# Clean digest_bg.png (894×808): gold frame OUTERS are 165×208.
 # Inner content rects — cards are contained+centered here (no stretch, no overflow).
 _SLOT_INNERS: list[tuple[int, int, int, int]] = [
     (68, 168, 159, 202),
@@ -50,6 +50,8 @@ _DROP_ORIGINS: list[tuple[int, int]] = [
 _TITLE = "ЛУЧШАЯ КОЛОДА НЕДЕЛИ"
 _TITLE_FILL = (255, 255, 255, 255)
 _TITLE_OUTLINE = (18, 28, 70, 255)
+_STAT_GOLD = (255, 224, 138, 255)
+_STAT_ICE = (211, 228, 255, 255)
 _ELIXIR_PINK = (224, 64, 251)
 _EVO_BADGE = (232, 121, 249, 255)
 _EVO_BADGE_DARK = (126, 34, 206, 255)
@@ -268,10 +270,17 @@ def _draw_elixir_drop_at(canvas: Image.Image, origin: tuple[int, int], elixir: i
     canvas.alpha_composite(layer, dest=(ox - pad, oy - pad))
 
 
-def _draw_title(canvas: Image.Image) -> None:
-    """Draw title with uniform letter height (Supercell Magic Cyrillic is uneven)."""
-    text = _TITLE.upper()
-    font = _title_font(46)
+def _draw_styled_centered_text(
+    canvas: Image.Image,
+    text: str,
+    *,
+    font_size: int,
+    center_y: int,
+    fill: tuple[int, int, int, int],
+    outline_radius: int,
+) -> None:
+    """Centered Supercell-style text with normalized Cyrillic cap height."""
+    font = _title_font(font_size)
     # Reference cap-height from a "clean" letter (А) — scale outliers like Д to match
     ref = font.getbbox("А")
     target_h = max(1, ref[3] - ref[1])
@@ -299,7 +308,7 @@ def _draw_title(canvas: Image.Image) -> None:
     total_w = sum(widths) + gap * max(0, len(widths) - 1)
     total_h = target_h
     # Outline padding
-    pad = 4
+    pad = outline_radius + 1
     layer = Image.new("RGBA", (total_w + pad * 2, total_h + pad * 2), (0, 0, 0, 0))
 
     def _blit_colored(color: tuple[int, int, int, int], dx: int, dy: int) -> None:
@@ -313,16 +322,67 @@ def _draw_title(canvas: Image.Image) -> None:
             layer.alpha_composite(tinted, dest=(x, pad + dy))
             x += w + gap
 
-    for ox in range(-3, 4):
-        for oy in range(-3, 4):
-            if ox * ox + oy * oy <= 10:
+    for ox in range(-outline_radius, outline_radius + 1):
+        for oy in range(-outline_radius, outline_radius + 1):
+            if ox * ox + oy * oy <= outline_radius * outline_radius:
                 _blit_colored(_TITLE_OUTLINE, ox, oy)
-    _blit_colored(_TITLE_FILL, 0, 0)
+    _blit_colored(fill, 0, 0)
 
     cx = canvas.width / 2
-    cy = 78
-    dest = (int(round(cx - layer.width / 2)), int(round(cy - layer.height / 2)))
+    dest = (int(round(cx - layer.width / 2)), int(round(center_y - layer.height / 2)))
     canvas.alpha_composite(layer, dest=dest)
+
+
+def _draw_title(canvas: Image.Image) -> None:
+    """Draw title with uniform letter height (Supercell Magic Cyrillic is uneven)."""
+    _draw_styled_centered_text(
+        canvas,
+        _TITLE,
+        font_size=46,
+        center_y=78,
+        fill=_TITLE_FILL,
+        outline_radius=3,
+    )
+
+
+def format_best_deck_collage_stats(
+    winrate: float,
+    matches: int,
+    usage_percent: float,
+) -> tuple[str, str]:
+    """Compact deck facts rendered on the collage, not repeated in the Telegram caption."""
+    winrate_label = f"{float(winrate):g}".replace(".", ",")
+    return (
+        f"ВИНРЕЙТ {winrate_label}% · {max(0, int(matches))} МАТЧЕЙ",
+        f"ИСПОЛЬЗОВАНИЕ {max(0, int(usage_percent))}%",
+    )
+
+
+def _draw_best_deck_stats(
+    canvas: Image.Image,
+    *,
+    winrate: float,
+    matches: int,
+    usage_percent: float,
+) -> None:
+    """Place the best-deck facts in the header gap above the card grid."""
+    winrate_line, usage_line = format_best_deck_collage_stats(winrate, matches, usage_percent)
+    _draw_styled_centered_text(
+        canvas,
+        winrate_line,
+        font_size=24,
+        center_y=119,
+        fill=_STAT_GOLD,
+        outline_radius=2,
+    )
+    _draw_styled_centered_text(
+        canvas,
+        usage_line,
+        font_size=22,
+        center_y=143,
+        fill=_STAT_ICE,
+        outline_radius=2,
+    )
 
 
 def _load_background() -> Image.Image:
@@ -405,8 +465,14 @@ def _draw_hero_card_frame(canvas: Image.Image, slot: tuple[int, int, int, int]) 
     canvas.alpha_composite(frame_layer)
 
 
-async def render_deck_collage(cards: list[dict]) -> bytes | None:
-    """Build PNG: clean BG → centered card icons → evo/hero badges → elixir → title."""
+async def render_deck_collage(
+    cards: list[dict],
+    *,
+    winrate: float | None = None,
+    matches: int | None = None,
+    usage_percent: float | None = None,
+) -> bytes | None:
+    """Build PNG: background → title/statistics → cards → evo/hero badges → elixir."""
     if not cards:
         return None
 
@@ -416,6 +482,13 @@ async def render_deck_collage(cards: list[dict]) -> bytes | None:
 
     canvas = _load_background()
     _draw_title(canvas)
+    if winrate is not None and matches is not None and usage_percent is not None:
+        _draw_best_deck_stats(
+            canvas,
+            winrate=winrate,
+            matches=matches,
+            usage_percent=usage_percent,
+        )
 
     async with aiohttp.ClientSession() as session:
         arts: list[Image.Image] = []
