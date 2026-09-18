@@ -22,29 +22,29 @@ _ASSETS = Path(__file__).resolve().parents[1] / "assets"
 _BG_PATH = _ASSETS / "digest_bg.png"
 _TITLE_FONT_PATH = _ASSETS / "Supercell-Magic.ttf"
 
-# Clean digest_bg.png (894×808): gold frame OUTERS are 165×208.
+# digest_bg.png is 894×808: gold frame OUTERS are 165×208.
 # Inner content rects — cards are contained+centered here (no stretch, no overflow).
 _SLOT_INNERS: list[tuple[int, int, int, int]] = [
-    (68, 168, 159, 202),
-    (268, 168, 159, 202),
-    (467, 168, 159, 202),
-    (667, 168, 159, 202),
-    (68, 422, 159, 202),
-    (268, 422, 159, 202),
-    (467, 422, 159, 202),
-    (667, 422, 159, 202),
+    (68, 298, 159, 202),
+    (268, 298, 159, 202),
+    (467, 298, 159, 202),
+    (667, 298, 159, 202),
+    (68, 552, 159, 202),
+    (268, 552, 159, 202),
+    (467, 552, 159, 202),
+    (667, 552, 159, 202),
 ]
 
 # Elixir drop anchor (top-left) on each slot — overlaps frame corner like the reference.
 _DROP_ORIGINS: list[tuple[int, int]] = [
-    (58, 155),
-    (258, 155),
-    (457, 155),
-    (657, 155),
-    (58, 409),
-    (258, 409),
-    (457, 409),
-    (657, 409),
+    (58, 285),
+    (258, 285),
+    (457, 285),
+    (657, 285),
+    (58, 539),
+    (258, 539),
+    (457, 539),
+    (657, 539),
 ]
 
 _TITLE = "ЛУЧШАЯ КОЛОДА НЕДЕЛИ"
@@ -367,21 +367,44 @@ def _draw_best_deck_stats(
 ) -> None:
     """Place the best-deck facts in the header gap above the card grid."""
     winrate_line, usage_line = format_best_deck_collage_stats(winrate, matches, usage_percent)
-    _draw_styled_centered_text(
+    _draw_stat_line(
         canvas,
         winrate_line,
         font_size=24,
         center_y=119,
         fill=_STAT_GOLD,
-        outline_radius=2,
     )
-    _draw_styled_centered_text(
+    _draw_stat_line(
         canvas,
         usage_line,
         font_size=22,
         center_y=143,
         fill=_STAT_ICE,
-        outline_radius=2,
+    )
+
+
+def _draw_stat_line(
+    canvas: Image.Image,
+    text: str,
+    *,
+    font_size: int,
+    center_y: int,
+    fill: tuple[int, int, int, int],
+) -> None:
+    """Draw stat text in the title font without stretching commas or decimal digits."""
+    font = _title_font(font_size)
+    draw = ImageDraw.Draw(canvas)
+    stroke_width = 2
+    bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
+    x = (canvas.width - (bbox[2] - bbox[0])) / 2 - bbox[0]
+    y = center_y - (bbox[3] - bbox[1]) / 2 - bbox[1]
+    draw.text(
+        (x, y),
+        text,
+        font=font,
+        fill=fill,
+        stroke_width=stroke_width,
+        stroke_fill=_TITLE_OUTLINE,
     )
 
 
