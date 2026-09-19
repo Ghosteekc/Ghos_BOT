@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from bot.services.battle_day_stats import build_last_results, build_most_used_cards, build_winrate_by_day, compute_daily_trophy_change
+from bot.services.battle_day_stats import build_last_league_results, build_last_results, build_most_used_cards, build_winrate_by_day, compute_daily_trophy_change
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -68,6 +68,7 @@ from bot.services.top_players import _cards_from_current_deck, get_top_players
 from bot.services.meta_analyzer import _guess_deck_name
 from bot.services.random_deck import generate_random_deck
 from bot.services.battle_insights import build_insights_report
+from bot.services.league_info import build_league_info
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +291,7 @@ def _build_stats_overview(
     *,
     chart_battles: list | None = None,
     trophy_battles: list | None = None,
+    is_absolute_champion: bool = False,
 ) -> StatsOverviewResponse:
     elixirs: list[float] = []
     durations: list[int] = []
@@ -304,6 +306,7 @@ def _build_stats_overview(
 
     winrate_by_day = build_winrate_by_day(chart_battles if chart_battles is not None else battles)
     last_results = build_last_results(trophy_battles if trophy_battles is not None else battles)
+    league_results = build_last_league_results(trophy_battles if trophy_battles is not None else battles)
 
     most_used = build_most_used_cards(battles, player_tag, limit=6) if player_tag else []
     archetypes = [
@@ -326,6 +329,8 @@ def _build_stats_overview(
         most_used_cards=most_used,
         archetypes=archetypes,
         last_results=last_results,
+        league_results=league_results,
+        is_absolute_champion=is_absolute_champion,
     )
 
 
@@ -905,6 +910,16 @@ async def extended_stats(user: User = Depends(require_linked_player)) -> StatsOv
     max_trophies = user.trophies or 0
     chart_battles = await get_battles_for_winrate_chart(user.player_tag or "", days=14)
     trophy_battles = await get_battles_for_trophy_chart(user.player_tag or "", battles)
+    is_absolute_champion = False
+    try:
+        client = ClashRoyaleClient()
+        try:
+            player = await client.get_player(user.player_tag or "")
+        finally:
+            await client.close()
+        is_absolute_champion = bool(build_league_info(player or {}).get("is_absolute_champion"))
+    except ClashRoyaleAPIError:
+        logger.debug("Stats league profile fetch failed for %s", user.player_tag)
 
     return _build_stats_overview(
         stats,
@@ -913,6 +928,7 @@ async def extended_stats(user: User = Depends(require_linked_player)) -> StatsOv
         max_trophies,
         chart_battles=chart_battles or battles,
         trophy_battles=trophy_battles or battles,
+        is_absolute_champion=is_absolute_champion,
     )
 
 

@@ -1,6 +1,6 @@
 """Tests for trophy growth / last_results selection."""
 
-from bot.services.battle_day_stats import build_last_results, is_ladder_1v1
+from bot.services.battle_day_stats import build_last_league_results, build_last_results, is_ladder_1v1
 
 
 def _ladder(name: str, delta: int, *, crowns: int = 1, opp_crowns: int = 0, when: str = "20260724T120000.000Z") -> dict:
@@ -99,3 +99,16 @@ def test_build_last_results_default_limit_covers_full_api_window():
     ]
     rows = build_last_results(battles)
     assert len(rows) == 25
+
+
+def test_build_last_league_results_never_includes_trophy_road():
+    ranked = _ladder("League opponent", 7, when="20260724T180000.000Z")
+    ranked["type"] = "pathOfLegend"
+    ranked["gameMode"] = {"name": "Ranked1v1_NewArena"}
+    trophy_road = _ladder("Trophy Road opponent", 30, when="20260724T170000.000Z")
+
+    rows = build_last_league_results([ranked, trophy_road])
+
+    assert len(rows) == 1
+    assert rows[0]["opponent_name"] == "League opponent"
+    assert rows[0]["trophy_change"] == 7

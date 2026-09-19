@@ -503,6 +503,8 @@ class StatsOverviewResponse(BaseModel):
     most_used_cards: list[dict] = []
     archetypes: list[dict] = []
     last_results: list[dict] = []
+    league_results: list[dict] = []
+    is_absolute_champion: bool = False
     activity_heatmap: list[list[int]] = []
 
 

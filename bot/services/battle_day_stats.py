@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Callable
 
 from bot.services.battle_time import battle_day_key, battle_time_from_record, today_key_msk
 
@@ -151,17 +152,17 @@ def _trophy_delta(team: dict, chronological: list[dict], index: int) -> int | No
     return None
 
 
-def build_last_results(battles: list, *, limit: int = 40) -> list[dict]:
-    """Recent ladder 1v1 battles oldest-first with trophy delta and opponent/time labels.
-
-    Clash battle log is newest-first (~25). We also use persisted cache battles that
-    store trophy_change so the chart covers more than one API window.
-    """
+def _build_progress_results(
+    battles: list,
+    *,
+    eligible: Callable[[dict], bool],
+    limit: int = 40,
+) -> list[dict]:
+    """Recent progression battles, oldest-first, with their verified API delta."""
     from bot.services.battle_time import format_battle_played_at, format_battle_played_date
 
-    # Newest-first (API order), ladder-only.
-    ladder = [b for b in battles if is_ladder_1v1(b)]
-    chronological = list(reversed(ladder))
+    progression = [battle for battle in battles if eligible(battle)]
+    chronological = list(reversed(progression))
     if not chronological:
         return []
 
@@ -186,6 +187,24 @@ def build_last_results(battles: list, *, limit: int = 40) -> list[dict]:
             break
 
     return list(reversed(rows_newest_first))
+
+
+def build_last_results(battles: list, *, limit: int = 40) -> list[dict]:
+    """Recent Trophy Road 1v1 battles oldest-first with their trophy delta.
+
+    Clash battle log is newest-first (~25). We also use persisted cache battles that
+    store trophy_change so the chart covers more than one API window.
+    """
+    return _build_progress_results(battles, eligible=is_ladder_1v1, limit=limit)
+
+
+def build_last_league_results(battles: list, *, limit: int = 40) -> list[dict]:
+    """Recent Ranked 1v1 battles oldest-first with their league-cup delta.
+
+    A battle is accepted only when its source mode identifies it as Ranked / Path
+    of Legend. This keeps league cups separate from Trophy Road progression.
+    """
+    return _build_progress_results(battles, eligible=is_ranked_1v1, limit=limit)
 
 
 def compute_daily_trophy_change(battles: list) -> int | None:

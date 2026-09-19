@@ -12,6 +12,8 @@ from bot.services.weekly_digest import (
     target_week_for_now,
     week_bounds,
     WeekStats,
+    WeekWindow,
+    build_week_stats,
 )
 from bot.services.deck_collage import format_best_deck_collage_stats
 
@@ -47,6 +49,32 @@ def test_digest_caption_keeps_best_deck_statistics_on_the_collage():
         best_deck_share=67,
         form_note="Винрейт стабильный — продолжай в том же духе.",
     )
+
+
+def test_digest_keeps_trophy_road_and_league_cups_separate():
+    window = WeekWindow("2026-W38", date(2026, 9, 14), date(2026, 9, 20))
+    common = {
+        "battleTime": "20260915T120000.000Z",
+        "team": [{"tag": "#ME", "crowns": 1, "trophyChange": 30, "cards": []}],
+        "opponent": [{"crowns": 0, "cards": []}],
+    }
+    league = {
+        **common,
+        "type": "pathOfLegend",
+        "gameMode": {"name": "Ranked1v1_NewArena"},
+        "team": [{"tag": "#ME", "crowns": 0, "trophyChange": -7, "cards": []}],
+        "opponent": [{"crowns": 1, "cards": []}],
+    }
+    trophy_road = {**common, "type": "PvP", "gameMode": {"name": "Ladder"}}
+
+    stats = build_week_stats([league, trophy_road], "#ME", window)
+
+    assert stats is not None
+    assert stats.trophy_delta == 30
+    assert stats.league_trophy_delta == -7
+    stats.include_league_trophies = True
+    assert "🏆 Кубки: +30" in format_digest_caption(stats)
+    assert "🟣 Кубки лиги: -7" in format_digest_caption(stats)
 
     assert format_digest_caption(stats) == "\n".join(
         [

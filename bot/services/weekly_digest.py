@@ -21,12 +21,14 @@ from sqlalchemy import select
 from bot.config import settings
 from bot.models.database import User, UserSettings, WeeklyDigestSent, async_session
 from bot.services.battle_cache_reader import get_battles_for_winrate_chart
+from bot.services.battle_day_stats import is_ladder_1v1, is_ranked_1v1
 from bot.services.battle_time import battle_day_key, now_msk
 from bot.services.card_data import get_card_elixir
 from bot.services.card_registry import ensure_cards_loaded
 from bot.services.clash_api import ClashRoyaleClient, normalize_tag
 from bot.services.deck_analyzer import calculate_deck_winrates
 from bot.services.deck_collage import render_deck_collage
+from bot.services.league_info import build_league_info
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,8 @@ class WeekStats:
     best_deck: dict[str, Any] | None
     best_deck_share: float
     form_note: str
+    league_trophy_delta: int = 0
+    include_league_trophies: bool = False
 
 
 def iso_week_key(d: date) -> str:
@@ -215,6 +219,7 @@ def build_week_stats(
     tag = normalize_tag(player_tag)
     results: list[bool] = []
     trophy_delta = 0
+    league_trophy_delta = 0
     day_wins: dict[str, int] = {}
     day_total: dict[str, int] = {}
 
@@ -233,10 +238,14 @@ def build_week_stats(
         if tc is None:
             tc = b.get("trophy_change")
         try:
-            if tc is not None:
-                trophy_delta += int(tc)
+            delta = int(tc) if tc is not None else None
         except (TypeError, ValueError):
-            pass
+            delta = None
+        if delta is not None:
+            if is_ladder_1v1(b):
+                trophy_delta += delta
+            elif is_ranked_1v1(b):
+                league_trophy_delta += delta
         day = battle_day_key(str(b.get("battleTime") or ""))
         if day:
             day_total[day] = day_total.get(day, 0) + 1
@@ -291,6 +300,7 @@ def build_week_stats(
         best_deck=best_deck,
         best_deck_share=share,
         form_note=_form_note(winrate, total),
+        league_trophy_delta=league_trophy_delta,
     )
 
 
@@ -515,6 +525,11 @@ def format_digest_caption(stats: WeekStats, player_name: str | None = None) -> s
         f"📈 Винрейт: {_format_percent(stats.winrate)}%",
         "",
         f"🏆 Кубки: {_format_trophy(stats.trophy_delta)}",
+        *(
+            [f"🟣 Кубки лиги: {_format_trophy(stats.league_trophy_delta)}"]
+            if stats.include_league_trophies
+            else []
+        ),
         f"🔥 Серия побед: {stats.best_streak}",
     ]
     if stats.best_day_name and stats.best_day_wins:
@@ -634,6 +649,13 @@ async def send_digest_to_user(
             window.week_key,
         )
         return False
+
+    try:
+        async with ClashRoyaleClient() as client:
+            player = await client.get_player(normalize_tag(user.player_tag))
+        stats.include_league_trophies = bool(build_league_info(player or {}).get("is_absolute_champion"))
+    except Exception as exc:
+        logger.debug("Digest league profile fetch failed for %s: %s", user.player_tag, exc)
 
     caption = format_digest_caption(stats, user.player_name)
     if force and not mark:
