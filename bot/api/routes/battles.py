@@ -27,6 +27,7 @@ from bot.api.schemas import (
     KeyCardEntry,
 )
 from bot.services.battle_day_stats import ranked_battle_sides
+from bot.services.battle_mode import battle_mode_label
 from bot.models.database import User
 from bot.services.battle_service import (
     BATTLE_LOG_LIMIT,
@@ -140,6 +141,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         timestamp=raw_time,
         played_at=format_battle_played_at(raw_time),
         is_ranked=is_ranked,
+        mode_label=battle_mode_label(battle),
         user_league=user_league,
         opponent_league=opponent_league,
     )
@@ -323,6 +325,7 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
         ),
         battle_coach=battle_coach,
         is_ranked=is_ranked,
+        mode_label=battle_mode_label(battle),
         user_league=user_league,
         opponent_league=opponent_league,
     )

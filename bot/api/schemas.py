@@ -188,6 +188,7 @@ class BattleSummary(BaseModel):
     timestamp: str = ""
     played_at: str = ""
     is_ranked: bool = False
+    mode_label: str | None = None
     user_league: BattleLeagueBadge | None = None
     opponent_league: BattleLeagueBadge | None = None
 
@@ -312,6 +313,7 @@ class BattleDetailResponse(BaseModel):
     match_plan: MatchPlanResponse | None = None
     battle_coach: BattleCoachResponse | None = None
     is_ranked: bool = False
+    mode_label: str | None = None
     user_league: BattleLeagueBadge | None = None
     opponent_league: BattleLeagueBadge | None = None
     detailed_unlocked: bool = True
