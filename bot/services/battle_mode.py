@@ -28,7 +28,8 @@ def battle_mode_label(battle: dict) -> str | None:
     battle_type = _key(battle.get("type"))
     mode_key = _game_mode_key(battle)
 
-    if battle_type in {"twovstwo", "2v2"} or "2v2" in mode_key:
+    # Supercell's TeamVsTeam payload is the 2v2 mode; some logs use type=trail.
+    if battle_type in {"twovstwo", "2v2"} or "2v2" in mode_key or mode_key == "teamvsteam":
         return "2 на 2"
     if battle_type in {"clanmate", "friendly"}:
         return "Дружеский"

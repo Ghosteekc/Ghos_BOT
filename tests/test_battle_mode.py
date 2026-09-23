@@ -14,6 +14,7 @@ def _battle(*, battle_type: str = "PvP", mode: str = "Ladder") -> dict:
 def test_labels_known_non_ranked_modes():
     assert battle_mode_label(_battle()) == "Кубки"
     assert battle_mode_label(_battle(battle_type="2v2", mode="2v2")) == "2 на 2"
+    assert battle_mode_label(_battle(battle_type="trail", mode="TeamVsTeam")) == "2 на 2"
     assert battle_mode_label(_battle(mode="ClassicDeck")) == "Классика"
     assert battle_mode_label(_battle(battle_type="challenge", mode="Challenge")) == "Испытание"
 
