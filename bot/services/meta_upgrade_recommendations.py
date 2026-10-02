@@ -56,7 +56,7 @@ def build_meta_upgrade_recommendations(
         return {
             **base,
             "status": "deck_unavailable",
-            "message": "API не вернул полную экипированную колоду игрока.",
+            "message": "Не удалось определить текущую колоду игрока. Обнови данные профиля и попробуй снова.",
         }
 
     # Aggregate only facts carried by the persisted, ranked meta deck payload.
