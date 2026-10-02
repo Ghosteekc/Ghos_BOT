@@ -71,7 +71,6 @@ def _pro_detail(exc: HTTPException) -> dict:
 
 GUARDED_FEATURES = (
     ("ai_coach", require_pro_linked("ai_coach")),
-    ("player_search", require_pro("player_search")),
     ("deck_improve", require_pro_linked("deck_improve")),
 )
 
@@ -171,12 +170,6 @@ async def _run_non_admin_still_requires_subscription() -> None:
         user = await _add_user(session, 960_778)
         with patch("bot.services.pro.entitlement.get_admin_telegram_ids", return_value=[111_222_333]):
             assert await is_user_pro(session, user) is False
-            try:
-                await require_pro("player_search")(user=user, session=session)
-            except HTTPException as exc:
-                assert _pro_detail(exc)["error_code"] == PRO_REQUIRED
-            else:
-                raise AssertionError("non-admin passed Pro guard")
     await engine.dispose()
 
 
@@ -653,7 +646,6 @@ def test_routes_are_wired_to_the_expected_guards() -> None:
 
     for method, path in (
         ("POST", "/api/ai/ask"),
-        ("GET", "/api/search"),
         ("POST", "/api/decks/recommend"),
     ):
         names = _dependency_qualnames(app, path, method)
@@ -661,6 +653,7 @@ def test_routes_are_wired_to_the_expected_guards() -> None:
 
     # FREE users keep the battle list and the basic battle card.
     for method, path in (
+        ("GET", "/api/search"),
         ("GET", "/api/battles"),
         ("GET", "/api/battles/{index}"),
         ("GET", "/api/players/{tag}"),
@@ -668,7 +661,8 @@ def test_routes_are_wired_to_the_expected_guards() -> None:
         ("GET", "/api/meta/clan-wars"),
     ):
         names = _dependency_qualnames(app, path, method)
-        assert "require_linked_player" in names, f"{method} {path} lost the link guard"
+        expected_guard = "get_current_user" if path == "/api/search" else "require_linked_player"
+        assert expected_guard in names, f"{method} {path} lost the expected access guard"
         assert not (names & PRO_GUARD_QUALNAMES), f"{method} {path} must stay open to FREE users"
 
 
