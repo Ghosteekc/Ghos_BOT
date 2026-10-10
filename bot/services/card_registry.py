@@ -101,8 +101,10 @@ async def ensure_cards_loaded() -> dict[str, dict]:
         hero_icon = _resolve_hero_icon(name, icons.get("heroMedium") or "")
         max_evo = int(item.get("maxEvolutionLevel") or 0)
         key = _normalize_name(name)
-        # Season overrides: local evo art implies evolvable card.
-        if evo_icon and key in _CARD_EVOLUTION_ICON_FALLBACKS:
+        # The official cards API exposes an evolution variant through its
+        # evolutionMedium art. Treat that API field as confirmation even when
+        # maxEvolutionLevel is temporarily missing during a season rollout.
+        if evo_icon:
             max_evo = max(max_evo, 1)
         # Dual-path (evo + hero): collection uses 1/2/3 evolutionLevel tiers.
         if key in _DUAL_PATH_CARDS and (evo_icon or max_evo >= 1) and hero_icon:
