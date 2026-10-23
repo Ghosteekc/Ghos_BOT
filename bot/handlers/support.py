@@ -1,6 +1,7 @@
 from html import escape
 
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message
 
 from bot.config import settings
@@ -17,6 +18,21 @@ def _support_url(value: str) -> str:
     if support.startswith("t.me/"):
         return f"https://{support}"
     return f"https://t.me/{support.lstrip('@')}"
+
+
+@router.message(Command("paysupport"))
+async def cmd_paysupport(message: Message) -> None:
+    await message.answer(
+        "💳 <b>Вопрос по оплате Ghosteek Pro</b>\n\n"
+        "Если Stars списались ошибочно, подписка не появилась после оплаты "
+        "или вы хотите запросить возврат Stars, обратитесь в поддержку. "
+        "Опишите, что произошло, и укажите дату платежа. "
+        "Платёжные данные отправляйте только в личном диалоге с поддержкой."
+    )
+    if settings.support_username:
+        await cmd_support(message)
+    else:
+        await message.answer("Контакт поддержки сейчас не настроен. Попробуйте позже.")
 
 
 @router.message(F.text == "💬 Поддержка")
