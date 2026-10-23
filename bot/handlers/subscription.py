@@ -27,7 +27,7 @@ router = Router(name="ghosteek_pro")
 async def pre_checkout(query: PreCheckoutQuery) -> None:
     parsed = parse_invoice_payload(query.invoice_payload or "")
     if parsed is None:
-        logger.warning("Rejecting pre-checkout: unknown payload=%s", query.invoice_payload)
+        logger.warning("Rejecting pre-checkout: unknown payload")
         await query.answer(ok=False, error_message="Неизвестный тариф Ghosteek Pro.")
         return
 
@@ -93,16 +93,15 @@ async def successful_payment(message: Message) -> None:
     payload = payment.invoice_payload or ""
     parsed = parse_invoice_payload(payload)
     if parsed is None:
-        logger.warning("Successful payment with non-Pro payload=%s — ignored", payload)
+        logger.warning("Successful payment with non-Pro payload — ignored")
         return
 
     plan_id, telegram_id, credits_used = parsed
     if message.from_user.id != telegram_id:
         logger.error(
-            "Payment user mismatch: from=%s payload_tg=%s charge=%s",
+            "Payment user mismatch: from=%s payload_tg=%s",
             message.from_user.id,
             telegram_id,
-            payment.telegram_payment_charge_id,
         )
         await message.answer(
             "Оплата получена, но не удалось привязать подписку. Напишите в поддержку."
@@ -126,7 +125,7 @@ async def successful_payment(message: Message) -> None:
                 credits_used=credits_used,
             )
         except Exception:
-            logger.exception("Failed to activate Pro after payment charge=%s", charge_id)
+            logger.exception("Failed to activate Pro after payment")
             await message.answer(
                 "Оплата прошла, но активация Ghosteek Pro не удалась. "
                 "Напишите в поддержку и укажите ID платежа."

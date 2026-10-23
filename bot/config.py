@@ -4,6 +4,8 @@ import os
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from bot.secret_logging import install_secret_redaction
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,6 +147,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+install_secret_redaction(settings)
 
 
 def get_admin_telegram_ids() -> list[int]:
@@ -178,10 +181,12 @@ logger.info(
     bool(settings.ollama_enable_tools),
 )
 
-logger.debug(f"Clash Royale API base: {settings.clash_royale_api_base}")
-logger.debug(f"Database URL: {settings.database_url}")
+logger.debug("Clash Royale API configured: %s", bool(settings.clash_royale_api_key))
+_database_scheme = settings.database_url.partition("://")[0].split("+")[0].lower()
+_database_backend = _database_scheme if _database_scheme in {"postgresql", "postgres", "sqlite"} else "other"
+logger.debug("Database backend: %s", _database_backend)
 logger.debug(f"Trial days: {settings.trial_days}")
 logger.debug(f"Subscription price: {settings.subscription_price_stars} stars")
 logger.debug(f"Sync interval: {settings.sync_interval_minutes} minutes")
 logger.debug(f"Admin Telegram IDs: {get_admin_telegram_ids()}")
-logger.debug(f"WebApp URL: {settings.webapp_url}")
+logger.debug("WebApp URL configured: %s", bool(settings.webapp_url))

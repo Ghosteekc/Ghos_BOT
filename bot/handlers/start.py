@@ -19,7 +19,7 @@ router = Router()
 async def cmd_start(message: Message, command: CommandObject) -> None:
     if message.from_user is None:
         return
-    logger.info("User %s started the bot (args=%r)", message.from_user.id, command.args)
+    logger.info("User %s started the bot (args_present=%s)", message.from_user.id, bool(command.args))
 
     beta_token = parse_beta_payload(command.args)
     referrer_tg = None if beta_token else parse_referral_payload(command.args)

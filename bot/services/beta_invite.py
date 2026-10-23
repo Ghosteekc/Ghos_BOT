@@ -93,8 +93,7 @@ async def create_beta_invite(
 
     link = build_beta_link(token=token, bot_username=bot_username)
     logger.info(
-        "Beta invite created: token=%s days=%s by=%s",
-        token,
+        "Beta invite created: days=%s by=%s",
         days,
         created_by_telegram_id,
     )
@@ -151,8 +150,7 @@ async def redeem_beta_invite(
         commit=True,
     )
     logger.info(
-        "Beta invite redeemed: token=%s user=%s days=%s",
-        token_norm,
+        "Beta invite redeemed: user=%s days=%s",
         user.telegram_id,
         days,
     )

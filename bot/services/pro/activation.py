@@ -138,9 +138,8 @@ async def activate_pro_plan(
             reloaded = await session.get(User, user_id)
             status = await get_pro_status(session, reloaded) if reloaded else status_from_subscription(None)
             logger.error(
-                "Credits spend failed — Pro activation rolled back user=%s charge=%s amount=%s",
+                "Credits spend failed — Pro activation rolled back user=%s amount=%s",
                 tg_id,
-                charge_id,
                 credits,
             )
             return ProActivationResult(
@@ -161,19 +160,17 @@ async def activate_pro_plan(
         )
     except Exception:
         logger.exception(
-            "Referral credits grant failed user=%s charge=%s",
+            "Referral credits grant failed user=%s",
             user.telegram_id,
-            charge_id,
         )
 
     await session.commit()
 
     status = status_from_subscription(sub, now=now)
     logger.info(
-        "Ghosteek Pro activated: user=%s plan=%s charge=%s credits=%s expires=%s",
+        "Ghosteek Pro activated: user=%s plan=%s credits=%s expires=%s",
         user.telegram_id,
         plan.id,
-        charge_id,
         credits,
         expires.isoformat() if expires else "unlimited",
     )

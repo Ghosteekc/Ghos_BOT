@@ -56,7 +56,11 @@ async def main() -> None:
     logger.info("=" * 50)
 
     logger.info("Initializing database...")
-    await init_db()
+    try:
+        await init_db()
+    except Exception:
+        logger.error("Database initialization failed")
+        raise
     logger.info("Database initialized successfully")
 
     try:
@@ -85,13 +89,12 @@ async def main() -> None:
                     web_app=WebAppInfo(url=webapp),
                 )
             )
-            logger.info("Chat menu WebApp button set -> %s", webapp)
+            logger.info("Chat menu WebApp button set")
         except Exception as e:
             logger.warning("Failed to set chat menu WebApp button: %s", e)
     else:
         logger.warning(
-            "Skip chat menu WebApp button: WEBAPP_URL missing or invalid (%r)",
-            webapp,
+            "Skip chat menu WebApp button: WEBAPP_URL missing or invalid",
         )
 
     storage = SqliteStorage()

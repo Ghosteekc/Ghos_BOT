@@ -244,9 +244,8 @@ async def grant_referral_purchase_credits(
 
     if granted_ref or granted_friend:
         logger.info(
-            "Referral purchase credits: referral_id=%s charge=%s ref=%s friend=%s",
+            "Referral purchase credits: referral_id=%s ref=%s friend=%s",
             row.id,
-            payment_charge_id,
             granted_ref,
             granted_friend,
         )
