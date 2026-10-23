@@ -17,6 +17,11 @@ from bot.services import weekly_digest
 from bot.services.pro import reminders as pro_reminders
 from bot.services import meta_collector
 from bot.services.clash_api import ClashRoyaleClient
+from bot.services.ghosteek_ai.memory.in_memory import (
+    InMemoryMemoryProvider,
+    run_periodic_cleanup,
+)
+from bot.services.ghosteek_ai.memory.provider import get_memory_provider
 from bot.services.startup_warmup import warmup_caches
 from bot.services.tunnel_manager import start_tunnel, stop_tunnel_process
 
@@ -139,11 +144,22 @@ async def main() -> None:
     logger.info("Starting polling...")
     await bot.delete_webhook(drop_pending_updates=True)
     logger.info("Webhook cleared — using long polling")
+    memory_provider = get_memory_provider()
+    session_cleanup_task = (
+        asyncio.create_task(run_periodic_cleanup(memory_provider, stop_event))
+        if isinstance(memory_provider, InMemoryMemoryProvider)
+        else None
+    )
     try:
         await dp.start_polling(bot)
     finally:
         logger.info("Shutting down...")
         stop_event.set()
+        if session_cleanup_task:
+            try:
+                await session_cleanup_task
+            except Exception:
+                logger.exception("AI session cleanup task failed")
         if settings.tunnel_auto_start:
             await asyncio.to_thread(stop_tunnel_process, tunnel_proc)
         api_task.cancel()
