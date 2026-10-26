@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,9 @@ from fastapi.staticfiles import StaticFiles
 
 from bot.api.errors import register_exception_handlers
 from bot.api.routes import ai, battles, decks, meta, misc, pro, profile, referral
+from bot.config import settings
+
+logger = logging.getLogger(__name__)
 
 WEBAPP_DIST = Path(__file__).resolve().parents[2] / "webapp" / "dist"
 STATIC_CARDS = Path(__file__).resolve().parents[1] / "static" / "cards"
@@ -16,12 +20,16 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Ghosteek CR Assistant API", version="1.0.0")
     register_exception_handlers(app)
 
+    origins = [origin for origin in settings.cors_allowed_origins.split(",") if origin]
+    if not origins:
+        logger.warning("CORS origin allowlist is empty; cross-origin browser access is disabled")
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"],
+        allow_headers=["Content-Type", "X-Telegram-Init-Data", "Bypass-Tunnel-Reminder"],
     )
 
     app.include_router(profile.router)

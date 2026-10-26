@@ -1,5 +1,6 @@
 import logging
 import os
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -68,6 +69,9 @@ class Settings(BaseSettings):
     referral_credits_reward: int = 10
     credits_max_share_percent: int = 50  # never cover more than this % with Credits
     webapp_url: str = "https://your-domain.com"
+    # Owner-confirmed frontend origins. Environment overrides replace this list.
+    # An explicitly empty list disables cross-origin browser access.
+    cors_allowed_origins: str = "https://ghos-web2.vercel.app,http://localhost:5173"
     support_username: str | None = None
     api_host: str = "0.0.0.0"
     # Local/dev: API_PORT. Railway always injects PORT — preferred in _apply_platform_defaults.
@@ -125,6 +129,32 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_database_url(cls, value: object) -> str:
         return normalize_database_url("" if value is None else str(value))
+
+    @field_validator("cors_allowed_origins")
+    @classmethod
+    def _validate_cors_origins(cls, value: str) -> str:
+        origins: list[str] = []
+        for item in value.split(","):
+            origin = item.strip()
+            if not origin:
+                continue
+            try:
+                parsed = urlsplit(origin)
+                valid = (
+                    parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+                    and not parsed.username and not parsed.password
+                    and not parsed.path and not parsed.query and not parsed.fragment
+                    and not any(char.isspace() for char in origin)
+                    and "*" not in origin and "?" not in origin and "#" not in origin
+                )
+                parsed.port  # Validate the port without printing the input on failure.
+            except ValueError:
+                valid = False
+            if not valid:
+                raise ValueError("CORS origins must be exact http(s) origins without paths, credentials or wildcards")
+            if origin not in origins:
+                origins.append(origin)
+        return ",".join(origins)
 
     @model_validator(mode="after")
     def _apply_platform_defaults(self) -> "Settings":
