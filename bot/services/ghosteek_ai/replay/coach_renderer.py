@@ -703,7 +703,7 @@ def apply_replay_coach_gate(text: str, envelope: dict[str, Any] | None) -> str:
     ok, reason = validate_replay_coach_response(text, envelope)
     if ok:
         return (text or "").strip()
-    logger.info("replay renderer fact-lock rejected: %s", reason)
+    logger.info("replay renderer fact-lock rejected")
     return render_replay_coach_fallback(envelope or {"tool": REPLAY_COACH_TOOL, "data": {}})
 
 

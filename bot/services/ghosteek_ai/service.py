@@ -272,7 +272,7 @@ def _log_planner_turn(
         tools,
         tool_ok,
         renderer_invoked,
-        reason,
+        reason.split(":", 1)[0],
     )
 
 
@@ -567,7 +567,7 @@ async def _run_agent_mode(
             "ghosteek_ai mode=%s llm_backend=%s fallback_reason=%s — Planner path",
             MODE_AGENT,
             backend,
-            reason,
+            type(exc).__name__,
         )
         text, tool_names, fb_meta = await _run_planner_fallback(
             ai_context,

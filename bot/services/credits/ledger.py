@@ -71,8 +71,7 @@ async def credit_once(
     except IntegrityError:
         return False
     logger.info(
-        "Credits granted user=%s amount=%s type=%s",
-        user_id,
+        "Credits granted amount=%s type=%s",
         amount,
         tx_type,
     )
@@ -122,5 +121,5 @@ async def spend_credits_once(
             await session.flush()
     except IntegrityError:
         return False
-    logger.info("Credits spent user=%s amount=%s", user_id, amount)
+    logger.info("Credits spent amount=%s", amount)
     return True

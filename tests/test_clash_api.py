@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 
 from bot.services.clash_api import (
@@ -12,6 +13,7 @@ from bot.services.clash_api import (
     _is_retryable_http_status,
     _parse_retry_after_header,
     _retry_delay_seconds,
+    _safe_api_path,
 )
 
 
@@ -33,6 +35,26 @@ async def _run_clan_endpoint_shapes() -> None:
 
 def test_clan_endpoint_shapes() -> None:
     asyncio.run(_run_clan_endpoint_shapes())
+
+
+def test_player_logging_does_not_change_request_or_result(caplog) -> None:
+    client = object.__new__(ClashRoyaleClient)
+    data = {"tag": "#P0YQ88", "name": "Fixture Personal Name"}
+    paths = []
+
+    async def fake_request(path):
+        paths.append(path)
+        return data
+
+    client._request = fake_request
+    with caplog.at_level(logging.DEBUG, logger="bot.services.clash_api"):
+        result = asyncio.run(client.get_player("#P0YQ88"))
+    assert result is data
+    assert paths == ["/players/%23P0YQ88"]
+    assert "CR API player fetched" in caplog.text
+    assert "P0YQ88" not in caplog.text
+    assert "Fixture Personal Name" not in caplog.text
+    assert _safe_api_path(paths[0] + "/battlelog?token=private") == "/players/{tag}/battlelog"
 
 
 def test_config_error_on_401() -> None:

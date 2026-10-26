@@ -23,35 +23,35 @@ _battle_cache: dict[int, list] = {}
 
 async def _load_battles(user: User, telegram_id: int) -> list | None:
     if not user.player_tag:
-        logger.warning(f"User {telegram_id} has no linked player tag")
+        logger.warning("Battle analysis skipped: no linked player tag")
         return None
 
     client = ClashRoyaleClient()
     try:
         battles = await client.get_battlelog(user.player_tag)
     except ClashRoyaleAPIError as e:
-        logger.error(f"Failed to load battles for {user.player_tag}: {e}")
+        logger.error("Failed to load battles: status=%s", e.status)
         return None
-    except Exception as e:
-        logger.error(f"Unexpected error loading battles for {user.player_tag}: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Unexpected error loading battles")
         return None
     finally:
         await client.close()
 
     pvp = filter_pvp_battles(battles, user.player_tag)
     _battle_cache[telegram_id] = pvp
-    logger.info(f"Loaded {len(pvp)} PvP battles for {user.player_tag}")
+    logger.info("Loaded %d PvP battles", len(pvp))
 
     saved_count = await persist_battles(user, pvp)
     if saved_count:
-        logger.info("Saved %d new battles for %s", saved_count, user.player_tag)
+        logger.info("Saved %d new battles", saved_count)
 
     return pvp
 
 
 @router.message(F.text == "📊 Анализ боёв")
 async def analyze_battles(message: Message, user: User) -> None:
-    logger.info(f"User {message.from_user.id} requested battle analysis")
+    logger.info("Battle analysis requested")
     await message.answer("⏳ Загружаю последние бои...")
     battles = await _load_battles(user, message.from_user.id)
 
@@ -121,16 +121,16 @@ async def battle_detail(callback: CallbackQuery, user: User) -> None:
             text += f"\n\n⚠️ <b>Угрозы:</b> {', '.join(analysis.opponent_threats)}"
 
         await callback.message.edit_text(text)
-        logger.info(f"Showed battle {idx} analysis to user {callback.from_user.id}")
+        logger.info("Battle analysis shown: index=%s", idx)
     except Exception as e:
-        log_error(logger, "E040", "Error showing battle detail", exc=e, user_id=callback.from_user.id)
+        log_error(logger, "E040", "Error showing battle detail", exc=e)
         await callback.message.edit_text(user_message("E040"))
     await callback.answer()
 
 
 @router.message(F.text == "📈 Винрейт колод")
 async def deck_winrates(message: Message, user: User) -> None:
-    logger.info(f"User {message.from_user.id} requested deck winrates")
+    logger.info("Deck winrates requested")
     await message.answer("⏳ Считаю винрейт...")
     battles = await _load_battles(user, message.from_user.id)
 
@@ -157,15 +157,15 @@ async def deck_winrates(message: Message, user: User) -> None:
             )
 
         await message.answer("\n".join(lines))
-        logger.info(f"Showed deck winrates to user {message.from_user.id}")
+        logger.info("Deck winrates shown")
     except Exception as e:
-        log_error(logger, "E041", "Error calculating winrates", exc=e, user_id=message.from_user.id)
+        log_error(logger, "E041", "Error calculating winrates", exc=e)
         await message.answer(user_message("E041"))
 
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message, user: User) -> None:
-    logger.info(f"User {message.from_user.id} requested detailed stats")
+    logger.info("Detailed stats requested")
     if not user.player_tag:
         await message.answer(user_message("E003") + "\n\nИспользуйте /link #ВАШТЕГ")
         return
@@ -254,7 +254,7 @@ async def cmd_stats(message: Message, user: User) -> None:
             pass
 
         await message.answer("\n".join(lines))
-        logger.info(f"Showed detailed stats to user {message.from_user.id}")
+        logger.info("Detailed stats shown")
     except Exception as e:
-        log_error(logger, "E042", "Error showing stats", exc=e, user_id=message.from_user.id)
+        log_error(logger, "E042", "Error showing stats", exc=e)
         await message.answer(user_message("E042"))

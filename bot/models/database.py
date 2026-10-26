@@ -55,9 +55,10 @@ async def _index_exists(conn: AsyncConnection, index_name: str) -> bool:
 def _engine_kwargs() -> dict:
     url = settings.database_url
     if url.startswith("sqlite"):
-        return {"echo": False}
+        return {"echo": False, "hide_parameters": True}
     return {
         "echo": False,
+        "hide_parameters": True,
         "pool_pre_ping": True,
         "pool_size": 5,
         "max_overflow": 10,
@@ -609,21 +610,6 @@ async def _migrate_users_player_tag_unique() -> None:
                 "unique index not created — resolve manually before enforcing uniqueness",
                 len(dupe_rows),
             )
-            for player_tag, cnt in dupe_rows[:10]:
-                ids = await conn.execute(
-                    text(
-                        "SELECT id, telegram_id FROM users "
-                        "WHERE player_tag = :tag ORDER BY id"
-                    ),
-                    {"tag": player_tag},
-                )
-                users = ids.fetchall()
-                logger.warning(
-                    "  duplicate player_tag=%s count=%d users=%s",
-                    player_tag,
-                    cnt,
-                    [(u[0], u[1]) for u in users],
-                )
             return
 
         await conn.execute(
@@ -672,13 +658,6 @@ async def _migrate_battle_cache_dedup() -> None:
                 "unique index not created — review manually before dedup cleanup",
                 len(dupe_rows),
             )
-            for player_tag, battle_time, cnt in dupe_rows[:10]:
-                logger.warning(
-                    "  duplicate battle_cache: tag=%s time=%s count=%d",
-                    player_tag,
-                    battle_time,
-                    cnt,
-                )
             return
 
         await conn.execute(

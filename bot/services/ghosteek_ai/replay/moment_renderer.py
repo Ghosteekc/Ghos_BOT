@@ -693,7 +693,7 @@ class ReplayMomentRenderer:
             catalog=self._catalog,
         )
         if reason:
-            logger.info("moment renderer rejected qwen output: %s", reason)
+            logger.info("moment renderer rejected qwen output")
             return None
         return MomentExplanation(
             title=title[:_TITLE_MAX],
@@ -811,7 +811,7 @@ class ReplaySummaryRenderer:
                 catalog=self._catalog,
             )
             if reason:
-                logger.info("summary renderer rejected qwen output: %s", reason)
+                logger.info("summary renderer rejected qwen output")
                 return fallback_replay_summary(moments=moments, limitations=limitations)
             return ReplayGroundedSummary(
                 overview=overview[:_SUMMARY_MAX],

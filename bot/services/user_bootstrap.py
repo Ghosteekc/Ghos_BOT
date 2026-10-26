@@ -35,7 +35,7 @@ async def _profile_current_deck(player_tag: str) -> list[dict]:
         player = await client.get_player(player_tag)
         return _cards_from_current_deck(player) or []
     except Exception:
-        logger.debug("Bootstrap: currentDeck fetch failed for %s", player_tag, exc_info=True)
+        logger.debug("Bootstrap: currentDeck fetch failed", exc_info=True)
         return []
     finally:
         await client.close()
@@ -71,12 +71,10 @@ async def bootstrap_linked_user(user: User | SimpleNamespace, *, force: bool = T
         )
         mine_decks = len(rows)
     except Exception:
-        logger.exception("Bootstrap: mine decks sync failed for %s", tag)
+        logger.exception("Bootstrap: mine decks sync failed")
 
     logger.info(
-        "Bootstrap ready telegram_id=%s tag=%s battles=%s mine_decks=%s",
-        ref.telegram_id,
-        tag,
+        "Bootstrap ready battles=%s mine_decks=%s",
         len(battles),
         mine_decks,
     )

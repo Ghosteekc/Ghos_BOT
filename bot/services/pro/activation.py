@@ -132,14 +132,12 @@ async def activate_pro_plan(
                 reference_id=f"sub_discount:{charge_id}",
             )
         except ValueError:
-            tg_id = user.telegram_id
             user_id = user.id
             await session.rollback()
             reloaded = await session.get(User, user_id)
             status = await get_pro_status(session, reloaded) if reloaded else status_from_subscription(None)
             logger.error(
-                "Credits spend failed — Pro activation rolled back user=%s amount=%s",
-                tg_id,
+                "Credits spend failed — Pro activation rolled back amount=%s",
                 credits,
             )
             return ProActivationResult(
@@ -160,16 +158,14 @@ async def activate_pro_plan(
         )
     except Exception:
         logger.exception(
-            "Referral credits grant failed user=%s",
-            user.telegram_id,
+            "Referral credits grant failed",
         )
 
     await session.commit()
 
     status = status_from_subscription(sub, now=now)
     logger.info(
-        "Ghosteek Pro activated: user=%s plan=%s credits=%s expires=%s",
-        user.telegram_id,
+        "Ghosteek Pro activated: plan=%s credits=%s expires=%s",
         plan.id,
         credits,
         expires.isoformat() if expires else "unlimited",
@@ -244,8 +240,7 @@ async def activate_pro_trial(session: AsyncSession, user: User) -> ProActivation
 
     status = status_from_subscription(sub, now=now)
     logger.info(
-        "Ghosteek Pro trial started: user=%s expires=%s",
-        user.telegram_id,
+        "Ghosteek Pro trial started: expires=%s",
         expires.isoformat(),
     )
     return ProActivationResult(
@@ -297,8 +292,7 @@ async def extend_pro_days(
 
     status = status_from_subscription(sub, now=now)
     logger.info(
-        "Ghosteek Pro extended: user=%s days=%s plan=%s expires=%s",
-        user.telegram_id,
+        "Ghosteek Pro extended: days=%s plan=%s expires=%s",
         days,
         plan_id,
         expires.isoformat() if expires else "unlimited",

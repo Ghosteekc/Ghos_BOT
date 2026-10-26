@@ -25,9 +25,8 @@ async def _fetch_battlelog(client: ClashRoyaleClient, player_tag: str) -> list:
         return await asyncio.wait_for(client.get_battlelog(player_tag), timeout=timeout)
     except asyncio.TimeoutError as exc:
         logger.warning(
-            "CR API timeout (%ss) fetching battlelog for %s",
+            "CR API timeout (%ss) fetching battlelog",
             timeout,
-            player_tag,
         )
         raise ClashRoyaleAPIError(
             f"Battlelog request timed out after {timeout}s",
@@ -43,7 +42,7 @@ async def sync_user_battles(user: User, *, client: ClashRoyaleClient | None = No
 
     tag = normalize_tag(user.player_tag)
     if is_fresh(tag):
-        logger.debug("Battle sync skipped for %s: battlelog fetched recently", tag)
+        logger.debug("Battle sync skipped: battlelog fetched recently")
         return 0
 
     owns_client = client is None
@@ -51,10 +50,10 @@ async def sync_user_battles(user: User, *, client: ClashRoyaleClient | None = No
     try:
         battles = await _fetch_battlelog(client, user.player_tag)
     except ClashRoyaleAPIError as exc:
-        logger.warning("Failed to fetch battles for %s: %s", user.player_tag, exc)
+        logger.warning("Failed to fetch battles: status=%s", exc.status)
         return 0
     except Exception:
-        logger.exception("Unexpected error fetching battles for %s", user.player_tag)
+        logger.exception("Unexpected error fetching battles")
         return 0
     finally:
         if owns_client:
@@ -94,10 +93,10 @@ async def _sync_all_once_locked(*, stop_event: asyncio.Event | None = None) -> d
             try:
                 new = await sync_user_battles(user, client=client)
                 if new:
-                    logger.info("Synced %s: %d new battles", user.player_tag, new)
+                    logger.info("Synced %d new battles", new)
                 return tag, new
             except Exception:
-                logger.exception("Error syncing %s", user.player_tag)
+                logger.exception("Error syncing battles")
                 return tag, 0
 
     try:

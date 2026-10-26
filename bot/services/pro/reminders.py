@@ -118,12 +118,12 @@ async def _send_reminder(bot: Bot, user: User, text: str, *, button_label: str) 
         )
         return True
     except TelegramForbiddenError:
-        logger.info("Pro reminder blocked telegram_id=%s", user.telegram_id)
+        logger.info("Pro reminder blocked by Telegram")
         return False
     except TelegramRetryAfter:
         raise
     except Exception:
-        logger.exception("Pro reminder send failed telegram_id=%s", user.telegram_id)
+        logger.exception("Pro reminder send failed")
         return False
 
 

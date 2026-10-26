@@ -49,9 +49,7 @@ async def get_current_user(
     sub_service = SubscriptionService(session)
     user = await sub_service.get_or_create_user(telegram_id)
     logger.debug(
-        "WebApp auth ok: telegram_id=%s user_id=%s linked=%s",
-        user.telegram_id,
-        user.id,
+        "WebApp auth ok: linked=%s",
         bool(user.player_tag),
     )
     return user

@@ -98,11 +98,7 @@ async def successful_payment(message: Message) -> None:
 
     plan_id, telegram_id, credits_used = parsed
     if message.from_user.id != telegram_id:
-        logger.error(
-            "Payment user mismatch: from=%s payload_tg=%s",
-            message.from_user.id,
-            telegram_id,
-        )
+        logger.error("Payment user mismatch: subscription not activated")
         await message.answer(
             "Оплата получена, но не удалось привязать подписку. Напишите в поддержку."
         )

@@ -88,22 +88,20 @@ async def _link_player_by_tag(message: Message, state: FSMContext, raw_tag: str)
         log_error(
             logger,
             code,
-            f"Failed to link player {tag}: {e}",
+            "Failed to link player",
             exc=e,
-            user_id=message.from_user.id,
             status=e.status,
         )
         await state.set_state(LinkStates.waiting_tag)
         await message.answer(user_message(code))
         return
-    except Exception:
+    except Exception as exc:
         log_error(
             logger,
             "E061",
-            f"Unexpected error linking player {tag}",
-            user_id=message.from_user.id,
+            "Unexpected error linking player",
+            exc=exc,
         )
-        logger.exception("Unexpected error linking player %s", tag)
         await state.set_state(LinkStates.waiting_tag)
         await message.answer(user_message("E061"))
         return
@@ -118,7 +116,7 @@ async def _link_player_by_tag(message: Message, state: FSMContext, raw_tag: str)
 
         arena = player.get("arena", {})
         trophies = player.get("trophies", 0)
-        logger.info("Successfully linked player %s to user %s", tag, message.from_user.id)
+        logger.info("Player linked successfully")
         await _clear_link_state(state)
 
         # Prefetch battles / mine decks so Mini App opens with data, not empty states.
@@ -133,7 +131,7 @@ async def _link_player_by_tag(message: Message, state: FSMContext, raw_tag: str)
             )
             battles_n = int(boot.get("battles_loaded") or 0)
         except Exception:
-            logger.exception("Bootstrap after link failed for %s", tag)
+            logger.exception("Bootstrap after link failed")
             battles_n = 0
             asyncio.create_task(bootstrap_user_by_telegram_id(message.from_user.id))
 
@@ -155,8 +153,7 @@ async def _link_player_by_tag(message: Message, state: FSMContext, raw_tag: str)
         log_error(
             logger,
             "E062",
-            f"Player tag {tag} already linked to another user",
-            user_id=message.from_user.id,
+            "Player tag already linked to another user",
         )
         await _clear_link_state(state)
         await message.answer(user_message("E062"))
@@ -164,9 +161,8 @@ async def _link_player_by_tag(message: Message, state: FSMContext, raw_tag: str)
         log_error(
             logger,
             "E030",
-            f"Database error linking player {tag}",
+            "Database error linking player",
             exc=e,
-            user_id=message.from_user.id,
         )
         await state.set_state(LinkStates.waiting_tag)
         await message.answer(user_message("E030"))
@@ -267,12 +263,11 @@ async def cmd_profile(message: Message) -> None:
         player = await client.get_player(user.player_tag)
     except ClashRoyaleAPIError as e:
         code = code_from_clash_api(e)
-        log_error(logger, code, f"Failed to load profile for {user.player_tag}: {e}", status=e.status)
+        log_error(logger, code, "Failed to load profile", status=e.status)
         await message.answer(user_message(code))
         return
     except Exception:
-        log_error(logger, "E060", f"Unexpected error loading profile for {user.player_tag}")
-        logger.exception("Unexpected error loading profile for %s", user.player_tag)
+        logger.exception("[E060] Unexpected error loading profile")
         await message.answer(user_message("E060"))
         return
     finally:

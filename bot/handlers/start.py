@@ -19,7 +19,7 @@ router = Router()
 async def cmd_start(message: Message, command: CommandObject) -> None:
     if message.from_user is None:
         return
-    logger.info("User %s started the bot (args_present=%s)", message.from_user.id, bool(command.args))
+    logger.info("Bot start (args_present=%s)", bool(command.args))
 
     beta_token = parse_beta_payload(command.args)
     referrer_tg = None if beta_token else parse_referral_payload(command.args)
@@ -40,8 +40,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
                 "Откройте приложение через Menu Button «Ghosteek»."
             )
             logger.info(
-                "Beta invite ok: user=%s days=%s",
-                message.from_user.id,
+                "Beta invite ok: days=%s",
                 redeem.days,
             )
         elif redeem.reason == "already_used":
@@ -49,8 +48,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         else:
             beta_note = "\n\n⚠️ Бета-ссылка недействительна или устарела."
             logger.info(
-                "Beta invite failed: user=%s reason=%s",
-                message.from_user.id,
+                "Beta invite failed: reason=%s",
                 redeem.reason,
             )
 
@@ -66,9 +64,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
                 is_new_user=created,
             )
             logger.info(
-                "Referral conversion: referred=%s referrer_tg=%s created=%s result=%s rewards=%s",
-                message.from_user.id,
-                referrer_tg,
+                "Referral conversion: created=%s result=%s rewards=%s",
                 created,
                 result.reason,
                 result.rewards_granted,
@@ -88,7 +84,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
 
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
-    logger.info(f"User {message.from_user.id} requested help")
+    logger.info("Bot help requested")
     await message.answer(
         "<b>Команды в чате:</b>\n"
         "/start — главное меню\n"

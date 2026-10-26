@@ -81,6 +81,10 @@ def log_error(
     **context: Any,
 ) -> None:
     parts = [f"[{code}]", technical]
+    context = {
+        key: value for key, value in context.items()
+        if key.lower() not in {"user_id", "telegram_id", "chat_id", "username", "player_tag", "tag"}
+    }
     if context:
         parts.append("| " + " ".join(f"{k}={v}" for k, v in context.items()))
     line = " ".join(parts)

@@ -204,7 +204,7 @@ async def create_pro_invoice(
             prices=[LabeledPrice(label=plan.title, amount=quote.stars_to_pay)],
         )
     except Exception as exc:
-        logger.exception("Failed to create Stars invoice for user=%s", user.telegram_id)
+        logger.exception("Failed to create Stars invoice")
         raise http_error(
             "E099",
             status=502,

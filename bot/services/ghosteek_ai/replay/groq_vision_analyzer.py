@@ -149,7 +149,7 @@ class GroqVisionAnalyzer(VisionAnalyzer):
         try:
             data = await self._post_chat(payload)
         except (GroqVisionUnavailable, GroqVisionTimeout) as exc:
-            logger.warning("groq vision unavailable/timeout frame=%s: %s", frame_index, exc)
+            logger.warning("groq vision unavailable/timeout frame=%s type=%s", frame_index, type(exc).__name__)
             return []
         except Exception:
             logger.exception("groq vision analyze failed frame=%s", frame_index)
@@ -158,7 +158,7 @@ class GroqVisionAnalyzer(VisionAnalyzer):
         content = _extract_message_content(data)
         parsed = parse_vision_json_content(content)
         if parsed is None:
-            logger.warning("groq vision malformed JSON frame=%s content=%r", frame_index, content[:120])
+            logger.warning("groq vision malformed JSON frame=%s", frame_index)
             return []
 
         return parse_raw_observations(

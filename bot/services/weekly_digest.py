@@ -450,7 +450,7 @@ async def _profile_deck_if_matches(player_tag: str, target_fp: str) -> list[dict
             player = await client.get_player(normalize_tag(player_tag))
         profile = _cards_from_current_deck(player or {})
     except Exception as exc:
-        logger.debug("Digest profile deck fetch failed for %s: %s", player_tag, exc)
+        logger.debug("Digest profile deck fetch failed: %s", type(exc).__name__)
         return None
     if len(profile) != 8:
         return None
@@ -568,7 +568,7 @@ async def _load_week_battles(player_tag: str, window: WeekWindow) -> list[dict]:
             raw = await client.get_battle_log(normalize_tag(player_tag))
             live = list(raw or [])
     except Exception as exc:
-        logger.debug("Digest live battlelog failed for %s: %s", player_tag, exc)
+        logger.debug("Digest live battlelog failed: %s", type(exc).__name__)
     return _merge_live_and_cache(live, cached)
 
 
@@ -597,7 +597,7 @@ async def mark_sent(user_id: int, week_key: str) -> None:
         except Exception:
             await session.rollback()
             # Unique race — treat as sent
-            logger.debug("Digest already marked for user_id=%s week=%s", user_id, week_key)
+            logger.debug("Digest already marked for week=%s", week_key)
 
 
 async def _eligible_users() -> list[User]:
@@ -644,8 +644,7 @@ async def send_digest_to_user(
             # No battles — still mark so we don't spam empty retries all week
             await mark_sent(user.id, window.week_key)
         logger.info(
-            "Digest skip (no battles) user_id=%s week=%s",
-            user.id,
+            "Digest skip (no battles) week=%s",
             window.week_key,
         )
         return False
@@ -655,7 +654,7 @@ async def send_digest_to_user(
             player = await client.get_player(normalize_tag(user.player_tag))
         stats.include_league_trophies = bool(build_league_info(player or {}).get("is_absolute_champion"))
     except Exception as exc:
-        logger.debug("Digest league profile fetch failed for %s: %s", user.player_tag, exc)
+        logger.debug("Digest league profile fetch failed: %s", type(exc).__name__)
 
     caption = format_digest_caption(stats, user.player_name)
     if force and not mark:
@@ -692,7 +691,7 @@ async def send_digest_to_user(
                 usage_percent=stats.best_deck_share,
             )
         except Exception:
-            logger.exception("Deck collage failed user_id=%s", user.id)
+            logger.exception("Deck collage failed")
 
     try:
         if photo_bytes:
@@ -711,20 +710,19 @@ async def send_digest_to_user(
     except TelegramForbiddenError:
         if mark:
             await mark_sent(user.id, window.week_key)
-        logger.info("Digest blocked by user telegram_id=%s", user.telegram_id)
+        logger.info("Digest blocked by user")
         return False
     except TelegramRetryAfter as e:
         await asyncio.sleep(float(e.retry_after) + 0.5)
         raise
     except Exception:
-        logger.exception("Digest send failed user_id=%s", user.id)
+        logger.exception("Digest send failed")
         return False
 
     if mark:
         await mark_sent(user.id, window.week_key)
     logger.info(
-        "Digest sent user_id=%s week=%s battles=%s wr=%s force=%s mark=%s",
-        user.id,
+        "Digest sent week=%s battles=%s wr=%s force=%s mark=%s",
         window.week_key,
         stats.total,
         stats.winrate,
@@ -766,7 +764,7 @@ async def run_digest_cycle(bot: Bot) -> int:
                 if await send_digest_to_user(bot, user, window):
                     sent += 1
             except Exception:
-                logger.exception("Digest retry failed user_id=%s", user.id)
+                logger.exception("Digest retry failed")
         await asyncio.sleep(0.07)
     return sent
 

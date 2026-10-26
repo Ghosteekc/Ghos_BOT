@@ -562,26 +562,11 @@ class QwenLLMProvider(LLMProvider):
         raw_text: str,
         data: Any,
     ) -> None:
-        """Полный debug dump ответа до интерпретации (без усечения JSON)."""
-        try:
-            header_map = {
-                k: v
-                for k, v in (headers.items() if headers is not None else [])
-                if str(k).lower() not in {"authorization", "cookie", "set-cookie"}
-            }
-        except Exception:
-            header_map = {}
-        if isinstance(data, (dict, list)):
-            body_dump = json.dumps(data, ensure_ascii=False, default=str)
-        else:
-            body_dump = raw_text if raw_text is not None else str(data)
+        """Keep transport diagnostics without model text, headers or user context."""
         logger.debug(
-            "llm_provider_raw_response provider=%s url=%s status=%s headers=%s body=%s",
+            "llm_provider_response provider=%s status=%s",
             self.name,
-            url,
             status,
-            json.dumps(header_map, ensure_ascii=False, default=str),
-            body_dump,
         )
 
     async def generate(

@@ -62,6 +62,14 @@ def encode_tag(tag: str) -> str:
     return quote(normalize_tag(tag), safe="")
 
 
+def _safe_api_path(path: str) -> str:
+    """Keep the endpoint family in diagnostics, not the player/clan tag or query."""
+    parts = path.partition("?")[0].split("/")
+    if len(parts) > 2 and parts[1] in {"players", "clans"}:
+        parts[2] = "{tag}"
+    return "/".join(parts)
+
+
 def _utc_aware(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
@@ -203,7 +211,7 @@ class ClashRoyaleClient:
                     "CR API retry %s/%s for %s in %.1fs (status=%s)",
                     attempt,
                     max_attempts,
-                    path,
+                    _safe_api_path(path),
                     delay,
                     exc.status,
                 )
@@ -232,7 +240,7 @@ class ClashRoyaleClient:
                 log_fn = logger.warning if resp.status >= 400 or duration_ms >= 2500 else logger.debug
                 log_fn(
                     "CR API GET %s status=%s duration_ms=%s attempt=%s/%s",
-                    path,
+                    _safe_api_path(path),
                     resp.status,
                     duration_ms,
                     attempt,
@@ -250,7 +258,7 @@ class ClashRoyaleClient:
                     logger.error(
                         "CR API configuration error status=%s path=%s reason=%s",
                         resp.status,
-                        path,
+                        _safe_api_path(path),
                         _parse_error_body(response_text)[0],
                     )
                     raise _config_error_message(resp.status, response_text)
@@ -274,7 +282,7 @@ class ClashRoyaleClient:
                     )
 
                 if resp.status != 200:
-                    logger.error("CR API unexpected status=%s path=%s", resp.status, path)
+                    logger.error("CR API unexpected status=%s path=%s", resp.status, _safe_api_path(path))
                     raise ClashRoyaleAPIError(
                         f"Ошибка загрузки данных игры ({resp.status}).",
                         resp.status,
@@ -290,7 +298,7 @@ class ClashRoyaleClient:
                 try:
                     return json.loads(response_text)
                 except json.JSONDecodeError as exc:
-                    logger.error("CR API invalid JSON path=%s", path)
+                    logger.error("CR API invalid JSON path=%s", _safe_api_path(path))
                     raise ClashRoyaleAPIError(
                         "Получен некорректный ответ от сервера игры.",
                         500,
@@ -298,7 +306,7 @@ class ClashRoyaleClient:
                     ) from exc
 
         except asyncio.TimeoutError as exc:
-            logger.warning("CR API timeout path=%s attempt=%s/%s", path, attempt, max_attempts)
+            logger.warning("CR API timeout path=%s attempt=%s/%s", _safe_api_path(path), attempt, max_attempts)
             err = ClashRoyaleAPIError(
                 "Сервис данных игры не ответил вовремя. Попробуйте позже.",
                 0,
@@ -306,7 +314,10 @@ class ClashRoyaleClient:
             )
             raise err from exc
         except aiohttp.ClientError as exc:
-            logger.warning("CR API network error path=%s attempt=%s/%s: %s", path, attempt, max_attempts, exc)
+            logger.warning(
+                "CR API network error path=%s attempt=%s/%s type=%s",
+                _safe_api_path(path), attempt, max_attempts, type(exc).__name__,
+            )
             raise ClashRoyaleAPIError(
                 "Ошибка сети. Проверьте подключение к интернету.",
                 0,
@@ -315,38 +326,34 @@ class ClashRoyaleClient:
             ) from exc
 
     async def get_player(self, tag: str) -> dict:
-        normalized = normalize_tag(tag)
         data = await self._request(f"/players/{encode_tag(tag)}")
         if not isinstance(data, dict):
             raise ClashRoyaleAPIError("Некорректный ответ профиля игрока.", 500)
-        logger.debug("CR API player fetched tag=%s name=%s", normalized, data.get("name", "?"))
+        logger.debug("CR API player fetched")
         return data
 
     async def get_clan(self, tag: str) -> dict:
         """Return the live clan record from the official Clash Royale API."""
-        normalized = normalize_tag(tag)
         data = await self._request(f"/clans/{encode_tag(tag)}")
         if not isinstance(data, dict):
             raise ClashRoyaleAPIError("Некорректный ответ профиля клана.", 500)
-        logger.debug("CR API clan fetched tag=%s name=%s", normalized, data.get("name", "?"))
+        logger.debug("CR API clan fetched")
         return data
 
     async def get_clan_members(self, tag: str) -> list[dict]:
         """Return the current member list from the official Clash Royale API."""
-        normalized = normalize_tag(tag)
         data = await self._request(f"/clans/{encode_tag(tag)}/members")
         items = data.get("items") if isinstance(data, dict) else None
         if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
             raise ClashRoyaleAPIError("Некорректный ответ состава клана.", 500)
-        logger.debug("CR API clan members fetched tag=%s members=%s", normalized, len(items))
+        logger.debug("CR API clan members fetched members=%s", len(items))
         return items
 
     async def fetch_battlelog_raw(self, tag: str) -> list:
-        normalized = normalize_tag(tag)
         data = await self._request(f"/players/{encode_tag(tag)}/battlelog")
         if not isinstance(data, list):
             raise ClashRoyaleAPIError("Некорректный ответ журнала боёв.", 500)
-        logger.debug("CR API battlelog fetched tag=%s battles=%s", normalized, len(data))
+        logger.debug("CR API battlelog fetched battles=%s", len(data))
         return data
 
     async def get_battlelog(self, tag: str) -> list:
@@ -432,17 +439,12 @@ class SubscriptionService:
             user.trophies = player_data.get("trophies")
             await self.session.commit()
             await self.session.refresh(user)
-            logger.info("Refreshed linked player %s for telegram_id=%s", normalized, user.telegram_id)
+            logger.info("Refreshed linked player")
             return user
 
         owner = await self.find_user_by_player_tag(normalized, exclude_user_id=user.id)
         if owner is not None:
-            logger.warning(
-                "Rejected link: player_tag=%s already linked to telegram_id=%s (requested by %s)",
-                normalized,
-                owner.telegram_id,
-                user.telegram_id,
-            )
+            logger.warning("Rejected link: player tag already linked to another account")
             raise PlayerTagAlreadyLinkedError(normalized)
 
         # Drop in-memory battle/opponent caches and tracked "mine" decks from the old tag.
@@ -460,10 +462,7 @@ class SubscriptionService:
             try:
                 await clear_tracked_mine_decks_for_user(user.id)
             except Exception:
-                logger.exception(
-                    "Failed clearing tracked mine decks on retag user_id=%s",
-                    user.id,
-                )
+                logger.exception("Failed clearing tracked mine decks on retag")
 
         user.player_tag = normalized
         user.player_name = player_data.get("name")
@@ -475,18 +474,9 @@ class SubscriptionService:
             await self.session.refresh(user)
         except IntegrityError as exc:
             await self.session.rollback()
-            logger.warning(
-                "IntegrityError linking player_tag=%s to telegram_id=%s",
-                normalized,
-                user.telegram_id,
-            )
+            logger.warning("IntegrityError linking player tag")
             raise PlayerTagAlreadyLinkedError(normalized) from exc
-        logger.info(
-            "Linked player %s to telegram_id=%s (previous=%s)",
-            normalized,
-            user.telegram_id,
-            previous_norm,
-        )
+        logger.info("Linked player (previous_link=%s)", bool(previous_norm))
         return user
 
     async def unlink_player(self, user: User) -> str | None:
@@ -510,12 +500,7 @@ class SubscriptionService:
         user.trophies = None
         await self.session.commit()
         await self.session.refresh(user)
-        logger.info(
-            "Unlinked player %s from telegram_id=%s (user_id=%s)",
-            tag,
-            user.telegram_id,
-            user.id,
-        )
+        logger.info("Unlinked player")
         return tag
 
     async def has_active_subscription(self, user: User) -> bool:
