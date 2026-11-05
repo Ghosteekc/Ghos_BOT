@@ -37,26 +37,56 @@ def build_meta_upgrade_recommendations(
         arena_name=str(arena_name) if arena_name else None,
     )
 
+    active_deck = list(collection.get("current_deck") or [])
+    collection_cards = collection.get("cards") or []
+    collection_available = bool(player.get("cards"))
+    cards_by_name = {
+        str(card.get("name") or "").casefold(): card
+        for card in collection_cards
+        if isinstance(card, dict) and card.get("name")
+    }
+    current_deck_cards = []
+    for name in active_deck if len(active_deck) == 8 else []:
+        card = cards_by_name.get(str(name).casefold()) or {}
+        is_owned = collection_available and bool(card.get("owned"))
+        current_deck_cards.append({
+            "name": str(name),
+            "name_ru": card.get("name_ru") or str(name),
+            "icon": card.get("icon") or card.get("icon_base") or "",
+            "level": int(card["level"]) if is_owned and card.get("level") is not None else None,
+            "max_level": int(card["max_level"])
+            if is_owned and card.get("max_level") is not None
+            else None,
+        })
+
     base = {
         "arena": arena,
-        "recommended_level": target_level,
+        "recommended_level": None,
         "updated_at": meta.get("updated_at"),
         "sample_note": meta.get("sample_note") or "",
+        "current_deck_cards": current_deck_cards,
         "cards": [],
     }
+
+    if len(active_deck) != 8:
+        return {
+            **base,
+            "status": "no_current_deck",
+            "message": "API не вернул полную текущую колоду игрока.",
+        }
+
+    if not player.get("cards"):
+        return {
+            **base,
+            "status": "no_collection",
+            "message": "API не вернул данные коллекции и уровни карт игрока.",
+        }
+
     if meta.get("status") != "ok":
         return {
             **base,
             "status": "meta_unavailable",
-            "message": meta.get("message") or "Недостаточно актуальных данных меты.",
-        }
-
-    active_deck = list(collection.get("current_deck") or [])
-    if len(active_deck) != 8:
-        return {
-            **base,
-            "status": "deck_unavailable",
-            "message": "Не удалось определить текущую колоду игрока. Обнови данные профиля и попробуй снова.",
+            "message": meta.get("message") or "Мета сейчас недоступна. Ниже показаны данные твоей текущей колоды.",
         }
 
     # Aggregate only facts carried by the persisted, ranked meta deck payload.
@@ -76,10 +106,14 @@ def build_meta_upgrade_recommendations(
             appearances[name]["observed_games"] += games
             appearances[name]["wins"] += wins
 
-    owned_by_name = {str(card.get("name") or ""): card for card in collection.get("cards") or []}
+    owned_by_name = {
+        str(card.get("name") or "").casefold(): card
+        for card in collection_cards
+        if isinstance(card, dict) and card.get("name")
+    }
     rows: list[dict[str, Any]] = []
     for name in active_deck:
-        card = owned_by_name.get(name)
+        card = owned_by_name.get(name.casefold())
         stats = appearances.get(name)
         if not card or not stats:
             continue
@@ -119,7 +153,13 @@ def build_meta_upgrade_recommendations(
     if not rows:
         return {
             **base,
-            "status": "no_matching_cards",
+            "status": "no_meta_matches",
             "message": "В текущей мета-выборке нет карт твоей колоды, которые ниже целевого уровня арены.",
         }
-    return {**base, "status": "ok", "message": None, "cards": rows[:5]}
+    return {
+        **base,
+        "status": "ok",
+        "message": None,
+        "recommended_level": target_level,
+        "cards": rows[:5],
+    }

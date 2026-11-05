@@ -263,7 +263,14 @@ async def get_upgrade_priorities(
         await client.close()
 
     collection = await build_player_collection(player)
-    meta = await get_ladder_meta(MODE_TROPHIES)
+    try:
+        meta = await get_ladder_meta(MODE_TROPHIES)
+    except Exception:
+        logger.warning("Failed to load Trophy Road meta for upgrade priorities", exc_info=True)
+        meta = {
+            "status": "unavailable",
+            "message": "Мета временно недоступна. Ниже показаны данные твоей текущей колоды.",
+        }
     return MetaUpgradeRecommendationsResponse(
         **build_meta_upgrade_recommendations(collection, player, meta)
     )
