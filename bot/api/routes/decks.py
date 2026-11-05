@@ -57,7 +57,15 @@ from bot.services.counter_engine import (
     customize_deck_for_arena,
     suggest_counter_deck,
 )
-from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates, get_most_played_cards
+from bot.services.deck_analyzer import (
+    analyze_battle,
+    analyze_deck,
+    battle_outcome,
+    calculate_deck_winrates,
+    get_most_played_cards,
+    outcome_totals,
+    outcome_winrate,
+)
 from bot.services.arena_decks import get_arena_popular_decks
 from bot.services.deck_constructor import build_constructor_decks
 from bot.services.constructor_top_match import match_constructor_top_decks
@@ -123,29 +131,31 @@ def _stats_from_battles(battles: list, tag: str):
     from types import SimpleNamespace
 
     tag_norm = normalize_tag(tag)
-    wins = losses = 0
+    outcomes: list[str] = []
     card_counts: dict[str, int] = {}
     for battle in battles:
         team = battle.get("team", [{}])[0]
         if team.get("tag") and normalize_tag(team.get("tag", "")) != tag_norm:
             continue
         opponent = battle.get("opponent", [{}])[0]
-        won = team.get("crowns", 0) > opponent.get("crowns", 0)
-        if won:
-            wins += 1
-        else:
-            losses += 1
+        outcomes.append(battle_outcome(team, opponent))
         for c in team.get("cards", []):
             name = c.get("name")
             if name:
                 card_counts[name] = card_counts.get(name, 0) + 1
-    total = wins + losses
-    wr = round(wins / total * 100, 1) if total else 0.0
+    totals = outcome_totals(outcomes)
+    total = len(outcomes)
+    wr = outcome_winrate(
+        wins=totals["wins"], losses=totals["losses"], draws=totals["draws"],
+    )
     top_cards = sorted(card_counts.items(), key=lambda x: x[1], reverse=True)[:6]
     return SimpleNamespace(
         total=total,
-        wins=wins,
-        losses=losses,
+        wins=totals["wins"],
+        losses=totals["losses"],
+        draws=totals["draws"],
+        unknowns=totals["unknowns"],
+        scored_games=totals["scored_games"],
         winrate=wr,
         top_decks=[],
         top_cards=top_cards,
@@ -278,7 +288,10 @@ async def _build_user_deck_entries(battles: list, user: User) -> list[DeckEntry]
             type="mine",
             category="mine",
             deck_link=deck_link,
-            description=f"{data['wins']}W / {data['losses']}L · {data['total']} игр",
+        description=(
+            f"{data['wins']}W / {data.get('draws', 0)}D / {data['losses']}L "
+            f"· {data['total']} игр"
+        ),
         ))
     return decks
 
@@ -313,13 +326,16 @@ def _build_stats_overview(
         {"name": "Игры", "value": stats.total},
         {"name": "Победы", "value": stats.wins},
         {"name": "Поражения", "value": stats.losses},
+        {"name": "Ничьи", "value": stats.draws},
     ]
 
     return StatsOverviewResponse(
         total_battles=stats.total,
         wins=stats.wins,
         losses=stats.losses,
-        draws=0,
+        draws=stats.draws,
+        unknowns=stats.unknowns,
+        scored_games=stats.scored_games,
         winrate=stats.winrate,
         avg_elixir=round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0,
         max_trophies=max_trophies,
@@ -394,6 +410,9 @@ async def get_mine_deck_stats(
         cards=card_infos,
         wins=data["wins"],
         losses=data["losses"],
+        draws=data.get("draws", 0),
+        unknowns=data.get("unknowns", 0),
+        scored_games=data.get("scored_games", 0),
         total_games=data["total_games"],
         winrate=data["winrate"],
         avg_elixir=data["avg_elixir"],
@@ -692,9 +711,20 @@ async def random_deck(
 
 @router.get("/insights", response_model=InsightsResponse)
 async def battle_insights(user: User = Depends(require_linked_player)) -> InsightsResponse:
-    battles = await _get_battles(user)
+    try:
+        battles = await _get_battles(user)
+    except Exception:
+        return InsightsResponse(
+            insights=[], patterns=[], threats=[], sample_size=0, wins=0, losses=0,
+            analysis_status="error",
+            analysis_message="Не удалось определить — анализ временно недоступен. Попробуйте позже.",
+        )
     if not battles:
-        return InsightsResponse(insights=[], patterns=[], threats=[], sample_size=0, wins=0, losses=0)
+        return InsightsResponse(
+            insights=[], patterns=[], threats=[], sample_size=0, wins=0, losses=0,
+            analysis_status="no_battles",
+            analysis_message="Боёв пока нет. Сыграйте бой и обновите историю, чтобы появился разбор.",
+        )
 
     try:
         report = await asyncio.to_thread(
@@ -705,7 +735,11 @@ async def battle_insights(user: User = Depends(require_linked_player)) -> Insigh
             losses_only=True,
         )
     except Exception:
-        report = {"insights": [], "patterns": [], "threats": [], "sample_size": 0, "wins": 0, "losses": 0}
+        report = {
+            "insights": [], "patterns": [], "threats": [], "sample_size": 0,
+            "wins": 0, "losses": 0, "analysis_status": "error",
+            "analysis_message": "Не удалось определить — анализ временно недоступен. Попробуйте позже.",
+        }
     return InsightsResponse(**report)
 
 
@@ -733,6 +767,9 @@ async def deck_winrates(user: User = Depends(require_linked_player)) -> list[Win
             deck_cards=deck_cards,
             wins=data["wins"],
             losses=data["losses"],
+            draws=data.get("draws", 0),
+            unknowns=data.get("unknowns", 0),
+            scored_games=data.get("scored_games", 0),
             total=data["total"],
             winrate=data["winrate"],
             last_seen=data.get("last_seen") or None,
@@ -754,6 +791,7 @@ async def list_opponents(user: User = Depends(require_linked_player)) -> list[Op
             threats=opp["threats"],
             avg_elixir=opp["avg_elixir"],
             won_against=opp["won_against"],
+            outcome=opp.get("outcome", "unknown"),
         )
         for i, opp in enumerate(opponents)
     ]
@@ -983,14 +1021,14 @@ async def recommendations(user: User = Depends(require_linked_player)) -> Recomm
     if last_battle:
         team = last_battle.get("team", [{}])[0]
         opp = last_battle.get("opponent", [{}])[0]
-        won = team.get("crowns", 0) > opp.get("crowns", 0)
         try:
             from bot.services.deck_analyzer import analyze_battle
             from bot.api.schemas import LastBattleSummary
 
             analysis = analyze_battle(team, opp)
             last_summary = LastBattleSummary(
-                won=won,
+                won=analysis.won,
+                outcome=analysis.outcome,
                 opponent_name=opp.get("name", "Соперник"),
                 trophy_change=int(team.get("trophyChange") or 0),
                 matchup_score=round(analysis.matchup_score, 1),

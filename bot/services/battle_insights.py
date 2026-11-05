@@ -4,10 +4,14 @@ from collections import Counter
 
 from bot.services.battle_report import analyze_battle_list_item
 from bot.services.card_data import WIN_CONDITIONS, card_has_role
-from bot.services.card_matchups import counters_in_deck
+from bot.services.card_matchups import (
+    counters_in_deck,
+    local_counter_available,
+    local_counter_has_card,
+)
 from bot.services.card_names_ru import card_name_ru
 from bot.services.clash_api import normalize_tag
-from bot.services.deck_analyzer import extract_deck
+from bot.services.deck_analyzer import battle_outcome, extract_deck
 from bot.services.tactical_matchup import analyze_tactical_matchup
 
 
@@ -32,7 +36,7 @@ def build_battle_insight(battle: dict, player_tag: str) -> dict | None:
     tags: list[str] = []
     summary = analysis.outcome_summary
 
-    if not analysis.won:
+    if analysis.outcome == "loss":
         if "воздух" in summary.lower():
             tags.append("air_defense")
         if "сплеш" in summary.lower() or "спам" in summary.lower():
@@ -57,6 +61,7 @@ def build_battle_insight(battle: dict, player_tag: str) -> dict | None:
 
     return {
         "won": analysis.won,
+        "outcome": analysis.outcome,
         "opponent_name": opponent.get("name", "Соперник"),
         "summary": summary,
         "tags": tags,
@@ -93,6 +98,32 @@ def _tactical_lines(user_deck: list[str], opponent_deck: list[str]) -> list[str]
     return lines
 
 
+def _counter_check(
+    threat: str,
+    user_deck: list[str],
+) -> tuple[list[str], list[str], str, bool]:
+    """Return confirmed answers and an explicit lookup state.
+
+    An empty, completed lookup means only that no *confirmed project-database*
+    answer was found in this exact deck. It never claims the threat has no
+    possible in-game counters. Errors or incomplete source coverage remain
+    ``unknown`` instead of being converted to an empty result.
+    """
+    if not local_counter_available() or not local_counter_has_card(threat):
+        return [], [], "unknown", False
+    if any(not local_counter_has_card(card) for card in user_deck):
+        return [], [], "unknown", False
+    try:
+        strong, partial = counters_in_deck(threat, user_deck)
+    except Exception:
+        return [], [], "unknown", False
+    if strong:
+        return strong, partial, "strong", True
+    if partial:
+        return strong, partial, "partial", True
+    return [], [], "not_found", True
+
+
 def build_loss_threats(
     battles: list[dict],
     player_tag: str,
@@ -100,10 +131,11 @@ def build_loss_threats(
     scan_limit: int = 40,
     limit: int = 4,
 ) -> list[dict]:
-    """Aggregate recurring enemy threats and the actual deck answers used in losses.
+    """Aggregate recurring enemy deck threats and answers available in the played deck.
 
-    Each row keeps a representative played matchup, so a counter is never
-    presented as available merely because it existed in another deck.
+    Each row keeps a representative played matchup, so an answer is never
+    presented as available merely because it existed in another deck. Presence
+    in a deck does not prove the card was played in that battle.
     """
     tag = normalize_tag(player_tag)
     grouped: dict[str, dict] = {}
@@ -116,11 +148,16 @@ def build_loss_threats(
             continue
         # A draw is not evidence of a loss pattern. Keep this aggregation to
         # actual losses only, independently of how a caller presents draws.
-        if int(team.get("crowns") or 0) >= int(opponent.get("crowns") or 0):
+        if battle_outcome(team, opponent) != "loss":
             continue
 
-        user_deck = extract_deck(team)
-        opponent_deck = extract_deck(opponent)
+        try:
+            user_deck = extract_deck(team)
+            opponent_deck = extract_deck(opponent)
+        except Exception:
+            # Malformed stored cards make this matchup indeterminate, never a
+            # negative claim about counter coverage.
+            continue
         if len(user_deck) != 8 or len(opponent_deck) != 8:
             continue
 
@@ -138,19 +175,21 @@ def build_loss_threats(
                 continue
             row = grouped.get(threat)
             if row is None:
+                strong, partial, counter_status, counter_check_performed = _counter_check(threat, user_deck)
                 try:
-                    strong, partial = counters_in_deck(threat, user_deck)
                     tactics = _tactical_lines(user_deck, opponent_deck)
                 except Exception:
-                    # A malformed matchup must not make the whole loss report
-                    # unavailable or produce a guessed counter recommendation.
-                    strong, partial, tactics = [], [], []
+                    # Tactics are optional and must not erase a completed
+                    # counter lookup or turn an error into a game claim.
+                    tactics = []
                 row = {
                     "card": threat,
                     "card_ru": card_name_ru(threat, short=True) or threat,
                     "losses": 0,
                     "strong_counters": [card_name_ru(card, short=True) or card for card in strong],
                     "partial_counters": [card_name_ru(card, short=True) or card for card in partial],
+                    "counter_status": counter_status,
+                    "counter_check_performed": counter_check_performed,
                     "win_conditions": _win_conditions(user_deck),
                     "tactics": tactics,
                 }
@@ -164,15 +203,7 @@ def build_loss_threats(
             len(item["partial_counters"]),
         )
 
-    result = sorted(grouped.values(), key=_rank, reverse=True)[:limit]
-    for row in result:
-        if row["strong_counters"]:
-            row["counter_status"] = "strong"
-        elif row["partial_counters"]:
-            row["counter_status"] = "partial"
-        else:
-            row["counter_status"] = "missing"
-    return result
+    return sorted(grouped.values(), key=_rank, reverse=True)[:limit]
 
 
 def build_insights_report(
@@ -188,7 +219,12 @@ def build_insights_report(
     for i, battle in enumerate(battles[:40]):
         if len(insights) >= limit:
             break
-        row = build_battle_insight(battle, player_tag)
+        try:
+            row = build_battle_insight(battle, player_tag)
+        except Exception:
+            # One malformed history row is insufficient evidence, not a
+            # reason to report that the player has no losses.
+            continue
         if not row:
             continue
         if losses_only and row["won"]:
@@ -200,28 +236,49 @@ def build_insights_report(
     patterns: list[str] = []
     if tag_counter.get("air_defense", 0) >= 2:
         patterns.append(
-            f"Частая проблема: защита от воздуха ({tag_counter['air_defense']} поражений)."
+            f"Повторяющийся риск состава: защита от воздуха ({tag_counter['air_defense']} поражений)."
         )
     if tag_counter.get("splash", 0) >= 2:
-        patterns.append(f"Слабый сплеш — {tag_counter['splash']} поражений против спама.")
+        patterns.append(f"Повторяющийся риск: мало сплеша в {tag_counter['splash']} поражениях против спама.")
     if tag_counter.get("point_target", 0) >= 2:
         patterns.append(
-            f"Слабый ответ на точечный урон — {tag_counter['point_target']} поражений. "
-            f"Стражи помогают против P.E.K.K.A и подобных."
+            f"Повторяющийся риск против точечного урона — {tag_counter['point_target']} поражений. "
+            f"Стражи могут помочь против P.E.K.K.A и подобных."
         )
     if tag_counter.get("cycle", 0) >= 2:
-        patterns.append("Тяжёлая колода мешает — попробуйте снизить средний эликсир.")
+        patterns.append("Тяжёлая колода может уступать в темпе — рассмотрите снижение среднего эликсира.")
     if tag_counter.get("spells", 0) >= 2:
         patterns.append("Добавьте заклинания — без них сложнее контролировать поле.")
 
     wins = sum(1 for x in insights if x["won"])
     losses = len(insights) - wins
 
+    threats = build_loss_threats(battles, player_tag)
+    source_outcomes = [
+        battle_outcome(battle.get("team", [{}])[0], battle.get("opponent", [{}])[0])
+        for battle in battles[:40]
+    ]
+    source_losses = source_outcomes.count("loss")
+    source_unknowns = source_outcomes.count("unknown")
+    if source_losses == 0 and source_unknowns == 0:
+        analysis_status = "no_losses"
+        analysis_message = "В загруженной истории нет подтверждённых поражений. Сыграйте ещё бои, если хотите получить разбор."
+    elif source_losses == 0:
+        analysis_status = "insufficient"
+        analysis_message = "Не удалось определить — в части боёв не хватает данных о результате. Обновите историю после следующего полного боя."
+    elif not insights and not threats:
+        analysis_status = "insufficient"
+        analysis_message = "Не удалось определить — недостаточно полных данных боя для проверки угроз и ответов. Обновите историю после следующего полного боя."
+    else:
+        analysis_status = "ok"
+        analysis_message = None
     return {
         "insights": insights,
         "patterns": patterns,
-        "threats": build_loss_threats(battles, player_tag),
+        "threats": threats,
         "sample_size": len(insights),
         "wins": wins,
         "losses": losses,
+        "analysis_status": analysis_status,
+        "analysis_message": analysis_message,
     }

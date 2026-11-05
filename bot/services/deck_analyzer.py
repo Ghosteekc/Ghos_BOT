@@ -1,4 +1,5 @@
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from bot.services.card_data import (
@@ -42,10 +43,51 @@ class BattleAnalysis:
     matchup_evaluation: MatchupEvaluation
     counter_cards_missing: list[str]
     opponent_threats: list[str]
+    # win/loss/draw/unknown is derived only from supplied crown values.
+    outcome: str = "unknown"
 
 
 def extract_deck(team: dict) -> list[str]:
     return [card["name"] for card in team.get("cards", [])]
+
+
+def battle_outcome(user_team: dict, opponent_team: dict) -> str:
+    """Confirmed result from the battle-log crown values, or ``unknown``."""
+    try:
+        user_crowns = int(user_team["crowns"])
+        opponent_crowns = int(opponent_team["crowns"])
+    except (KeyError, TypeError, ValueError):
+        return "unknown"
+    if user_crowns > opponent_crowns:
+        return "win"
+    if user_crowns < opponent_crowns:
+        return "loss"
+    return "draw"
+
+
+CONFIRMED_BATTLE_OUTCOMES = frozenset({"win", "loss", "draw"})
+
+
+def outcome_totals(outcomes: Iterable[str]) -> dict[str, int]:
+    """Count only explicit battle-log outcomes; unknown never becomes a loss."""
+    counts = {"wins": 0, "losses": 0, "draws": 0, "unknowns": 0}
+    for outcome in outcomes:
+        if outcome == "win":
+            counts["wins"] += 1
+        elif outcome == "loss":
+            counts["losses"] += 1
+        elif outcome == "draw":
+            counts["draws"] += 1
+        else:
+            counts["unknowns"] += 1
+    counts["scored_games"] = counts["wins"] + counts["losses"] + counts["draws"]
+    return counts
+
+
+def outcome_winrate(*, wins: int, losses: int, draws: int) -> float:
+    """Win share among battles with a confirmed outcome (draws count as played)."""
+    scored_games = wins + losses + draws
+    return round(wins / scored_games * 100, 1) if scored_games else 0.0
 
 
 def analyze_deck(cards: list[str]) -> DeckStats:
@@ -98,9 +140,9 @@ def _all_counter_labels(strong: list[str], partial: list[str]) -> str:
 def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
     user_deck = extract_deck(user_team)
     opponent_deck = extract_deck(opponent_team)
-    crowns_user = user_team.get("crowns", 0)
-    crowns_opp = opponent_team.get("crowns", 0)
-    won = crowns_user > crowns_opp
+    outcome = battle_outcome(user_team, opponent_team)
+    won = outcome == "win"
+    lost = outcome == "loss"
     trophy_change = user_team.get("trophyChange", 0)
 
     matchup = evaluate_matchup(user_deck, opponent_deck)
@@ -114,63 +156,50 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
         t_ru = ru(threat)
         if strong:
             labels = _all_counter_labels(strong, partial)
-            if won:
-                reasons.append(f"✅ {t_ru} — контры: {labels}")
-            else:
-                reasons.append(
-                    f"⚠️ {t_ru} — контры есть ({labels}), но не сработали вовремя",
-                )
+            reasons.append(f"Оценка состава: ответы на {t_ru}: {labels}.")
         elif partial:
             missing_counters.extend(partial[:2])
-            if won:
-                reasons.append(
-                    f"🎯 Победа без полной контры на {t_ru} "
-                    f"(частичные: {ru_list(partial, limit=len(partial))})"
-                )
-            else:
-                reasons.append(
-                    f"⚠️ Слабые контры на {t_ru}: "
-                    f"{ru_list(partial, limit=len(partial))}"
-                )
+            reasons.append(
+                f"Оценка состава: частичные ответы на {t_ru}: "
+                f"{ru_list(partial, limit=len(partial))}."
+            )
         else:
             from bot.services.card_matchups import get_matchups
 
             row = get_matchups(threat)
             rec = list(row.counters_strong)[:3] if row else []
             missing_counters.extend(rec[:2])
-            if won:
-                reasons.append(f"🎯 Победа без контры на {t_ru} — сильная игра")
-            else:
-                reasons.append(
-                    f"❌ Нет контры на {t_ru}. Подойдут: {ru_list(rec) if rec else '—'}",
-                )
+            reasons.append(
+                f"Оценка состава: нет сильного ответа на {t_ru}. "
+                f"Подойдут: {ru_list(rec) if rec else '—'}."
+            )
 
     user_stats = analyze_deck(user_deck)
     opp_stats = analyze_deck(opponent_deck)
 
     if user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
-        if not won:
+        if lost:
             reasons.append(
-                f"❌ Ваша колода тяжелее ({user_stats.avg_elixir} против "
-                f"{opp_stats.avg_elixir} эликсира) — соперник быстрее циклил"
+                f"Оценка состава: ваша колода тяжелее ({user_stats.avg_elixir} против "
+                f"{opp_stats.avg_elixir} эликсира), поэтому у соперника потенциально быстрее цикл."
             )
-        else:
-            reasons.append("✅ Выиграли несмотря на более тяжёлую колоду")
+        elif won:
+            reasons.append("Оценка состава: победа получена с более тяжёлой колодой; реальные розыгрыши журнал не показывает.")
 
     if not user_stats.spells and opp_stats.spells:
-        reasons.append("❌ У вас нет заклинаний — сложнее контролировать поле")
+        reasons.append("Оценка состава: без заклинаний обычно сложнее контролировать поле.")
     elif user_stats.spells and not opp_stats.spells:
-        reasons.append("✅ Преимущество в заклинаниях")
+        reasons.append("Оценка состава: у вашей колоды больше инструментов-заклинаний.")
 
     opp_spam = [c for c in opponent_deck if is_spam_card(c)]
-    if not won and opp_spam and not user_stats.splash_coverage:
-        reasons.append("❌ Слабый сплеш — спам соперника сложно зачищать")
+    if lost and opp_spam and not user_stats.splash_coverage:
+        reasons.append("Оценка состава: без сплеша спам соперника мог быть сложной угрозой.")
 
     opp_point = [c for c in opponent_deck if is_point_target_threat(c)]
-    if not won and opp_point and not user_stats.point_target_coverage:
+    if lost and opp_point and not user_stats.point_target_coverage:
         reasons.append(
-            f"❌ Слабый ответ на точечный урон ({ru_list(opp_point[:2])}) — "
-            f"Стражи держат P.E.K.K.A, Хог и подобных",
+            f"Оценка состава: слабее ответ на точечный урон ({ru_list(opp_point[:2])}); "
+            f"Стражи и подобные карты могут помочь против таких юнитов.",
         )
 
     reasons.insert(0, f"📊 Матчап: {matchup_score:.0f}/100 — {matchup.rating}.")
@@ -187,6 +216,7 @@ def analyze_battle(user_team: dict, opponent_team: dict) -> BattleAnalysis:
         matchup_evaluation=matchup,
         counter_cards_missing=list(set(missing_counters)),
         opponent_threats=threats,
+        outcome=outcome,
     )
 
 
@@ -198,7 +228,7 @@ def calculate_deck_winrates(battles: list[dict], player_tag: str) -> dict[str, d
     """
     from bot.services.card_icons import cards_from_team, merge_deck_variants
 
-    deck_results: dict[str, list[bool]] = {}
+    deck_results: dict[str, list[str]] = {}
     deck_variants: dict[str, list[list[dict]]] = {}
     deck_last_seen: dict[str, str] = {}
 
@@ -241,13 +271,12 @@ def calculate_deck_winrates(battles: list[dict], player_tag: str) -> dict[str, d
         if bt and bt >= prev_seen:
             deck_last_seen[deck_key] = bt
 
-        won = team.get("crowns", 0) > opponent.get("crowns", 0)
-        deck_results.setdefault(deck_key, []).append(won)
+        deck_results.setdefault(deck_key, []).append(battle_outcome(team, opponent))
         deck_variants.setdefault(deck_key, []).append(parsed)
 
     winrates = {}
     for deck_key, results in deck_results.items():
-        wins = sum(results)
+        totals = outcome_totals(results)
         total = len(results)
         merged = merge_deck_variants(deck_variants.get(deck_key, []))
         if not merged:
@@ -265,10 +294,17 @@ def calculate_deck_winrates(battles: list[dict], player_tag: str) -> dict[str, d
         winrates[deck_key] = {
             "cards": [c["name"] for c in merged],
             "deck_cards": merged,
-            "wins": wins,
-            "losses": total - wins,
+            "wins": totals["wins"],
+            "losses": totals["losses"],
+            "draws": totals["draws"],
+            "unknowns": totals["unknowns"],
+            "scored_games": totals["scored_games"],
             "total": total,
-            "winrate": round(wins / total * 100, 1) if total else 0,
+            "winrate": outcome_winrate(
+                wins=totals["wins"],
+                losses=totals["losses"],
+                draws=totals["draws"],
+            ),
             "last_seen": deck_last_seen.get(deck_key, ""),
         }
 

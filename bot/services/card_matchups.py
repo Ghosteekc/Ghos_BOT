@@ -138,6 +138,15 @@ def local_counter_available() -> bool:
     return _LOCAL_COUNTER_STATUS.available
 
 
+def local_counter_has_card(card: str) -> bool:
+    """Whether the local counter snapshot has a row for this exact card.
+
+    Callers that need to make a negative claim use this to distinguish an
+    exhausted lookup from a card absent from the project's data.
+    """
+    return card in _LOCAL_COUNTERS
+
+
 def get_matchups(card: str) -> CardMatchups | None:
     return _matchups().get(card)
 

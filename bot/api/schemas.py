@@ -153,13 +153,22 @@ class MetaUpgradePriorityCard(BaseModel):
     meta_win_rate: float | None = None
 
 
+class UpgradeCurrentDeckCard(BaseModel):
+    name: str
+    name_ru: str = ""
+    icon: str = ""
+    level: int | None = None
+    max_level: int | None = None
+
+
 class MetaUpgradeRecommendationsResponse(BaseModel):
     status: str
     message: str | None = None
     arena: int
-    recommended_level: int
+    recommended_level: int | None = None
     updated_at: str | None = None
     sample_note: str = ""
+    current_deck_cards: list[UpgradeCurrentDeckCard] = []
     cards: list[MetaUpgradePriorityCard] = []
 
 
@@ -176,6 +185,7 @@ class BattleSummary(BaseModel):
     opponent_tag: str = ""
     opponent_trophies: int = 0
     won: bool
+    outcome: str = "unknown"  # win | loss | draw | unknown, from crown values only
     trophy_change: int
     matchup_score: float | None = None
     duration: int = 0
@@ -287,6 +297,7 @@ class BattleCoachResponse(BaseModel):
 class BattleDetailResponse(BaseModel):
     index: int
     won: bool
+    outcome: str = "unknown"
     opponent_name: str
     opponent_tag: str = ""
     trophy_change: int
@@ -328,6 +339,7 @@ class OpponentEntry(BaseModel):
     threats: list[str]
     avg_elixir: float
     won_against: bool
+    outcome: str = "unknown"
 
 
 class CounterDeckResponse(BaseModel):
@@ -476,6 +488,9 @@ class StatsDeckEntry(BaseModel):
     cards: list[str]
     total: int
     winrate: float
+    draws: int = 0
+    unknowns: int = 0
+    scored_games: int = 0
 
 
 class StatsResponse(BaseModel):
@@ -483,6 +498,9 @@ class StatsResponse(BaseModel):
     total: int
     wins: int
     losses: int
+    draws: int = 0
+    unknowns: int = 0
+    scored_games: int = 0
     winrate: float
     top_decks: list[StatsDeckEntry]
     top_cards: list[dict]
@@ -495,6 +513,8 @@ class StatsOverviewResponse(BaseModel):
     wins: int
     losses: int
     draws: int = 0
+    unknowns: int = 0
+    scored_games: int = 0
     winrate: float
     avg_elixir: float = 0.0
     max_trophies: int = 0
@@ -527,6 +547,9 @@ class WinrateEntry(BaseModel):
     deck_cards: list[DeckCardInfo] = []
     wins: int
     losses: int
+    draws: int = 0
+    unknowns: int = 0
+    scored_games: int = 0
     total: int
     winrate: float
     last_seen: str | None = None
@@ -772,6 +795,9 @@ class MineDeckStatsResponse(BaseModel):
     cards: list[DeckCardInfo] = []
     wins: int = 0
     losses: int = 0
+    draws: int = 0
+    unknowns: int = 0
+    scored_games: int = 0
     total_games: int = 0
     winrate: float = 0.0
     avg_elixir: float = 0.0
@@ -883,6 +909,7 @@ class HomeResponse(BaseModel):
 
 class LastBattleSummary(BaseModel):
     won: bool
+    outcome: str = "unknown"
     opponent_name: str
     trophy_change: int
     matchup_score: float
@@ -913,6 +940,7 @@ class RandomDeckResponse(BaseModel):
 class BattleInsightEntry(BaseModel):
     battle_index: int
     won: bool
+    outcome: str = "unknown"
     opponent_name: str
     summary: str
     matchup_score: float = 0.0
@@ -924,7 +952,8 @@ class LossThreatInsight(BaseModel):
     card: str
     card_ru: str
     losses: int
-    counter_status: str
+    counter_status: str = "unknown"  # strong | partial | not_found | unknown
+    counter_check_performed: bool = False
     strong_counters: list[str] = []
     partial_counters: list[str] = []
     win_conditions: list[str] = []
@@ -938,6 +967,8 @@ class InsightsResponse(BaseModel):
     sample_size: int = 0
     wins: int = 0
     losses: int = 0
+    analysis_status: str = "ok"  # ok | no_battles | no_losses | insufficient | error
+    analysis_message: str | None = None
 
 
 class SyncResponse(BaseModel):
@@ -1230,7 +1261,17 @@ class MetaLadderResponse(BaseModel):
     status: str
     message: str | None = None
     sample_note: str
+    # ``updated_at`` is the latest confirmed battle in the sample, not the
+    # collector's last attempt.  New fields are optional for older clients.
     updated_at: str | None = None
+    attempted_at: str | None = None
+    collection_status: str = "legacy"
+    # Aggregates are intentionally cumulative. These timestamps are derived
+    # from confirmed battle observations, never from collector attempts.
+    sample_started_at: str | None = None
+    last_battle_at: str | None = None
+    is_cumulative: bool = True
+    sample_origin: str = "ghosteek_observations"
     min_games: int = 0
     decks: list[MetaLadderDeck] = Field(default_factory=list)
     is_pro: bool = True
