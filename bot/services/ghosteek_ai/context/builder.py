@@ -44,22 +44,17 @@ class ContextBuilder:
         cards = _str_list(args.get("cards")) or _str_list(req.get("cards"))
         is_build = str(plan.intent or "") == "build_deck"
         if is_build:
-            # Ядро сборки 1–4 карт — никогда не подменять полной last_deck.
-            if not cards and getattr(conversation, "last_build_core", None):
-                cards = list(conversation.last_build_core)[:4]
-            elif len(cards) >= 8 and getattr(conversation, "last_build_core", None):
+            # A caller may explicitly pass a previous build core for a
+            # follow-up.  Do not fetch one here: bootstrap also serves fresh
+            # requests, where implicit session reuse would be stale context.
+            if len(cards) >= 8 and getattr(conversation, "last_build_core", None):
                 core = list(conversation.last_build_core)[:4]
                 if core and set(core).issubset(set(cards)):
                     cards = core
-        elif len(cards) < 8 and len(conversation.last_deck) >= 8:
-            cards = list(conversation.last_deck)
-
         opp = _str_list(args.get("opponent_cards")) or _str_list(req.get("opponent_cards"))
-        if len(opp) < 8 and len(conversation.last_opponent_deck) >= 8:
-            opp = list(conversation.last_opponent_deck)
 
         battle_index = args.get("battle_index", req.get("battle_index"))
-        if battle_index is None:
+        if battle_index is None and str(plan.intent or "") == "last_battle":
             battle_index = conversation.last_battle_index
 
         followups = [
@@ -68,13 +63,13 @@ class ContextBuilder:
         ]
 
         battle = BattleContext()
-        if conversation.last_battle:
+        if str(plan.intent or "") == "last_battle" and conversation.last_battle:
             battle = BattleContext.from_data(dict(conversation.last_battle))
         if isinstance(battle_index, int):
             battle.battle_index = battle_index
 
         rec = RecommendationContext()
-        if conversation.last_recommendation:
+        if str(plan.intent or "") in {"analyze_deck", "improve_deck"} and conversation.last_recommendation:
             rec.payload = dict(conversation.last_recommendation)
 
         ctx = AIContext(

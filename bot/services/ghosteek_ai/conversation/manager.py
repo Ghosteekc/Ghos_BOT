@@ -22,6 +22,38 @@ from bot.services.ghosteek_ai.models import ConversationMessage, FollowUpEvent
 AiSessionContext = ConversationState
 
 
+def _references_session_deck(message: str, intent: str | None) -> bool:
+    """Return True only for an explicit reference to the prior deck.
+
+    Session data is useful for a real follow-up, but it is not evidence for a
+    fresh game question.  If this narrow check does not match, tools ask for a
+    deck rather than silently analysing stale data.
+    """
+    low = (message or "").lower().replace("ё", "е")
+    deck_refs = (
+        "мою колод",
+        "моя колод",
+        "моей колод",
+        "эту колод",
+        "этой колод",
+        "с этой колод",
+        "в этой колод",
+        "что тут замен",
+        "что здесь замен",
+        "ее улучш",
+        "ею играть",
+    )
+    if any(marker in low for marker in deck_refs):
+        return True
+    if intent == "game_coach":
+        from bot.services.ghosteek_ai.intents import _is_how_to_play_request
+
+        return _is_how_to_play_request(low) and any(
+            marker in low for marker in ("колод", "ею", "этой")
+        )
+    return False
+
+
 def _compact_recommendation(data: dict[str, Any]) -> dict[str, Any]:
     rec = data.get("recommendation")
     if not isinstance(rec, dict):
@@ -43,6 +75,7 @@ def _compact_battle(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "battle_index": data.get("battle_index"),
         "won": data.get("won"),
+        "outcome": data.get("outcome"),
         "opponent_name": data.get("opponent_name"),
         "matchup_score": data.get("matchup_score"),
         "outcome_summary": data.get("outcome_summary"),
@@ -166,20 +199,14 @@ class ConversationManager:
         if session is None:
             return ctx
 
-        cards = ctx.get("cards")
-        if not (isinstance(cards, list) and len([c for c in cards if isinstance(c, str)]) >= 8):
-            if len(session.last_deck) >= 8:
-                ctx["cards"] = list(session.last_deck)
-
-        opp = ctx.get("opponent_cards")
-        if not (isinstance(opp, list) and len([c for c in opp if isinstance(c, str)]) >= 8):
-            if len(session.last_opponent_deck) >= 8:
-                ctx["opponent_cards"] = list(session.last_opponent_deck)
-
+        # Do not turn session snapshots into inputs for a new request.  In
+        # particular, injecting ``last_deck`` before intent detection made a
+        # question such as "чем контрить Голема" look like a request about a
+        # previous deck.  Explicit request payload remains authoritative;
+        # intentional conversational reuse happens below, after intent is
+        # known, in ``apply_followup_enrichment``.
         ctx["session"] = session.to_public()
         ctx["memory"] = session.memory_context()
-        if session.last_replay and "replay" not in ctx:
-            ctx["replay"] = dict(session.last_replay)
         return ctx
 
     @staticmethod
@@ -219,7 +246,10 @@ class ConversationManager:
         cards = list(getattr(detected, "cards", None) or [])
         opponent = list(getattr(detected, "opponent_cards", None) or [])
 
-        if intent in {"improve_deck", "analyze_deck", "matchup", "game_coach"}:
+        if (
+            intent in {"improve_deck", "analyze_deck", "matchup", "game_coach"}
+            and _references_session_deck(message, intent)
+        ):
             if len(cards) < 8 and len(session.last_deck) >= 8:
                 detected.cards = list(session.last_deck)
                 ConversationManager.record_followup(
@@ -324,8 +354,20 @@ class ConversationManager:
             )
             return detected
 
-        # build_deck без карт, но ядро в сессии — добираем ядро (в т.ч. «2 колоды» после сборки).
-        if intent == INTENT_BUILD_DECK and not cards and build_core:
+        # A fresh "собери колоду" must not silently inherit an old core.
+        # Reuse it only when the wording itself is a continuation.
+        if (
+            intent == INTENT_BUILD_DECK
+            and not cards
+            and build_core
+            and (
+                is_build_more_followup(follow_low)
+                or any(
+                    marker in follow_low
+                    for marker in ("с этой", "вокруг нее", "вокруг неё", "с ней")
+                )
+            )
+        ):
             detected.cards = list(build_core)[:4]
             count = parse_build_variant_count(follow_low) or getattr(detected, "build_limit", None)
             if count:

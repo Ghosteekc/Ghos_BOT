@@ -17,6 +17,7 @@ from bot.services.card_icons import (
 )
 from bot.services.card_registry import build_deck_share_link, ensure_cards_loaded
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
+from bot.services.deck_analyzer import battle_outcome, outcome_totals, outcome_winrate
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +107,13 @@ def _latest_ladder_deck_from_battlelog(tag: str, battles: list) -> list[dict]:
     return []
 
 
-def _deck_winrate(tag: str, battles: list, deck_key: frozenset[str]) -> tuple[int, int]:
-    """Wins and losses on the given 8-card deck from recent ladder battles."""
+def _deck_winrate(tag: str, battles: list, deck_key: frozenset[str]) -> tuple[int, int, int]:
+    """Confirmed wins/losses/draws on the given 8-card deck from ladder battles."""
     if len(deck_key) != 8:
-        return 0, 0
+        return 0, 0, 0
 
     tag_norm = normalize_tag(tag)
-    wins = losses = 0
+    outcomes: list[str] = []
 
     for battle in battles:
         team = battle.get("team", [{}])[0]
@@ -127,12 +128,10 @@ def _deck_winrate(tag: str, battles: list, deck_key: frozenset[str]) -> tuple[in
             continue
 
         opponent = battle.get("opponent", [{}])[0]
-        if team.get("crowns", 0) > opponent.get("crowns", 0):
-            wins += 1
-        else:
-            losses += 1
+        outcomes.append(battle_outcome(team, opponent))
 
-    return wins, losses
+    totals = outcome_totals(outcomes)
+    return totals["wins"], totals["losses"], totals["draws"]
 
 
 async def _fetch_path_of_legend_rankings(client: ClashRoyaleClient, limit: int) -> list[dict]:
@@ -165,7 +164,7 @@ async def _build_player_entry(client: ClashRoyaleClient, item: dict) -> dict | N
 
     deck_cards: list[dict] = []
     trophies = 0
-    wins = losses = 0
+    wins = losses = draws = 0
 
     try:
         player, battles = await asyncio.gather(
@@ -181,9 +180,9 @@ async def _build_player_entry(client: ClashRoyaleClient, item: dict) -> dict | N
         if not deck_cards:
             deck_cards = _latest_deck_from_battlelog(tag, battles)
         if deck_cards:
-            wins, losses = _deck_winrate(tag, battles, _deck_key(deck_cards))
+            wins, losses, draws = _deck_winrate(tag, battles, _deck_key(deck_cards))
     except ClashRoyaleAPIError as e:
-        logger.debug("Player data for %s: %s", tag, e)
+        logger.debug("Player data unavailable: status=%s", e.status)
         trophies = int(item.get("eloRating") or 0)
 
     if not deck_cards:
@@ -197,8 +196,8 @@ async def _build_player_entry(client: ClashRoyaleClient, item: dict) -> dict | N
     card_infos = [deck_card_info_from_parsed(c, slot=i) for i, c in enumerate(deck_cards)]
     elixirs = [c["cost"] for c in card_infos if c["cost"]]
     avg = round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0
-    total = wins + losses
-    wr = round(wins / total * 100, 1) if total else 0.0
+    total = wins + losses + draws
+    wr = outcome_winrate(wins=wins, losses=losses, draws=draws)
 
     return {
         "rank": rank,

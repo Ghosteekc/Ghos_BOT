@@ -413,8 +413,6 @@ def _facts_battle(data: dict[str, Any]) -> list[str]:
         _push_fact(facts, "Исход боя: победа")
     elif data.get("won") is False:
         _push_fact(facts, "Исход боя: поражение")
-    if data.get("opponent_name"):
-        _push_fact(facts, f"Соперник: {data.get('opponent_name')}")
     if data.get("matchup_score") is not None:
         _push_fact(facts, f"Оценка матчапа: {data.get('matchup_score')}")
     summary = data.get("outcome_summary")

@@ -51,9 +51,11 @@ class BattleAnalysisTool(BaseTool):
         data: dict[str, Any] = {
             "battle_index": battle_index,
             "won": analysis.won,
+            "outcome": analysis.outcome,
             "opponent_name": analysis.opponent_name,
             "matchup_score": analysis.matchup_score,
             "outcome_summary": analysis.outcome_summary,
+            "evidence_scope": "Подтверждены только составы колод и итог/счёт по коронам; розыгрыши, урон карт и причина исхода не известны.",
             "reasons": analysis.reasons[:6],
             "evaluation_report": (
                 analysis.evaluation_report.to_dict()

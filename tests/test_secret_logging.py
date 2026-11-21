@@ -9,6 +9,7 @@ import unittest
 from contextlib import redirect_stderr
 from types import SimpleNamespace
 
+import bot.config  # Initialise application logging before installing test-only settings.
 from bot.secret_logging import install_secret_redaction
 
 
@@ -79,7 +80,8 @@ class SecretLoggingTests(unittest.TestCase):
 
         log = self.output.getvalue()
         self.assertIn("Database initialization failed", log)
-        self.assertIn("RuntimeError: connection failed", log)
+        self.assertIn("RuntimeError", log)
+        self.assertNotIn("connection failed:", log)
         self.assertIn("test_exception_traceback_preserves_diagnostics", log)
         self.assertNotIn(self.database_url, log)
         self.assertNotIn("db@pass", log)
@@ -120,7 +122,8 @@ class SecretLoggingTests(unittest.TestCase):
                 sys.excepthook(*sys.exc_info())
 
         text = output.getvalue()
-        self.assertIn("RuntimeError: could not connect", text)
+        self.assertIn("RuntimeError", text)
+        self.assertNotIn("could not connect", text)
         self.assertIn("test_uncaught_traceback_is_redacted", text)
         self.assertNotIn(self.database_url, text)
         self.assertNotIn("db%40pass", text)
@@ -145,7 +148,7 @@ class SecretLoggingTests(unittest.TestCase):
             self.logger.exception("Integrity conflict")
         text = self.output.getvalue()
         self.assertIn("ValueError", text)
-        self.assertIn("Key (telegram_id)=([REDACTED]) already exists", text)
+        self.assertNotIn("already exists", text)
         for value in ("987654321", "P0YQ88", "fixture_person"):
             self.assertNotIn(value, text)
 
@@ -161,7 +164,7 @@ class SecretLoggingTests(unittest.TestCase):
         text = AccessFormatter('%(client_addr)s %(request_line)s %(status_code)s', use_colors=False).format(record)
         for value in ("192.0.2.5", "P0YQ88", "initData", "private-message"):
             self.assertNotIn(value, text)
-        self.assertIn("GET /api/players/", text)
+        self.assertIn("GET /[REDACTED]", text)
         self.assertIn("403", text)
         self.assertEqual(record.args[-1], 403)
 
@@ -187,7 +190,8 @@ class SecretLoggingTests(unittest.TestCase):
         self.logger.error("Database write failed: %s", error)
         text = self.output.getvalue()
         self.assertIn("Database write failed", text)
-        self.assertIn("INSERT INTO users", text)
+        self.assertIn("StatementError", text)
+        self.assertNotIn("INSERT INTO users", text)
         self.assertNotIn("987654321", text)
 
     def test_ai_response_body_and_error_context_are_not_logged(self) -> None:
@@ -214,6 +218,38 @@ class SecretLoggingTests(unittest.TestCase):
         self.assertIn("status=400", text)
         self.assertIn("ProviderError: HTTP_ERROR", text)
         self.assertIn("test_ai_response_body", text)
+
+    def test_unknown_exception_messages_and_chains_are_not_logged(self) -> None:
+        secret = "fixture-init-data-and-private-ai-message"
+        try:
+            try:
+                raise ValueError(secret)
+            except ValueError as cause:
+                raise RuntimeError(f"payment fixture-charge-id {secret}") from cause
+        except RuntimeError:
+            self.logger.exception("[E099] request failed")
+        self.logger.warning("upstream error %s", ValueError(secret))
+        text = self.output.getvalue()
+        self.assertNotIn(secret, text)
+        self.assertNotIn("fixture-charge-id", text)
+        self.assertIn("[E099] request failed", text)
+        self.assertIn("RuntimeError", text)
+        self.assertIn("ValueError", text)
+
+    def test_access_log_hides_arbitrary_path_values(self) -> None:
+        from uvicorn.logging import AccessFormatter
+
+        record = logging.getLogRecordFactory()(
+            "uvicorn.access", logging.INFO, __file__, 1,
+            '%s - "%s %s HTTP/%s" %d',
+            ("192.0.2.5:42", "GET", "/api/custom/privatevalue?data=secret", "1.1", 500),
+            None,
+        )
+        text = AccessFormatter('%(request_line)s %(status_code)s', use_colors=False).format(record)
+        self.assertNotIn("privatevalue", text)
+        self.assertNotIn("secret", text)
+        self.assertIn("GET /[REDACTED]", text)
+        self.assertIn("500", text)
 
 
 if __name__ == "__main__":

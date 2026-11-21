@@ -177,7 +177,7 @@ async def get_profile(
         player = await client.get_player(user.player_tag)
         daily_trophy_change = await _daily_trophy_for_user(user)
     except ClashRoyaleAPIError as e:
-        logger.warning(f"Failed to fetch live profile for {user.player_tag}: {e}")
+        logger.warning("Failed to fetch live profile: status=%s", e.status)
         player = None
         daily_trophy_change = await _daily_trophy_for_user(user)
     finally:

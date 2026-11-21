@@ -21,7 +21,7 @@ async def coalesced_battlelog(client: ClashRoyaleClient, player_tag: str) -> lis
     async with _lock:
         task = _inflight.get(tag)
         if task is not None and not task.done():
-            logger.debug("Battlelog coalesce: waiting on in-flight fetch for %s", tag)
+            logger.debug("Battlelog coalesce: waiting on in-flight fetch")
         elif task is not None and task.done():
             _inflight.pop(tag, None)
             task = None

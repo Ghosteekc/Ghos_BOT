@@ -17,6 +17,7 @@ from bot.services.top_players import (
     _deck_winrate,
     _latest_deck_from_battlelog,
 )
+from bot.services.deck_analyzer import battle_outcome, outcome_totals, outcome_winrate
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def _lifetime_winrate(player: dict) -> tuple[float | None, int | None, int | Non
 
 def _recent_ladder_winrate(tag: str, battles: list) -> tuple[float | None, int]:
     tag_norm = normalize_tag(tag)
-    wins = losses = 0
+    outcomes: list[str] = []
     for battle in battles:
         team = battle.get("team", [{}])[0]
         if normalize_tag(team.get("tag") or "") != tag_norm:
@@ -45,14 +46,14 @@ def _recent_ladder_winrate(tag: str, battles: list) -> tuple[float | None, int]:
         if btype in _SKIP_BATTLE_TYPES or btype not in _LADDER_BATTLE_TYPES:
             continue
         opponent = battle.get("opponent", [{}])[0]
-        if team.get("crowns", 0) > opponent.get("crowns", 0):
-            wins += 1
-        else:
-            losses += 1
-    total = wins + losses
+        outcomes.append(battle_outcome(team, opponent))
+    totals = outcome_totals(outcomes)
+    total = totals["scored_games"]
     if total <= 0:
         return None, 0
-    return round(wins / total * 100, 1), total
+    return outcome_winrate(
+        wins=totals["wins"], losses=totals["losses"], draws=totals["draws"],
+    ), total
 
 
 def _arena_icon(arena: dict | None) -> str | None:
@@ -93,7 +94,7 @@ async def build_player_preview(tag: str) -> dict:
         try:
             battles = await client.get_battlelog(normalized)
         except ClashRoyaleAPIError as e:
-            logger.debug("Battlelog unavailable for preview %s: %s", normalized, e)
+            logger.debug("Battlelog unavailable for preview: status=%s", e.status)
             battles = []
     finally:
         await client.close()
@@ -123,10 +124,10 @@ async def build_player_preview(tag: str) -> dict:
         elixirs = [int(c.get("cost") or 0) for c in cards_payload]
         avg_elixir = round(sum(elixirs) / len(elixirs), 1) if elixirs else 0.0
         deck_link = build_deck_share_link(names)
-        wins, losses = _deck_winrate(normalized, battles, _deck_key(deck_cards))
-        deck_games = wins + losses
+        wins, losses, draws = _deck_winrate(normalized, battles, _deck_key(deck_cards))
+        deck_games = wins + losses + draws
         if deck_games:
-            deck_winrate = round(wins / deck_games * 100, 1)
+            deck_winrate = outcome_winrate(wins=wins, losses=losses, draws=draws)
 
     return {
         "player_tag": normalized.replace("#", ""),

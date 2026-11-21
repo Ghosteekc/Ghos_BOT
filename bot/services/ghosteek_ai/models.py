@@ -174,8 +174,9 @@ class ToolResult:
     def to_llm_content(self) -> str:
         """JSON-строка для role=tool content в Chat Completions / Qwen."""
         import json
+        from bot.services.ghosteek_ai.llm.privacy import minimize_model_facts
 
-        return json.dumps(self.to_dict(), ensure_ascii=False)
+        return json.dumps(minimize_model_facts(self.to_dict()), ensure_ascii=False)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ToolResult":

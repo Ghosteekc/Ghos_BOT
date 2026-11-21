@@ -18,8 +18,7 @@ from bot.services.tactical_matchup import TacticalMatchupReport
 
 _DATA_LIMIT_NOTE = (
     "Clash Royale API не отдаёт реплей и таймлайн действий. "
-    "Перелом и альтернатива ниже — по длительности, счёту и дырам в контрах состава, "
-    "без выдуманных ходов боя."
+    "Здесь возможна только гипотеза усиления состава, без выдуманных ходов боя."
 )
 
 
@@ -105,63 +104,10 @@ def _build_turning_point(
     user_elixir: ElixirEfficiencyReport | None,
     opp_elixir: ElixirEfficiencyReport | None,
 ) -> CoachInsight:
-    evidence: list[str] = []
-    if crown_score:
-        evidence.append(f"счёт: {crown_score}")
-    if duration:
-        evidence.append(f"длительность: {duration}с")
-
-    if duration >= 180:
-        profile = ""
-        if user_elixir:
-            profile = user_elixir.elixir_profile
-            evidence.append(f"ваш elixir profile: {profile}")
-        side = "ваше" if won else "соперника"
-        text = (
-            f"Бой ушёл за {duration // 60}:{duration % 60:02d} — перелом вероятнее "
-            f"в фазе дабл-эликсира / овертайма, где реализовалось преимущество {side}."
-        )
-        if profile and "Beatdown" in profile and won:
-            text += f" Профиль «{profile}» сильнее именно в дабле."
-        elif profile and "Cycle" in profile and not won and opp_elixir and "Beatdown" in (
-            opp_elixir.elixir_profile or ""
-        ):
-            text += " Тяжёлая колода соперника набрала силу позже."
-            evidence.append(f"opp profile: {opp_elixir.elixir_profile}")
-        return CoachInsight(
-            title="Переломный момент",
-            text=text,
-            evidence=evidence,
-            confidence="medium",
-        )
-
-    if duration and duration <= 90:
-        return CoachInsight(
-            title="Переломный момент",
-            text=(
-                f"Короткий бой ({duration}с, счёт {crown_score or f'{crowns_user}:{crowns_opp}'}). "
-                "Перелом, скорее всего, случился рано — через быстрый цикл или ошибку на открытии. "
-                "Точный ход API не показывает."
-            ),
-            evidence=evidence,
-            confidence="low",
-        )
-
-    if abs(crowns_user - crowns_opp) >= 2 or (won and crowns_user == 3):
-        return CoachInsight(
-            title="Переломный момент",
-            text=(
-                f"Крупный разрыв по коронам ({crown_score or f'{crowns_user}:{crowns_opp}'}). "
-                "Перелом связан с взятием башни, а не с равным эндшпилем — "
-                "без реплея нельзя назвать секунду."
-            ),
-            evidence=evidence,
-            confidence="medium",
-        )
-
+    _ = (won, duration, crowns_user, crowns_opp, crown_score, user_elixir, opp_elixir)
     return _insufficient(
         "Переломный момент",
-        "По длительности и счёту нельзя надёжно выделить перелом без таймлайна боя.",
+        "Журнал подтверждает только итог, счёт и длительность; без таймлайна нельзя назвать переломный момент или его причину.",
     )
 
 
@@ -182,8 +128,8 @@ def _build_counterfactual(
             continue
         pick = candidates[0] if candidates else partial[0]
         text = (
-            f"Если бы вместо слабого ответа на {_ru(threat)} в колоде был {_ru(pick)}, "
-            f"вероятнее удалось бы стабильнее гасить пуш и "
+            f"Для усиления ответа на {_ru(threat)} можно рассмотреть {_ru(pick)}: "
+            f"по базе контр это потенциально помогло бы стабильнее гасить пуш и "
             + ("удержать башни дольше." if not won else "снизить риск даже при победе.")
         )
         return CoachInsight(

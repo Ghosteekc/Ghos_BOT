@@ -11,7 +11,7 @@ from bot.models.database import BattleCache, User, _is_sqlite
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
 from bot.services.battle_time import battle_time_from_record
 from bot.services.battle_opponent import resolve_opponent_fields
-from bot.services.deck_analyzer import analyze_battle
+from bot.services.deck_analyzer import analyze_battle, battle_outcome, outcome_totals, outcome_winrate
 
 logger = logging.getLogger(__name__)
 
@@ -108,22 +108,22 @@ async def load_pvp_battles(
 
     tag = normalize_tag(player_tag)
     if not bypass_ttl and is_fresh(tag):
-        logger.debug("Skipping CR battlelog for %s (fetched within TTL)", tag)
+        logger.debug("Skipping CR battlelog (fetched within TTL)")
         return None
 
-    logger.debug(f"Loading PvP battles for {player_tag}")
+    logger.debug("Loading PvP battles")
     owns_client = client is None
     client = client or ClashRoyaleClient()
     try:
         battles = await client.get_battlelog(player_tag)
     except ClashRoyaleAPIError:
-        logger.warning(f"Failed to load battles for {player_tag}: API error")
+        logger.warning("Failed to load battles: API error")
         return None
     finally:
         if owns_client:
             await client.close()
     pvp = filter_pvp_battles(battles, player_tag)
-    logger.info(f"Loaded {len(pvp)} PvP battles for {player_tag} from API")
+    logger.info("Loaded %d PvP battles from API", len(pvp))
     return pvp
 
 
@@ -133,14 +133,16 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
 
     battle_time = battle_time_from_record(battle)
     if not battle_time:
-        logger.debug("Skipping battle without battleTime/warTime for %s", player_tag)
+        logger.debug("Skipping battle without battleTime/warTime")
         return None
 
     team = battle.get("team", [{}])[0]
     opponent = battle.get("opponent", [{}])[0]
     team_cards = [c.get("name") for c in team.get("cards", [])]
     opp_cards = [c.get("name") for c in opponent.get("cards", [])]
-    result = "win" if team.get("crowns", 0) > opponent.get("crowns", 0) else "loss"
+    # Keep a draw distinct in the persisted source.  Treating every non-win
+    # as a loss would later turn an equal crown score into a false defeat.
+    result = battle_outcome(team, opponent)
 
     user_deck_json = ""
     try:
@@ -148,13 +150,13 @@ def build_battle_cache_row(battle: dict, player_tag: str) -> dict | None:
         if len(parsed) == 8:
             user_deck_json = serialize_deck_cards(parsed)
     except Exception as exc:
-        logger.debug("Battle deck JSON parse failed for %s: %s", player_tag, exc)
+        logger.debug("Battle deck JSON parse failed: type=%s", type(exc).__name__)
 
     try:
         analysis_obj = analyze_battle(team, opponent)
         analysis_text = "\n".join(analysis_obj.reasons)
     except Exception as exc:
-        logger.debug("Battle analysis error for %s: %s", player_tag, exc)
+        logger.debug("Battle analysis error: type=%s", type(exc).__name__)
         analysis_text = None
 
     opp_name, opp_tag = resolve_opponent_fields(opponent)
@@ -208,6 +210,16 @@ async def _insert_battle_row(session, row: dict) -> bool:
     battle_row = existing.scalar_one_or_none()
     if battle_row is not None:
         updated = False
+        # A current battle-log response is authoritative for this exact
+        # timestamp.  Never infer a draw from an old ``loss`` row, but do
+        # repair it when the official log explicitly supplies one.
+        incoming_result = row.get("result")
+        if (
+            incoming_result in {"win", "loss", "draw"}
+            and battle_row.result != incoming_result
+        ):
+            battle_row.result = incoming_result
+            updated = True
         if row.get("opponent_name") and not (battle_row.opponent_name or "").strip():
             battle_row.opponent_name = row["opponent_name"]
             updated = True
@@ -280,7 +292,7 @@ async def persist_battles(user: User, battles: list) -> int:
     lock = _persist_locks.setdefault(tag, asyncio.Lock())
 
     async with lock:
-        logger.info("Persisting %d battles for %s", len(battles), tag)
+        logger.info("Persisting %d battles", len(battles))
         saved = 0
         async with database.async_session() as session:
             for battle in battles:
@@ -293,7 +305,7 @@ async def persist_battles(user: User, battles: list) -> int:
             if saved or session.dirty:
                 await session.commit()
                 if saved:
-                    logger.info("Saved %d new battles for %s", saved, tag)
+                    logger.info("Saved %d new battles", saved)
 
         return saved
 
@@ -303,6 +315,9 @@ class CachedStats:
     total: int
     wins: int
     losses: int
+    draws: int
+    unknowns: int
+    scored_games: int
     winrate: float
     top_decks: list[dict]
     top_cards: list[tuple[str, int]]
@@ -321,24 +336,37 @@ async def get_cached_stats(player_tag: str) -> CachedStats | None:
         return None
 
     total = len(cached)
-    wins = sum(1 for r in cached if r.result == "win")
-    losses = total - wins
-    wr = round(wins / total * 100, 1) if total else 0.0
+    totals = outcome_totals((r.result for r in cached))
+    wins = totals["wins"]
+    losses = totals["losses"]
+    draws = totals["draws"]
+    unknowns = totals["unknowns"]
+    scored_games = totals["scored_games"]
+    wr = outcome_winrate(wins=wins, losses=losses, draws=draws)
 
     decks: dict[str, dict] = {}
     for r in cached:
         if not r.user_deck:
             continue
-        decks.setdefault(r.user_deck, {"total": 0, "wins": 0})
+        decks.setdefault(r.user_deck, {"total": 0, "outcomes": []})
         decks[r.user_deck]["total"] += 1
-        if r.result == "win":
-            decks[r.user_deck]["wins"] += 1
+        decks[r.user_deck]["outcomes"].append(r.result)
 
     top_decks = []
     for deck_key, data in sorted(decks.items(), key=lambda x: x[1]["total"], reverse=True)[:5]:
         cards = deck_key.split(",")
-        deck_wr = round(data["wins"] / data["total"] * 100, 1) if data["total"] else 0
-        top_decks.append({"cards": cards, "total": data["total"], "winrate": deck_wr})
+        deck_totals = outcome_totals(data["outcomes"])
+        deck_wr = outcome_winrate(
+            wins=deck_totals["wins"],
+            losses=deck_totals["losses"],
+            draws=deck_totals["draws"],
+        )
+        top_decks.append({
+            "cards": cards,
+            "total": data["total"],
+            "winrate": deck_wr,
+            **deck_totals,
+        })
 
     card_counts: dict[str, int] = {}
     for r in cached:
@@ -356,10 +384,13 @@ async def get_cached_stats(player_tag: str) -> CachedStats | None:
                 if loss_streak:
                     break
                 win_streak += 1
-            else:
+            elif r.result == "loss":
                 if win_streak:
                     break
                 loss_streak += 1
+            else:
+                # A draw neither extends nor breaks a win/loss streak.
+                continue
     except Exception:
         pass
 
@@ -367,6 +398,9 @@ async def get_cached_stats(player_tag: str) -> CachedStats | None:
         total=total,
         wins=wins,
         losses=losses,
+        draws=draws,
+        unknowns=unknowns,
+        scored_games=scored_games,
         winrate=wr,
         top_decks=top_decks,
         top_cards=top_cards,
@@ -448,7 +482,7 @@ async def delete_persisted_battles_for_user(user: User) -> int:
         if to_delete:
             await session.execute(delete(BattleCache).where(BattleCache.player_tag == tag))
             await session.commit()
-            logger.info("Deleted %d battle_cache rows for %s (user_id=%s)", to_delete, tag, user.id)
+            logger.info("Deleted %d battle_cache rows", to_delete)
 
     from bot.services.battle_session_cache import clear_user
 

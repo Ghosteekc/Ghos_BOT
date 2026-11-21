@@ -45,7 +45,7 @@ def _redact(text: str) -> str:
 
 
 def _redact_arg(value: object) -> object:
-    if isinstance(value, BaseException) and type(value).__module__.startswith("bot.services.ghosteek_ai"):
+    if isinstance(value, BaseException):
         return _exception_text(type(value), value, None)
     if isinstance(value, str):
         return _redact(value)
@@ -62,8 +62,8 @@ class _RedactingLogRecord(logging.LogRecord):
 
 
 def _exception_text(exc_type: type[BaseException], exc: BaseException, tb: TracebackType | None) -> str:
-    # Provider exceptions can embed full upstream bodies (including echoed user text).
-    # Keep stack locations and a bounded error code, without changing the exception.
+    # Exceptions can contain request bodies, credentials or user identifiers. Never
+    # include exception messages or source lines; retain locations and a safe code.
     current: BaseException | None = exc
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
@@ -71,9 +71,16 @@ def _exception_text(exc_type: type[BaseException], exc: BaseException, tb: Trace
         if type(current).__module__.startswith("bot.services.ghosteek_ai"):
             code = str(getattr(current, "code", ""))
             safe_code = code if re.fullmatch(r"[A-Z_0-9]{1,64}", code) else "UPSTREAM_ERROR"
-            return _redact("".join(traceback.format_tb(tb)) + f"{exc_type.__name__}: {safe_code}")
+            return _redact(_stack_locations(tb) + f"{exc_type.__name__}: {safe_code}")
         current = current.__cause__ or current.__context__
-    return _redact("".join(traceback.format_exception(exc_type, exc, tb)))
+    return _redact(_stack_locations(tb) + exc_type.__name__)
+
+
+def _stack_locations(tb: TracebackType | None) -> str:
+    return "".join(
+        f'  File "{frame.filename}", line {frame.lineno}, in {frame.name}\n'
+        for frame in traceback.extract_tb(tb)
+    )
 
 
 def _safe_record_factory(*args: object, **kwargs: object) -> logging.LogRecord:
@@ -88,7 +95,7 @@ def _safe_record_factory(*args: object, **kwargs: object) -> logging.LogRecord:
     # Query strings may contain initData and identifiers; client IP is unnecessary here.
     if record.name == "uvicorn.access" and isinstance(record.args, tuple) and len(record.args) == 5:
         _, method, path, version, status = record.args
-        record.args = ("[REDACTED]", method, _redact(str(path).partition("?")[0]), version, status)
+        record.args = ("[REDACTED]", method, "/[REDACTED]", version, status)
     if record.exc_info:
         record.exc_text = _exception_text(*record.exc_info).rstrip()
     if record.stack_info:

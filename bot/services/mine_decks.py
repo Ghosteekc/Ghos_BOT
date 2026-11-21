@@ -261,11 +261,8 @@ async def sync_tracked_mine_decks(
                         key=lambda t: (battle_count(t.deck_key), t.last_seen or "", t.id or 0),
                     )
                     logger.info(
-                        "Mine decks: replace %s (battles=%s) with %s for user_id=%s",
-                        victim.deck_key,
+                        "Mine decks: replace slot (battles=%s)",
                         battle_count(victim.deck_key),
-                        key,
-                        user.id,
                     )
                     del by_key[victim.deck_key]
                     await session.delete(victim)
@@ -289,11 +286,7 @@ async def sync_tracked_mine_decks(
                     protected.add(key)
                     return
                 except IntegrityError:
-                    logger.warning(
-                        "Mine decks: duplicate key %s for user_id=%s — updating existing",
-                        key,
-                        user.id,
-                    )
+                    logger.warning("Mine decks: duplicate key — updating existing")
 
                 # Гонка / уже есть в БД — подтянуть и обновить
                 res_existing = await session.execute(
@@ -333,11 +326,7 @@ async def sync_tracked_mine_decks(
             for key, slot in list(by_key.items()):
                 if battle_count(key) > 0 or key in sighting_keys or key in protected:
                     continue
-                logger.info(
-                    "Mine decks: drop never-played slot %s for user_id=%s",
-                    key,
-                    user.id,
-                )
+                logger.info("Mine decks: drop never-played slot")
                 del by_key[key]
                 await session.delete(slot)
             if by_key:
@@ -375,10 +364,7 @@ async def sync_tracked_mine_decks(
             try:
                 await session.commit()
             except IntegrityError:
-                logger.exception(
-                    "Mine decks: commit IntegrityError for user_id=%s — rollback and read-only",
-                    user.id,
-                )
+                logger.exception("Mine decks: commit IntegrityError — rollback and read-only")
                 await session.rollback()
 
             # Перечитать после commit / rollback
@@ -430,5 +416,5 @@ async def clear_tracked_mine_decks_for_user(user_id: int) -> int:
         await session.commit()
         deleted = int(res.rowcount or 0)
         if deleted:
-            logger.info("Cleared %s tracked mine decks for user_id=%s", deleted, user_id)
+            logger.info("Cleared %s tracked mine decks", deleted)
         return deleted

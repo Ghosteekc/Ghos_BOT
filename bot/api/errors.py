@@ -41,7 +41,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Unhandled API error on %s %s", request.method, request.url.path)
+        logger.exception("Unhandled API error: method=%s route=%s", request.method, request.scope.get("route").path if request.scope.get("route") else "unmatched")
         return JSONResponse(
             status_code=500,
             content={"message": DEFAULT_UNAVAILABLE, "code": "E099"},

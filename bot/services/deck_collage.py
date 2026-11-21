@@ -156,13 +156,13 @@ async def _fetch_icon(session: aiohttp.ClientSession, url: str) -> Image.Image |
     try:
         async with session.get(abs_url, timeout=aiohttp.ClientTimeout(total=12)) as resp:
             if resp.status != 200:
-                logger.debug("Icon fetch %s -> %s", abs_url, resp.status)
+                logger.debug("Icon fetch failed: status=%s", resp.status)
                 return None
             data = await resp.read()
         cached.write_bytes(data)
         return Image.open(io.BytesIO(data)).convert("RGBA")
     except Exception as exc:
-        logger.debug("Icon fetch failed %s: %s", abs_url, exc)
+        logger.debug("Icon fetch failed: type=%s", type(exc).__name__)
         return None
 
 

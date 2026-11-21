@@ -10,7 +10,13 @@ from bot.services.card_knowledge import canonical_card_names
 from bot.services.card_matchups import card_counters_target, counters_in_deck
 from bot.services.card_names_ru import card_name_ru
 from bot.services.clash_api import normalize_tag
-from bot.services.deck_analyzer import analyze_deck, extract_deck
+from bot.services.deck_analyzer import (
+    analyze_deck,
+    battle_outcome,
+    extract_deck,
+    outcome_totals,
+    outcome_winrate,
+)
 from bot.services.meta_analyzer import _guess_deck_name
 from bot.services.recommendation_engine import RecommendationEngine
 
@@ -75,27 +81,26 @@ def _filter_battles_for_deck(battles: list[dict], player_tag: str, cards: list[s
 
 def _analyze_opponent_card_matchups(deck_cards: list[str], deck_battles: list[dict]) -> tuple[list[dict], list[dict]]:
     """Cards opponents played that this deck handles well or poorly."""
-    card_stats: dict[str, dict[str, int]] = {}
+    card_stats: dict[str, dict[str, object]] = {}
 
     for battle in deck_battles:
         team = battle.get("team", [{}])[0]
         opponent = battle.get("opponent", [{}])[0]
-        won = team.get("crowns", 0) > opponent.get("crowns", 0)
+        outcome = battle_outcome(team, opponent)
         for card in set(extract_deck(opponent)):
-            stat = card_stats.setdefault(card, {"wins": 0, "total": 0})
-            stat["total"] += 1
-            if won:
-                stat["wins"] += 1
+            stat = card_stats.setdefault(card, {"outcomes": []})
+            stat["outcomes"].append(outcome)
 
     strong: list[dict] = []
     weak: list[dict] = []
 
     for card, stat in card_stats.items():
-        total = stat["total"]
+        totals = outcome_totals(stat["outcomes"])
+        total = totals["scored_games"]
         if total < 2:
             continue
-        wins = stat["wins"]
-        wr = round(wins / total * 100, 1)
+        wins = totals["wins"]
+        wr = outcome_winrate(wins=wins, losses=totals["losses"], draws=totals["draws"])
         counters = _effective_counters(deck_cards, card)
         label = card_name_ru(card, short=True) or card
         skip_advice = _skip_counter_advice(card)
@@ -152,15 +157,18 @@ def build_mine_deck_stats(battles: list[dict], player_tag: str, cards: list[str]
         return {"error": "Нужна полная колода из 8 карт"}
 
     deck_battles = _filter_battles_for_deck(battles, player_tag, cards)
-    wins = 0
+    outcomes: list[str] = []
     for battle in deck_battles:
         team = battle.get("team", [{}])[0]
         opponent = battle.get("opponent", [{}])[0]
-        if team.get("crowns", 0) > opponent.get("crowns", 0):
-            wins += 1
+        outcomes.append(battle_outcome(team, opponent))
     total = len(deck_battles)
-    losses = total - wins
-    winrate = round(wins / total * 100, 1) if total else 0.0
+    totals = outcome_totals(outcomes)
+    wins = totals["wins"]
+    losses = totals["losses"]
+    draws = totals["draws"]
+    unknowns = totals["unknowns"]
+    winrate = outcome_winrate(wins=wins, losses=losses, draws=draws)
 
     stats = analyze_deck(cards)
     strong, weak = _analyze_opponent_card_matchups(cards, deck_battles)
@@ -175,14 +183,17 @@ def build_mine_deck_stats(battles: list[dict], player_tag: str, cards: list[str]
     sample_note = ""
     if total == 0:
         sample_note = "Нет боёв с этой колодой в истории — статистика по матчапам недоступна"
-    elif total < 5:
-        sample_note = f"Мало данных ({total} боёв) — выводы могут быть неточными"
+    elif totals["scored_games"] < 5:
+        sample_note = f"Мало боёв с подтверждённым исходом ({totals['scored_games']}) — выводы могут быть неточными"
 
     return {
         "name": _guess_deck_name(cards),
         "cards": cards,
         "wins": wins,
         "losses": losses,
+        "draws": draws,
+        "unknowns": unknowns,
+        "scored_games": totals["scored_games"],
         "total_games": total,
         "winrate": winrate,
         "avg_elixir": stats.avg_elixir,

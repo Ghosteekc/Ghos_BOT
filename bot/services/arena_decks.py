@@ -388,8 +388,8 @@ async def _scan_player_tv_royale_deck(client: ClashRoyaleClient, tag: str) -> di
 
     cards = [c["name"] for c in parsed]
     key = "|".join(sorted(cards))
-    wins, losses = _deck_winrate(tag, battles, _deck_key(parsed))
-    total = wins + losses
+    wins, losses, draws = _deck_winrate(tag, battles, _deck_key(parsed))
+    total = wins + losses + draws
     return {
         key: {
             "wins": wins,

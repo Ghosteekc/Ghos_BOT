@@ -119,7 +119,7 @@ async def _live_player_arena(
         user.arena_id = arena_id
         await session.commit()
     except ClashRoyaleAPIError:
-        logger.debug("Arena decks: live player fetch failed for %s", user.player_tag)
+        logger.debug("Arena decks: live player fetch failed")
     finally:
         await client.close()
 
@@ -208,7 +208,7 @@ async def _fetch_profile_current_deck(player_tag: str) -> list[dict]:
         player = await client.get_player(player_tag)
         return _cards_from_current_deck(player)
     except ClashRoyaleAPIError:
-        logger.debug("Failed to fetch currentDeck for %s", player_tag)
+        logger.debug("Failed to fetch currentDeck")
         return []
     finally:
         await client.close()
@@ -264,7 +264,7 @@ async def _build_user_deck_entries(battles: list, user: User) -> list[DeckEntry]
             profile_deck=profile_deck,
         )
     except Exception:
-        logger.exception("sync_tracked_mine_decks failed for user_id=%s", user.id)
+        logger.exception("sync_tracked_mine_decks failed")
         rows = []
     decks: list[DeckEntry] = []
     for i, data in enumerate(rows):
@@ -755,7 +755,7 @@ async def deck_winrates(user: User = Depends(require_linked_player)) -> list[Win
             profile_deck=profile_deck,
         )
     except Exception:
-        logger.exception("deck_winrates sync failed for user_id=%s", user.id)
+        logger.exception("deck_winrates sync failed")
         rows = []
     result = []
     for data in rows:
@@ -957,7 +957,7 @@ async def extended_stats(user: User = Depends(require_linked_player)) -> StatsOv
             await client.close()
         is_absolute_champion = bool(build_league_info(player or {}).get("is_absolute_champion"))
     except ClashRoyaleAPIError:
-        logger.debug("Stats league profile fetch failed for %s", user.player_tag)
+        logger.debug("Stats league profile fetch failed")
 
     return _build_stats_overview(
         stats,

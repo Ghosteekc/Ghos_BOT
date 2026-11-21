@@ -277,7 +277,13 @@ async def rebuild_mode_aggregates(session: AsyncSession, mode: str) -> int:
     return len(buckets)
 
 
-async def _save_snapshot(session: AsyncSession, mode: str, source: str) -> None:
+async def _save_snapshot(
+    session: AsyncSession,
+    mode: str,
+    source: str,
+    *,
+    attempt: dict[str, Any],
+) -> None:
     rows = (
         await session.execute(
             select(MetaDeckAggregate)
@@ -291,6 +297,9 @@ async def _save_snapshot(session: AsyncSession, mode: str, source: str) -> None:
         "count": len(rows),
         "hashes": [r.deck_hash for r in rows],
         "games": sum(r.total_games for r in rows),
+        # Snapshot.created_at is an attempt timestamp.  These fields explain
+        # whether that attempt actually brought confirmed game observations.
+        "attempt": attempt,
     }
     session.add(
         MetaSnapshot(
@@ -311,12 +320,15 @@ async def collect_mode(mode: str) -> dict[str, Any]:
     source = "cr_api"
     new_obs = 0
     scanned = 0
+    failed_players = 0
+    rate_limited = False
+    collection_failed = False
     players: list[dict] = []
+    observations: list[dict[str, Any]] = []
     try:
         players = await _players_for_mode(client, mode)
         source = f"cr_api:{mode}:{len(players)}"
         sem = asyncio.Semaphore(concurrency)
-        observations: list[dict[str, Any]] = []
 
         async def fetch_one(item: dict) -> list[dict[str, Any]]:
             tag = item.get("tag") or ""
@@ -326,10 +338,8 @@ async def collect_mode(mode: str) -> dict[str, Any]:
                 try:
                     battles = await client.get_battlelog(tag)
                 except ClashRoyaleAPIError as exc:
-                    if exc.status == 429:
-                        raise
-                    logger.debug("Meta battlelog skip %s: %s", tag, exc)
-                    return []
+                    logger.debug("Meta battlelog skipped: status=%s", exc.status)
+                    raise
             out: list[dict[str, Any]] = []
             for battle in battles:
                 row = observation_from_battle(tag, battle, trophy_min=trophy_min)
@@ -338,13 +348,14 @@ async def collect_mode(mode: str) -> dict[str, Any]:
             return out
 
         results = await asyncio.gather(*[fetch_one(p) for p in players], return_exceptions=True)
-        rate_limited = False
         for result in results:
             if isinstance(result, ClashRoyaleAPIError) and result.status == 429:
                 rate_limited = True
+                failed_players += 1
                 logger.warning("Meta collector hit 429 for mode=%s", mode)
                 continue
             if isinstance(result, Exception):
+                failed_players += 1
                 logger.debug("Meta collector player error: %s", result)
                 continue
             scanned += 1
@@ -355,9 +366,11 @@ async def collect_mode(mode: str) -> dict[str, Any]:
         if exc.status == 429:
             logger.warning("Meta collector ranking 429 mode=%s", mode)
             source = "cr_api:429"
+            rate_limited = True
         else:
             logger.warning("Meta collector failed mode=%s: %s", mode, exc)
             source = f"cr_api:error:{exc.status}"
+            collection_failed = True
     finally:
         await client.close()
 
@@ -367,7 +380,29 @@ async def collect_mode(mode: str) -> dict[str, Any]:
         if observations:
             new_obs = await _insert_observations_safe(session, observations)
         decks = await rebuild_mode_aggregates(session, mode)
-        await _save_snapshot(session, mode, source)
+        if rate_limited:
+            collection_status = "rate_limited"
+        elif collection_failed or failed_players:
+            collection_status = "partial" if scanned else "failed"
+        elif not players:
+            collection_status = "no_data"
+        elif new_obs == 0:
+            collection_status = "no_new_data"
+        else:
+            collection_status = "complete"
+        await _save_snapshot(
+            session,
+            mode,
+            source,
+            attempt={
+                "status": collection_status,
+                "players_requested": len(players),
+                "players_scanned": scanned,
+                "players_failed": failed_players,
+                "observations_seen": len(observations),
+                "new_observations": new_obs,
+            },
+        )
         await session.commit()
 
     logger.info(

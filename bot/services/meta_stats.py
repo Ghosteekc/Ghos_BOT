@@ -54,8 +54,11 @@ def classify_battle_mode(battle: dict) -> str | None:
 
 
 def battle_result(team: dict, opponent: dict) -> str:
-    team_crowns = int(team.get("crowns") or 0)
-    opp_crowns = int(opponent.get("crowns") or 0)
+    try:
+        team_crowns = int(team["crowns"])
+        opp_crowns = int(opponent["crowns"])
+    except (KeyError, TypeError, ValueError):
+        return "unknown"
     if team_crowns > opp_crowns:
         return "win"
     if team_crowns < opp_crowns:

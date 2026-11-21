@@ -75,7 +75,7 @@ async def main() -> None:
             await client.get_cards()
             logger.info("Clash Royale API connection successful")
     except Exception as e:
-        logger.error(f"Failed to connect to Clash Royale API on startup: {e}", exc_info=True)
+        logger.error("Failed to connect to Clash Royale API on startup: type=%s", type(e).__name__, exc_info=True)
         logger.warning("Bot will start, but API calls may fail until the issue is resolved")
 
     bot = Bot(
@@ -97,7 +97,7 @@ async def main() -> None:
             )
             logger.info("Chat menu WebApp button set")
         except Exception as e:
-            logger.warning("Failed to set chat menu WebApp button: %s", e)
+            logger.warning("Failed to set chat menu WebApp button: type=%s", type(e).__name__)
     else:
         logger.warning(
             "Skip chat menu WebApp button: WEBAPP_URL missing or invalid",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from bot.services.card_data import CARD_META
+from bot.services.card_knowledge import canonical_card_names
 from bot.services.card_names_ru import CARD_NAMES_RU, CARD_NAMES_SHORT
 from bot.services.ghosteek_ai.constraints import is_unsupported_request
 from bot.services.ghosteek_ai.knowledge_base import resolve_mechanic_key
@@ -76,7 +76,7 @@ class DetectedIntent:
 def _build_alias_index() -> list[tuple[str, str]]:
     """(alias_lower, english_name), longest first."""
     pairs: dict[str, str] = {}
-    for en in CARD_META:
+    for en in canonical_card_names():
         pairs[en.lower()] = en
     for en, ru in CARD_NAMES_RU.items():
         pairs[ru.lower()] = en

@@ -552,11 +552,8 @@ async def _spool_limited(read: ReadChunk) -> tuple[bytes, Path, int]:
             handle.write(chunk)
             written += len(chunk)
         handle.flush()
-    except ReplayError:
-        handle.close()
-        _unlink_quiet(path)
-        raise
-    except Exception:
+    except BaseException:
+        # Includes cancellation during upload; never leave a partial video behind.
         handle.close()
         _unlink_quiet(path)
         raise

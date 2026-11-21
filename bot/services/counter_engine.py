@@ -14,7 +14,7 @@ from bot.services.card_data import (
 )
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_matchups import card_counters_target, synergy_partners
-from bot.services.deck_analyzer import analyze_deck, extract_deck, find_opponent_threats
+from bot.services.deck_analyzer import battle_outcome, analyze_deck, extract_deck, find_opponent_threats
 from bot.services.deck_improver import improve_player_deck
 
 import logging
@@ -913,7 +913,8 @@ def analyze_opponent_deck_from_battles(battles: list[dict], player_tag: str) -> 
             "user_deck": user_deck,
             "threats": find_opponent_threats(deck),
             "avg_elixir": stats.avg_elixir,
-            "won_against": team.get("crowns", 0) > opponent.get("crowns", 0),
+            "won_against": battle_outcome(team, opponent) == "win",
+            "outcome": battle_outcome(team, opponent),
         })
 
         if len(opponents) >= 10:

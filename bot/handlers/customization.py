@@ -59,7 +59,12 @@ async def opponent_decks(message: Message, user: User) -> None:
 
         lines = ["🎯 <b>Колоды соперников из ваших боёв:</b>\n"]
         for i, opp in enumerate(opponents[:5]):
-            result = "✅ победа" if opp["won_against"] else "❌ поражение"
+            result = {
+                "win": "✅ победа",
+                "loss": "❌ поражение",
+                "draw": "🤝 ничья",
+                "unknown": "❔ итог не подтверждён",
+            }.get(opp.get("outcome"), "✅ победа" if opp["won_against"] else "❌ поражение")
             threats = ", ".join(opp["threats"]) if opp["threats"] else "нет явных WC"
             lines.append(
                 f"<b>#{i + 1}</b> {opp['name']} ({result})\n"

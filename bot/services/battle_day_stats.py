@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Callable
 
 from bot.services.battle_time import battle_day_key, battle_time_from_record, today_key_msk
+from bot.services.deck_analyzer import battle_outcome, outcome_totals, outcome_winrate
 
 _EXCLUDED_BATTLE_TYPES = frozenset({
     "trail",
@@ -123,10 +124,14 @@ def _is_casual_game_mode(battle: dict) -> bool:
     return any(marker in key for marker in casual_markers)
 
 
-def _battle_won(battle: dict) -> bool:
+def _battle_outcome(battle: dict) -> str:
     team = battle.get("team", [{}])[0]
     opponent = battle.get("opponent", [{}])[0]
-    return team.get("crowns", 0) > opponent.get("crowns", 0)
+    return battle_outcome(team, opponent)
+
+
+def _battle_won(battle: dict) -> bool:
+    return _battle_outcome(battle) == "win"
 
 
 def _battle_time(battle: dict) -> str:
@@ -174,10 +179,11 @@ def _build_progress_results(
         delta = _trophy_delta(team, chronological, i)
         if delta is None:
             continue
-        won = _battle_won(battle)
+        outcome = _battle_outcome(battle)
         raw = _battle_time(battle)
         rows_newest_first.append({
-            "won": won,
+            "won": outcome == "win",  # Compatibility for older consumers.
+            "outcome": outcome,
             "trophy_change": delta,
             "opponent_name": opponent.get("name") or "Соперник",
             "played_date": format_battle_played_date(raw),
@@ -229,11 +235,8 @@ def compute_daily_trophy_change(battles: list) -> int | None:
     return total
 
 
-def _daily_winrate(wins: int, losses: int) -> float:
-    total = wins + losses
-    if total <= 0:
-        return 0.0
-    return round(wins / total * 100, 1)
+def _daily_winrate(wins: int, losses: int, draws: int) -> float:
+    return outcome_winrate(wins=wins, losses=losses, draws=draws)
 
 
 def build_winrate_by_day(battles: list, *, days: int = 14) -> list[dict]:
@@ -241,7 +244,7 @@ def build_winrate_by_day(battles: list, *, days: int = 14) -> list[dict]:
 
     Always returns exactly ``days`` rows, including days without battles.
     """
-    by_day: dict[str, dict[str, int]] = {}
+    by_day: dict[str, list[str]] = {}
 
     for battle in battles:
         raw = _battle_time(battle)
@@ -249,25 +252,24 @@ def build_winrate_by_day(battles: list, *, days: int = 14) -> list[dict]:
         if not day_key:
             continue
 
-        won = _battle_won(battle)
-        entry = by_day.setdefault(day_key, {"wins": 0, "losses": 0})
-        if won:
-            entry["wins"] += 1
-        else:
-            entry["losses"] += 1
+        by_day.setdefault(day_key, []).append(_battle_outcome(battle))
 
     today = datetime.strptime(today_key_msk(), "%Y%m%d").date()
     rows: list[dict] = []
     for offset in range(days - 1, -1, -1):
         day_key = (today - timedelta(days=offset)).strftime("%Y%m%d")
-        data = by_day.get(day_key, {"wins": 0, "losses": 0})
+        data = outcome_totals(by_day.get(day_key, []))
         wins = data["wins"]
         losses = data["losses"]
+        draws = data["draws"]
         rows.append({
             "date": datetime.strptime(day_key, "%Y%m%d").strftime("%d.%m"),
             "wins": wins,
             "losses": losses,
-            "winrate": _daily_winrate(wins, losses),
+            "draws": draws,
+            "unknowns": data["unknowns"],
+            "scored_games": data["scored_games"],
+            "winrate": _daily_winrate(wins, losses, draws),
         })
 
     return rows
@@ -278,25 +280,32 @@ def build_most_used_cards(battles: list, player_tag: str, *, limit: int = 6) -> 
     from bot.services.clash_api import normalize_tag
 
     tag_norm = normalize_tag(player_tag)
-    stats: dict[str, dict[str, int]] = {}
+    stats: dict[str, dict[str, object]] = {}
     for battle in battles:
         team = battle.get("team", [{}])[0]
         if team.get("tag") and normalize_tag(team.get("tag", "")) != tag_norm:
             continue
         opponent = battle.get("opponent", [{}])[0]
-        won = team.get("crowns", 0) > opponent.get("crowns", 0)
+        outcome = battle_outcome(team, opponent)
         for card in team.get("cards", []):
             name = card.get("name")
             if not name:
                 continue
-            entry = stats.setdefault(name, {"count": 0, "wins": 0})
+            entry = stats.setdefault(name, {"count": 0, "outcomes": []})
             entry["count"] += 1
-            if won:
-                entry["wins"] += 1
+            entry["outcomes"].append(outcome)
 
     rows: list[dict] = []
     for name, data in sorted(stats.items(), key=lambda item: item[1]["count"], reverse=True)[:limit]:
-        count = data["count"]
-        winrate = round(data["wins"] / count * 100, 1) if count else 0.0
-        rows.append({"name": name, "count": count, "winrate": winrate})
+        count = int(data["count"])
+        totals = outcome_totals(data["outcomes"])
+        winrate = outcome_winrate(
+            wins=totals["wins"], losses=totals["losses"], draws=totals["draws"],
+        )
+        rows.append({
+            "name": name,
+            "count": count,
+            "scored_games": totals["scored_games"],
+            "winrate": winrate,
+        })
     return rows

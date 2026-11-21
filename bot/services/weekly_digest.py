@@ -26,7 +26,12 @@ from bot.services.battle_time import battle_day_key, now_msk
 from bot.services.card_data import get_card_elixir
 from bot.services.card_registry import ensure_cards_loaded
 from bot.services.clash_api import ClashRoyaleClient, normalize_tag
-from bot.services.deck_analyzer import calculate_deck_winrates
+from bot.services.deck_analyzer import (
+    battle_outcome,
+    calculate_deck_winrates,
+    outcome_totals,
+    outcome_winrate,
+)
 from bot.services.deck_collage import render_deck_collage
 from bot.services.league_info import build_league_info
 
@@ -68,6 +73,9 @@ class WeekStats:
     form_note: str
     league_trophy_delta: int = 0
     include_league_trophies: bool = False
+    draws: int = 0
+    unknowns: int = 0
+    scored_games: int = 0
 
 
 def iso_week_key(d: date) -> str:
@@ -157,10 +165,10 @@ def seconds_until_digest_wake(now: datetime | None = None) -> float:
     return max(30.0, (target - now).total_seconds())
 
 
-def _best_win_streak(results: list[bool]) -> int:
+def _best_win_streak(results: list[str]) -> int:
     best = cur = 0
-    for won in results:
-        if won:
+    for outcome in results:
+        if outcome == "win":
             cur += 1
             best = max(best, cur)
         else:
@@ -217,7 +225,7 @@ def build_week_stats(
         return None
 
     tag = normalize_tag(player_tag)
-    results: list[bool] = []
+    results: list[str] = []
     trophy_delta = 0
     league_trophy_delta = 0
     day_wins: dict[str, int] = {}
@@ -229,11 +237,8 @@ def build_week_stats(
         team_tag = team.get("tag") or ""
         if team_tag and normalize_tag(team_tag) != tag:
             continue
-        won = int(team.get("crowns") or 0) > int(opp.get("crowns") or 0)
-        # Cache stubs use result via crowns in row_to_battle_dict
-        if b.get("type") == "cached" and "result" not in team:
-            pass
-        results.append(won)
+        outcome = battle_outcome(team, opp)
+        results.append(outcome)
         tc = team.get("trophyChange")
         if tc is None:
             tc = b.get("trophy_change")
@@ -249,15 +254,19 @@ def build_week_stats(
         day = battle_day_key(str(b.get("battleTime") or ""))
         if day:
             day_total[day] = day_total.get(day, 0) + 1
-            if won:
+            if outcome == "win":
                 day_wins[day] = day_wins.get(day, 0) + 1
 
     total = len(results)
     if total == 0:
         return None
-    wins = sum(1 for r in results if r)
-    losses = total - wins
-    winrate = round(wins / total * 100, 1)
+    totals = outcome_totals(results)
+    wins = totals["wins"]
+    losses = totals["losses"]
+    draws = totals["draws"]
+    unknowns = totals["unknowns"]
+    scored_games = totals["scored_games"]
+    winrate = outcome_winrate(wins=wins, losses=losses, draws=draws)
 
     best_day_name = None
     best_day_wins = 0
@@ -282,8 +291,9 @@ def build_week_stats(
         best_deck = ranked[0] if ranked else None
 
     share = 0.0
-    if best_deck and total:
-        share = round(100.0 * int(best_deck.get("total") or 0) / total, 0)
+    deck_sample_total = sum(int(deck.get("total") or 0) for deck in winrates.values())
+    if best_deck and deck_sample_total:
+        share = round(100.0 * int(best_deck.get("total") or 0) / deck_sample_total, 0)
 
     return WeekStats(
         week_key=window.week_key,
@@ -292,6 +302,9 @@ def build_week_stats(
         total=total,
         wins=wins,
         losses=losses,
+        draws=draws,
+        unknowns=unknowns,
+        scored_games=scored_games,
         winrate=winrate,
         trophy_delta=trophy_delta,
         best_streak=_best_win_streak(results),
@@ -299,7 +312,11 @@ def build_week_stats(
         best_day_wins=best_day_wins,
         best_deck=best_deck,
         best_deck_share=share,
-        form_note=_form_note(winrate, total),
+        form_note=(
+            _form_note(winrate, scored_games)
+            if scored_games
+            else "Нет боёв с подтверждённым исходом — винрейт за неделю не рассчитывается."
+        ),
         league_trophy_delta=league_trophy_delta,
     )
 
@@ -522,7 +539,8 @@ def format_digest_caption(stats: WeekStats, player_name: str | None = None) -> s
         f"⚔️ Матчи: {stats.total}",
         f"🟢 Победы: {stats.wins}",
         f"🔴 Поражения: {stats.losses}",
-        f"📈 Винрейт: {_format_percent(stats.winrate)}%",
+        f"🤝 Ничьи: {stats.draws}",
+        f"📈 Винрейт: {_format_percent(stats.winrate)}% ({stats.scored_games} боёв с подтверждённым исходом)",
         "",
         f"🏆 Кубки: {_format_trophy(stats.trophy_delta)}",
         *(
@@ -532,10 +550,19 @@ def format_digest_caption(stats: WeekStats, player_name: str | None = None) -> s
         ),
         f"🔥 Серия побед: {stats.best_streak}",
     ]
+    if stats.unknowns:
+        lines.append(f"❔ Исход не подтверждён: {stats.unknowns}")
     if stats.best_day_name and stats.best_day_wins:
         lines.append(
             f"📅 Лучший день: {stats.best_day_name} — {stats.best_day_wins} побед"
         )
+
+    if stats.best_deck:
+        lines.extend([
+            "",
+            "🃏 Колода недели: сначала учитывается число боёв (до 12), затем винрейт и число боёв.",
+            "Доля — среди учтённых боёв недели с полной колодой; ничьи входят в расчёт винрейта.",
+        ])
 
     lines.extend(["", f"💬 {stats.form_note}"])
     # player_name reserved for future personalization; keep signature stable

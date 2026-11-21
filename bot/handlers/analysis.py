@@ -6,7 +6,13 @@ from bot.keyboards.menus import battle_select_keyboard
 from bot.models.database import User
 from bot.services.battle_service import filter_pvp_battles, persist_battles
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient, normalize_tag
-from bot.services.deck_analyzer import analyze_battle, analyze_deck, calculate_deck_winrates
+from bot.services.deck_analyzer import (
+    analyze_battle,
+    analyze_deck,
+    calculate_deck_winrates,
+    outcome_totals,
+    outcome_winrate,
+)
 from bot.services.deck_analyzer import get_most_played_cards
 from bot.user_errors import log_error, user_message, user_message_plain
 from aiogram.filters import Command
@@ -71,11 +77,11 @@ async def analyze_battles(message: Message, user: User) -> None:
 
     if cached:
         total = len(cached)
-        wins = sum(1 for r in cached if r.result == "win")
-        losses = total - wins
-        wr = round(wins / total * 100, 1) if total else 0
+        totals = outcome_totals((r.result for r in cached))
+        wins, losses, draws = totals["wins"], totals["losses"], totals["draws"]
+        wr = outcome_winrate(wins=wins, losses=losses, draws=draws)
         await message.answer(
-            f"Найдено {len(battles)} последних боёв. По сохранённым данным: {total} боёв — {wins}W/{losses}L (винрейт {wr}%).\nВыберите бой для подробного анализа:",
+            f"Найдено {len(battles)} последних боёв. По сохранённым данным: {total} боёв — {wins}W/{draws}D/{losses}L (винрейт {wr}%).\nВыберите бой для подробного анализа:",
             reply_markup=battle_select_keyboard(len(battles)),
         )
     else:
@@ -103,7 +109,12 @@ async def battle_detail(callback: CallbackQuery, user: User) -> None:
         user_stats = analyze_deck(analysis.user_deck)
         opp_stats = analyze_deck(analysis.opponent_deck)
 
-        result_emoji = "🏆 Победа" if analysis.won else "💔 Поражение"
+        result_emoji = {
+            "win": "🏆 Победа",
+            "loss": "💔 Поражение",
+            "draw": "🤝 Ничья",
+            "unknown": "❔ Итог не подтверждён",
+        }[analysis.outcome]
         reasons_text = "\n".join(analysis.reasons)
 
         text = (
@@ -114,7 +125,9 @@ async def battle_detail(callback: CallbackQuery, user: User) -> None:
             f"{', '.join(analysis.user_deck)}\n\n"
             f"<b>Колода соперника</b> ({opp_stats.avg_elixir} ⚗️):\n"
             f"{', '.join(analysis.opponent_deck)}\n\n"
-            f"<b>Анализ:</b>\n{reasons_text}"
+            "<b>Оценка состава колод:</b>\n"
+            "Журнал не содержит розыгрышей, урона карт и причин исхода.\n"
+            f"{reasons_text}"
         )
 
         if analysis.opponent_threats:
@@ -152,7 +165,7 @@ async def deck_winrates(message: Message, user: User) -> None:
             emoji = "🟢" if wr >= 55 else "🟡" if wr >= 45 else "🔴"
             cards_short = ", ".join(data["cards"][:4]) + "..."
             lines.append(
-                f"{emoji} <b>{wr}%</b> ({data['wins']}W/{data['losses']}L)\n"
+                f"{emoji} <b>{wr}%</b> ({data['wins']}W/{data.get('draws', 0)}D/{data['losses']}L)\n"
                 f"   {cards_short}\n"
             )
 
@@ -183,9 +196,9 @@ async def cmd_stats(message: Message, user: User) -> None:
 
     try:
         total = len(cached)
-        wins = sum(1 for r in cached if r.result == "win")
-        losses = total - wins
-        wr = round(wins / total * 100, 1) if total else 0
+        totals = outcome_totals((r.result for r in cached))
+        wins, losses, draws = totals["wins"], totals["losses"], totals["draws"]
+        wr = outcome_winrate(wins=wins, losses=losses, draws=draws)
 
         # Top decks
         decks = {}
@@ -193,10 +206,9 @@ async def cmd_stats(message: Message, user: User) -> None:
             key = r.user_deck
             if not key:
                 continue
-            decks.setdefault(key, {"total": 0, "wins": 0})
+            decks.setdefault(key, {"total": 0, "outcomes": []})
             decks[key]["total"] += 1
-            if r.result == "win":
-                decks[key]["wins"] += 1
+            decks[key]["outcomes"].append(r.result)
 
         sorted_decks = sorted(decks.items(), key=lambda x: x[1]["total"], reverse=True)[:5]
 
@@ -212,14 +224,22 @@ async def cmd_stats(message: Message, user: User) -> None:
 
         lines = [
             f"📊 Расширенная статистика для {user.player_tag}",
-            f"Всего боёв: {total} — Побед: {wins} / Поражений: {losses} (винрейт {wr}%)",
+            f"Всего боёв: {total} — Побед: {wins} / Ничьих: {draws} / Поражений: {losses} (винрейт {wr}%)",
             "",
             "Топ колод (примерно):",
         ]
         for deck_key, data in sorted_decks:
             cards = deck_key.split(",")
-            wrd = round(data["wins"] / data["total"] * 100, 1) if data["total"] else 0
-            lines.append(f"• {', '.join(cards[:6])} — {data['total']} игр, {wrd}%")
+            deck_totals = outcome_totals(data["outcomes"])
+            wrd = outcome_winrate(
+                wins=deck_totals["wins"],
+                losses=deck_totals["losses"],
+                draws=deck_totals["draws"],
+            )
+            lines.append(
+                f"• {', '.join(cards[:6])} — {data['total']} игр, "
+                f"{deck_totals['wins']}W/{deck_totals['draws']}D/{deck_totals['losses']}L, {wrd}%"
+            )
 
         lines.append("")
         lines.append("Часто используемые карты:")
@@ -238,12 +258,15 @@ async def cmd_stats(message: Message, user: User) -> None:
                         last_win = True
                     else:
                         break
-                else:
+                elif r.result == "loss":
                     if last_win is None:
                         last_win = False
                         streak = -1
                     else:
                         break
+                else:
+                    # A draw/unknown result is not a loss streak.
+                    break
             if streak > 0:
                 lines.append("")
                 lines.append(f"Текущая серия побед: {streak}")

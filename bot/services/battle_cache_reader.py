@@ -29,7 +29,14 @@ def row_to_battle_dict(row: BattleCache, player_tag: str) -> dict:
     else:
         user_cards = [{"name": c} for c in (row.user_deck or "").split(",") if c]
     opp_cards = [{"name": c} for c in (row.opponent_deck or "").split(",") if c]
-    won = row.result == "win"
+    result = (row.result or "unknown").strip().lower()
+    won = result == "win"
+    lost = result == "loss"
+    # Old cache rows only stored win/loss, while newer rows preserve a draw.
+    # Unknown rows must not be reconstructed as a made-up loss either.
+    user_crowns, opponent_crowns = (
+        (3, 1) if won else (1, 3) if lost else (0, 0)
+    )
     tag = normalize_tag(player_tag)
     opp_name = (row.opponent_name or "").strip() or "Соперник"
     opp_tag = normalize_tag(row.opponent_tag or "")
@@ -45,14 +52,14 @@ def row_to_battle_dict(row: BattleCache, player_tag: str) -> dict:
         "team": [{
             "tag": tag,
             "name": "Вы",
-            "crowns": 3 if won else 1,
+            "crowns": user_crowns,
             "trophyChange": int(trophy_change) if trophy_change is not None else 0,
             "cards": user_cards,
         }],
         "opponent": [{
             "tag": opp_tag,
             "name": opp_name,
-            "crowns": 1 if won else 3,
+            "crowns": opponent_crowns,
             "cards": opp_cards,
         }],
     }

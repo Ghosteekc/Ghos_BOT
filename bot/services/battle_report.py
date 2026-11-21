@@ -11,7 +11,6 @@ from bot.services.card_data import (
     get_card_elixir,
     has_point_target_answer,
     is_point_target_threat,
-    is_pure_spell,
     is_spam_card,
 )
 from bot.services.card_matchups import counters_in_deck
@@ -114,24 +113,6 @@ class EnhancedBattleAnalysis(BattleAnalysis):
     battle_coach: BattleCoachReport | None = None
     evaluation_report: object | None = None  # EvaluationReport — оценка колоды игрока
 
-def _generic_counters(threat: str) -> list[str]:
-    from bot.services.card_data import card_is_flying
-
-    if threat in AIR_CARDS or card_is_flying(threat):
-        return ["Inferno Tower", "Musketeer", "Inferno Dragon", "Wizard"]
-    if is_spam_card(threat) or threat in {
-        "Skeleton King", "Skeleton Barrel", "Royal Recruits", "Goblin Hut", "Furnace",
-    }:
-        return ["Wizard", "Baby Dragon", "Valkyrie", "Executioner", "Arrows", "The Log", "Bowler"]
-    if is_point_target_threat(threat):
-        return list(POINT_TARGET_COUNTERS) + ["Inferno Tower", "Tesla"]
-    if card_has_role(threat, "building") or threat in CHIP_CARDS:
-        return ["Earthquake", "Rocket", "Miner", "Royal Giant"]
-    if is_pure_spell(threat):
-        return []
-    return ["Knight", "Valkyrie", "Mini P.E.K.K.A", "Inferno Tower", "Tornado"]
-
-
 def _counter_list(threat: str) -> list[str]:
     """Canonical counter list from the shared Local counter database-backed resolver."""
     from bot.services.card_knowledge import canonical_card_names
@@ -157,14 +138,12 @@ def _available_counter_labels(strong: list[str], partial: list[str]) -> str:
     return "; ".join(sections)
 
 
-def _damage_score(
+def _tower_pressure_score(
     card: str,
     *,
-    is_winner: bool,
-    crowns: int,
     deck: list[str],
 ) -> float:
-    """Оценка вероятного урона по башням.
+    """Potential tower pressure from deck roles, never recorded damage.
 
     Приоритет: win-condition → тяжёлые танки → chip-support (Princess) →
     mini-tank / DPS → big-spell. Малые спеллы и Ice Golem не угроза башням.
@@ -188,10 +167,11 @@ def _damage_score(
     elif card_has_role(card, "dps") and get_card_elixir(card) >= 4:
         score += 6.5
     elif card in TOWER_SPELLS:
-        score += 5.0 + 0.5 * min(crowns, 3)
+        score += 5.0
 
     synergies = deck
-    # Air-support за beatdown-танком — реальная угроза башням (не «просто сплеш»).
+    # Air-support за beatdown-танком — потенциальное давление на башню
+    # по составу (не «просто сплеш»).
     if card in _BEATDOWN_AIR_SUPPORT and (set(synergies) & _BEATDOWN_TANKS):
         score = max(score, 8.2)
 
@@ -212,19 +192,13 @@ def _damage_score(
     ):
         score += 0.8
 
-    if is_winner:
-        score += 1.5
-
     return score
 
 
-def _rank_damage_dealers(
+def _rank_tower_pressure_options(
     deck: list[str],
-    *,
-    is_winner: bool,
-    crowns: int,
 ) -> list[tuple[str, float]]:
-    ranked = [(c, _damage_score(c, is_winner=is_winner, crowns=crowns, deck=deck)) for c in deck]
+    ranked = [(c, _tower_pressure_score(c, deck=deck)) for c in deck]
     ranked.sort(key=lambda x: (-x[1], x[0]))
     return ranked
 
@@ -281,15 +255,13 @@ def _point_target_in_deck(deck: list[str]) -> list[str]:
 
 def _build_outcome_summary(
     *,
-    won: bool,
+    outcome: str,
     user_deck: list[str],
     opp_deck: list[str],
     threats: list[str],
     matchup_score: float,
     user_stats,
     opp_stats,
-    crowns_user: int,
-    crowns_opp: int,
     duration: int,
     user_top: str | None,
     opp_top: str | None,
@@ -298,68 +270,70 @@ def _build_outcome_summary(
     user_top_ru = card_name_ru(user_top) if user_top else ""
     opp_top_ru = card_name_ru(opp_top) if opp_top else ""
 
-    if not won and missing_threat:
+    if outcome == "unknown":
+        return "Итог боя по коронам не подтверждён. Ниже — только оценка состава колод."
+
+    result = {"win": "Победа по коронам.", "loss": "Поражение по коронам.", "draw": "Ничья по коронам."}[outcome]
+
+    if outcome == "loss" and missing_threat:
         counters = [c for c in _counter_list(missing_threat) if c not in user_deck]
         hint = ", ".join(card_name_ru(c) for c in counters[:3]) if counters else "усилить защиту"
         return (
-            f"Поражение: «{card_name_ru(missing_threat)}» соперника не была нейтрализована. "
-            f"Рекомендуемая контра: {hint}."
+            f"{result} По составу колод «{card_name_ru(missing_threat)}» — потенциальная угроза, "
+            f"а сильного ответа не видно. Варианты контры: {hint}."
         )
 
     opp_air = _air_in_deck(opp_deck)
-    if not won and opp_air and not user_stats.air_coverage:
+    if outcome == "loss" and opp_air and not user_stats.air_coverage:
         air_ru = ", ".join(card_name_ru(c) for c in opp_air[:2])
-        return f"Поражение: не хватило защиты от воздуха ({air_ru})."
+        return f"{result} По составу колод защита от воздуха слабее против: {air_ru}."
 
-    if not won and _swarm_in_deck(opp_deck) and not user_stats.splash_coverage:
-        return "Поражение: слабый сплеш — спам соперника добил по башням."
+    if outcome == "loss" and _swarm_in_deck(opp_deck) and not user_stats.splash_coverage:
+        return f"{result} По составу колод без сплеша спам соперника мог быть сложной угрозой."
 
     opp_point = _point_target_in_deck(opp_deck)
-    if not won and opp_point and not has_point_target_answer(user_deck):
+    if outcome == "loss" and opp_point and not has_point_target_answer(user_deck):
         pt_ru = ", ".join(card_name_ru(c) for c in opp_point[:2])
         return (
-            f"Поражение: слабый ответ на точечный урон ({pt_ru}) — "
-            f"Стражи и подобные карты держат таких юнитов лучше сплеша."
+            f"{result} По составу колод слабее ответ на точечный урон ({pt_ru}). "
+            "Стражи и подобные карты могут быть лучшим ответом."
         )
 
-    if not won and user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
+    if outcome == "loss" and user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
         return (
-            f"Поражение: колода слишком тяжёлая ({user_stats.avg_elixir} эл.), "
-            f"соперник быстрее циклил ({opp_stats.avg_elixir} эл.)."
+            f"{result} По составу ваша колода тяжелее ({user_stats.avg_elixir} эл. против "
+            f"{opp_stats.avg_elixir}), поэтому у соперника потенциально быстрее цикл."
         )
 
-    if not won and not user_stats.spells and opp_stats.spells:
-        return "Поражение: у соперника было преимущество в заклинаниях."
+    if outcome == "loss" and not user_stats.spells and opp_stats.spells:
+        return f"{result} По составу у соперника больше инструментов-заклинаний."
 
-    if not won and matchup_score >= 61 and opp_top_ru:
+    if outcome == "loss" and matchup_score >= 61 and opp_top_ru:
         return (
-            f"Поражение: сложный матчап ({matchup_score:.0f}/100, {rating_for(round(matchup_score))}). "
-            f"Ключевая угроза — «{opp_top_ru}»."
+            f"{result} Оценка матчапа: {matchup_score:.0f}/100, {rating_for(round(matchup_score))}. "
+            f"Потенциальная угроза по составу — «{opp_top_ru}»."
         )
 
-    if not won and opp_top_ru:
-        return f"Поражение: «{opp_top_ru}» соперника, вероятно, нанесла больше всего урона башням."
+    if outcome == "loss" and opp_top_ru:
+        return f"{result} По составу «{opp_top_ru}» — потенциальный источник давления на башню."
 
-    if won and matchup_score <= 40 and threats:
+    if outcome == "win" and matchup_score <= 40 and threats:
         threat_ru = card_name_ru(threats[0])
         return (
-            f"Победа: лёгкий матчап ({matchup_score:.0f}/100, "
-            f"{rating_for(round(matchup_score))}), удалось контрить «{threat_ru}»."
+            f"{result} Оценка матчапа: {matchup_score:.0f}/100, "
+            f"{rating_for(round(matchup_score))}; «{threat_ru}» была потенциальной угрозой."
         )
 
-    if won and user_stats.spells and not opp_stats.spells:
-        return "Победа: контроль поля заклинаниями и давление по башням."
+    if outcome == "win" and user_stats.spells and not opp_stats.spells:
+        return f"{result} По составу у вашей колоды больше инструментов-заклинаний."
 
-    if won and duration and duration <= 120 and user_stats.avg_elixir < opp_stats.avg_elixir:
-        return "Победа: быстрый цикл — легкая колода успела чаще давить по башням."
+    if outcome == "win" and duration and duration <= 120 and user_stats.avg_elixir < opp_stats.avg_elixir:
+        return f"{result} По составу у вашей более лёгкой колоды потенциал более быстрого цикла."
 
-    if won and crowns_user == 3 and user_top_ru:
-        return f"Победа: «{user_top_ru}» — главный источник урона башням (разгром {crowns_user}:{crowns_opp})."
+    if user_top_ru:
+        return f"{result} По составу «{user_top_ru}» — потенциальный источник давления на башню."
 
-    if won and user_top_ru:
-        return f"Победа: «{user_top_ru}» вероятнее всего добила больше всего урона башням."
-
-    return "Победа — колода реализовала преимущество." if won else "Поражение — соперник лучше реализовал колоду."
+    return f"{result} Оценка состава колод доступна ниже; журнал не содержит розыгрышей и урона карт."
 
 
 def _build_reasons(
@@ -379,6 +353,8 @@ def _build_reasons(
     key cards / low impact / эликсир (они уже в своих блоках).
     """
     reasons: list[str] = [outcome_summary]
+    if len(analysis.user_deck) < 8 or len(analysis.opponent_deck) < 8:
+        return reasons
 
     if not compact:
         reasons.append(
@@ -395,29 +371,25 @@ def _build_reasons(
 
         if user_top:
             reasons.append(
-                f"Ваша ключевая карта по урону башням (оценка): «{card_name_ru(user_top)}»."
+                f"По составу: «{card_name_ru(user_top)}» — потенциальное давление на башню."
             )
         if opp_top:
             reasons.append(
-                f"Ключевая карта соперника по урону башням (оценка): «{card_name_ru(opp_top)}»."
+                f"По составу: «{card_name_ru(opp_top)}» — потенциальное давление соперника на башню."
             )
 
     for threat in analysis.opponent_threats:
         strong, partial = counters_in_deck(threat, analysis.user_deck)
         if strong or partial:
             labels = _available_counter_labels(strong, partial)
-            if analysis.won:
-                reasons.append(f"Контры на «{card_name_ru(threat)}»: {labels}.")
-            else:
-                reasons.append(
-                    f"Контры на «{card_name_ru(threat)}» были ({labels}), "
-                    f"но сыграл слабо или не вовремя."
-                )
+            reasons.append(
+                f"По составу: ответы на «{card_name_ru(threat)}»: {labels}."
+            )
         else:
             counters = _counter_list(threat)
             rec = ", ".join(card_name_ru(c) for c in counters[:3])
             reasons.append(
-                f"Нет счётчика на «{card_name_ru(threat)}». Рекомендуется: {rec}."
+                f"По составу нет сильного ответа на «{card_name_ru(threat)}». Рекомендуется: {rec}."
             )
 
     if not compact:
@@ -425,10 +397,10 @@ def _build_reasons(
         opp_stats = analyze_deck(analysis.opponent_deck)
 
         if user_stats.avg_elixir > opp_stats.avg_elixir + 1.0:
-            if not analysis.won:
+            if analysis.outcome == "loss":
                 reasons.append(
                     f"Средний эликсир выше ({user_stats.avg_elixir} против {opp_stats.avg_elixir}) — "
-                    f"соперник чаще успевал атаковать."
+                    "у соперника потенциально быстрее цикл."
                 )
         if not user_stats.spells and opp_stats.spells:
             reasons.append("В колоде нет заклинаний — сложнее добивать башни и контрить поле.")
@@ -436,7 +408,7 @@ def _build_reasons(
         if low_impact:
             names = ", ".join(c.name_ru for c in low_impact[:3])
             reasons.append(
-                f"Мало влияли на исход (оценка по колоде): {names}."
+                f"Не ключевые для этого матчапа по составу колод: {names}."
             )
 
     return reasons
@@ -466,12 +438,13 @@ def analyze_battle_enhanced(
     base = analyze_battle(user_team, opponent_team)
     user_deck = base.user_deck
     opp_deck = base.opponent_deck
+    decks_complete = len(user_deck) == 8 and len(opp_deck) == 8
     crowns_user = user_team.get("crowns", 0)
     crowns_opp = opponent_team.get("crowns", 0)
-    crown_score = f"{crowns_user}:{crowns_opp}"
+    crown_score = f"{crowns_user}:{crowns_opp}" if base.outcome != "unknown" else ""
 
-    user_ranked = _rank_damage_dealers(user_deck, is_winner=base.won, crowns=crowns_user)
-    opp_ranked = _rank_damage_dealers(opp_deck, is_winner=not base.won, crowns=crowns_opp)
+    user_ranked = _rank_tower_pressure_options(user_deck) if decks_complete else []
+    opp_ranked = _rank_tower_pressure_options(opp_deck) if decks_complete else []
     user_top = user_ranked[0][0] if user_ranked and user_ranked[0][1] > 0 else None
     opp_top = opp_ranked[0][0] if opp_ranked and opp_ranked[0][1] > 0 else None
 
@@ -485,27 +458,34 @@ def analyze_battle_enhanced(
     opp_stats = analyze_deck(opp_deck)
     threats = find_opponent_threats(opp_deck)
 
-    outcome_summary = _build_outcome_summary(
-        won=base.won,
-        user_deck=user_deck,
-        opp_deck=opp_deck,
-        threats=threats,
-        matchup_score=base.matchup_score,
-        user_stats=user_stats,
-        opp_stats=opp_stats,
-        crowns_user=crowns_user,
-        crowns_opp=crowns_opp,
-        duration=duration,
-        user_top=user_top,
-        opp_top=opp_top,
-        missing_threat=missing_threat,
-    )
+    if not decks_complete:
+        result = {
+            "win": "Победа по коронам.",
+            "loss": "Поражение по коронам.",
+            "draw": "Ничья по коронам.",
+            "unknown": "Итог по коронам не подтверждён.",
+        }[base.outcome]
+        outcome_summary = f"{result} Колоды неполные — оценка матчапа и рекомендации по картам недоступны."
+    else:
+        outcome_summary = _build_outcome_summary(
+            outcome=base.outcome,
+            user_deck=user_deck,
+            opp_deck=opp_deck,
+            threats=threats,
+            matchup_score=base.matchup_score,
+            user_stats=user_stats,
+            opp_stats=opp_stats,
+            duration=duration,
+            user_top=user_top,
+            opp_top=opp_top,
+            missing_threat=missing_threat,
+        )
 
     user_key_cards = [
         KeyCardInsight(
             name=c,
             name_ru=card_name_ru(c),
-            note="Вероятный основной урон по башням" if i == 0 else "Дополнительное давление",
+            note="Потенциальное давление на башню по составу" if i == 0 else "Дополнительное потенциальное давление",
         )
         for i, (c, s) in enumerate(user_ranked[:3])
         if s >= 5
@@ -515,12 +495,12 @@ def analyze_battle_enhanced(
             name=c,
             name_ru=card_name_ru(c),
             note=(
-                "Главная угроза по башням"
+                "Потенциальная угроза башне по составу"
                 if i == 0
                 else (
-                    "Чип по башням / вынуждает малый спелл"
+                    "Потенциальный чип / bait по составу"
                     if c in TOWER_CHIP_SUPPORT
-                    else "Вспомогательная угроза"
+                    else "Вспомогательная потенциальная угроза"
                 )
             ),
         )
@@ -528,13 +508,13 @@ def analyze_battle_enhanced(
         if s >= 5
     ]
 
-    relevant = _relevant_user_cards(user_deck, opp_deck, threats)
-    low_impact_raw = [c for c in user_deck if c not in relevant][:4]
+    relevant = _relevant_user_cards(user_deck, opp_deck, threats) if decks_complete else set()
+    low_impact_raw = [c for c in user_deck if c not in relevant][:4] if decks_complete else []
     low_impact = [
         KeyCardInsight(
             name=c,
             name_ru=card_name_ru(c),
-            note="Не подходит под матчап или редко полезна — возможно, не успели сыграть",
+            note="Не ключевая для матчапа по составу колод; факт розыгрыша неизвестен",
         )
         for c in low_impact_raw
     ]
@@ -555,7 +535,7 @@ def analyze_battle_enhanced(
     opponent_elixir = None
     match_difficulty = None
     match_plan = None
-    if include_matchup_modules:
+    if include_matchup_modules and decks_complete:
         tactical = TacticalMatchupAnalyzer.analyze(user_deck, opp_deck)
         user_elixir = ElixirEfficiencyAnalyzer.analyze(user_deck)
         opponent_elixir = ElixirEfficiencyAnalyzer.analyze(opp_deck)
@@ -569,12 +549,15 @@ def analyze_battle_enhanced(
         match_plan = MatchPlanBuilder.build(user_deck, opp_deck, tactical=tactical)
 
     evaluation_report = None
-    if len(user_deck) == 8:
+    # A deck evaluation is useful only when both sides are known.  Otherwise
+    # exposing it in a battle report can look like a conclusion about an
+    # unobserved matchup.
+    if decks_complete:
         from bot.services.deck_evaluator import DeckEvaluator
 
         evaluation_report = DeckEvaluator.evaluate(
             user_deck,
-            opponent=opp_deck if len(opp_deck) == 8 else None,
+            opponent=opp_deck,
         )
 
     tactical_out = tactical if tactical is not None and tactical.has_content() else None
@@ -622,6 +605,7 @@ def analyze_battle_enhanced(
         matchup_evaluation=base.matchup_evaluation,
         counter_cards_missing=base.counter_cards_missing,
         opponent_threats=base.opponent_threats,
+        outcome=base.outcome,
         outcome_summary=outcome_summary,
         user_key_cards=user_key_cards,
         opponent_key_cards=opponent_key_cards,

@@ -108,6 +108,44 @@ def test_active_topic_preserved_on_chat() -> None:
     assert session.active_topic == "build_deck"
 
 
+def test_fresh_request_does_not_receive_session_game_inputs() -> None:
+    """Deck/replay snapshots remain memory, not implicit inputs to a new turn."""
+    session = ConversationState(
+        last_deck=list(HOG_CYCLE),
+        last_opponent_deck=list(reversed(HOG_CYCLE)),
+        last_replay={"accepted": True, "battle_id": "old-replay"},
+    )
+
+    merged = ConversationManager.merge_request_context(session, {})
+
+    assert "cards" not in merged
+    assert "opponent_cards" not in merged
+    assert "replay" not in merged
+    assert merged["memory"]["last_deck"] == list(HOG_CYCLE)
+
+
+def test_new_counter_request_does_not_reuse_previous_deck() -> None:
+    session = ConversationState(last_deck=list(HOG_CYCLE))
+    detected = detect_intent("Чем контрить Голема?")
+
+    enriched = ConversationManager.apply_followup_enrichment(
+        session, detected, "Чем контрить Голема?", {}
+    )
+
+    assert enriched.cards == ["Golem"]
+
+
+def test_explicit_deck_followup_still_reuses_previous_deck() -> None:
+    session = ConversationState(last_deck=list(HOG_CYCLE))
+    detected = detect_intent("Разбери мою колоду")
+
+    enriched = ConversationManager.apply_followup_enrichment(
+        session, detected, "Разбери мою колоду", {}
+    )
+
+    assert enriched.cards == list(HOG_CYCLE)
+
+
 def test_extract_deck_names_reads_deck_key() -> None:
     names = extract_deck_names({"deck": list(HOG_CYCLE)})
     assert names == list(HOG_CYCLE)

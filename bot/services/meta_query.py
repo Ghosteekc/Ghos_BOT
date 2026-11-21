@@ -15,19 +15,81 @@ from bot.services.card_registry import build_deck_share_link, get_card_info
 from bot.services.clan_war_decks import load_clan_war_snapshot
 from bot.services.meta_stats import MODE_LEAGUE, MODE_TROPHIES, ranking_score, trend_from_history_values
 
+SAMPLE_ORIGIN = "ghosteek_observations"
 SAMPLE_NOTE = (
-    "Количество боёв в накопленной выборке Ghosteek, а не число всех мировых боёв."
+    "Источник: подтверждённые наблюдения Ghosteek из журналов боёв. "
+    "Это накопительная выборка, а не глобальная статистика Clash Royale."
 )
 
 
 def _snapshot_is_stale(updated_at: datetime | None, *, now: datetime | None = None) -> bool:
-    """Whether the persisted sample is older than its advertised refresh window."""
+    """Whether confirmed game data is older than its advertised refresh window."""
     if updated_at is None:
         return False
     now = now or datetime.now(timezone.utc)
     if updated_at.tzinfo is None:
         updated_at = updated_at.replace(tzinfo=timezone.utc)
     return now - updated_at > timedelta(hours=max(1, settings.meta_refresh_hours))
+
+
+def _snapshot_attempt(snapshot: MetaSnapshot | None) -> dict[str, Any]:
+    """Read optional collection metadata while keeping legacy snapshots usable."""
+    if snapshot is None:
+        return {"status": "never"}
+    try:
+        payload = json.loads(snapshot.payload_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    attempt = payload.get("attempt") if isinstance(payload, dict) else None
+    if isinstance(attempt, dict) and isinstance(attempt.get("status"), str):
+        return attempt
+    # Legacy snapshots did not carry attempt metadata.  Keep the old source
+    # markers meaningful, but never pretend a normal old snapshot was fresh.
+    source = snapshot.source or ""
+    if "429" in source:
+        return {"status": "rate_limited"}
+    if ":error:" in source:
+        return {"status": "failed"}
+    return {"status": "legacy"}
+
+
+def _latest_confirmed_data_at(rows: list[MetaDeckAggregate]) -> datetime | None:
+    """Newest battle timestamp represented by the aggregate sample."""
+    dates = [row.last_seen for row in rows if row.last_seen is not None]
+    return max(dates) if dates else None
+
+
+def _confirmed_sample_period(
+    rows: list[MetaDeckAggregate],
+) -> tuple[datetime | None, datetime | None]:
+    """Bounds represented by all current aggregates for one mode.
+
+    Aggregates are rebuilt from every persisted observation of that mode;
+    no rolling date filter is applied here. Missing legacy timestamps stay
+    unknown rather than being inferred from a collector attempt.
+    """
+    starts = [row.first_seen for row in rows if row.first_seen is not None]
+    ends = [row.last_seen for row in rows if row.last_seen is not None]
+    return (min(starts) if starts else None, max(ends) if ends else None)
+
+
+def _freshness_message(
+    *,
+    collection_status: str,
+    data_updated_at: datetime | None,
+) -> tuple[str | None, str | None]:
+    """Return API status/message without conflating collection attempt and data date."""
+    if collection_status == "rate_limited":
+        return "rate_limited", "Сбор ограничен API; показана последняя подтверждённая выборка Ghosteek."
+    if collection_status == "failed":
+        return "failed", "Сбор не завершился; показана последняя подтверждённая выборка Ghosteek."
+    if collection_status == "partial":
+        return "partial", "Собрана только часть источников; дата ниже относится к последним подтверждённым боям."
+    if collection_status == "no_new_data":
+        return "no_new_data", "Новых подтверждённых боёв не найдено; показана накопленная выборка Ghosteek."
+    if _snapshot_is_stale(data_updated_at):
+        return "stale", "Последние подтверждённые игровые данные устарели; показана накопленная выборка Ghosteek."
+    return None, None
 
 
 def _cards_from_aggregate(row: MetaDeckAggregate) -> list[dict[str, Any]]:
@@ -97,8 +159,8 @@ async def get_ladder_meta(mode: str) -> dict[str, Any]:
     history_days = max(7, settings.meta_history_days)
     limit = max(4, settings.meta_ranking_limit)
     snapshot = await _latest_snapshot(mode)
-    updated_at = snapshot.created_at if snapshot else None
-    snapshot_source = snapshot.source if snapshot else ""
+    attempt = _snapshot_attempt(snapshot)
+    attempted_at = snapshot.created_at if snapshot else None
 
     async with async_session() as session:
         rows = (
@@ -123,6 +185,8 @@ async def get_ladder_meta(mode: str) -> dict[str, Any]:
                 daily_map.setdefault(item.deck_hash, []).append(item)
 
     now = datetime.now(timezone.utc)
+    sample_started_at, last_battle_at = _confirmed_sample_period(rows)
+    data_updated_at = last_battle_at
     max_games = max((row.total_games for row in rows), default=1)
     rows = sorted(
         rows,
@@ -187,22 +251,24 @@ async def get_ladder_meta(mode: str) -> dict[str, Any]:
             item["rank"] = index
         decks = preview
 
-    collector_failed = (
-        "429" in snapshot_source
-        or ":error:" in snapshot_source
-    )
     only_low_sample = bool(decks) and all(item["low_sample"] for item in decks)
-    snapshot_stale = _snapshot_is_stale(updated_at)
+    freshness_status, freshness_message = _freshness_message(
+        collection_status=str(attempt.get("status") or "legacy"),
+        data_updated_at=data_updated_at,
+    )
     if decks:
-        if collector_failed or snapshot_stale:
-            status = "stale"
-            message = "Мета временно не обновлена; показана последняя накопленная выборка."
+        if freshness_status:
+            status = freshness_status
+            message = freshness_message
         elif only_low_sample:
             status = "insufficient"
             message = "Предварительная мета — мало боёв в выборке, данные накапливаются."
         else:
             status = "ok"
             message = None
+    elif freshness_status in {"rate_limited", "failed", "partial"}:
+        status = freshness_status
+        message = freshness_message
     elif any(row.total_games > 0 for row in rows):
         status = "insufficient"
         message = (
@@ -210,7 +276,7 @@ async def get_ladder_meta(mode: str) -> dict[str, Any]:
             if mode == MODE_TROPHIES
             else "Недостаточно данных для формирования актуальной меты."
         )
-    elif updated_at is None:
+    elif data_updated_at is None:
         status = "empty"
         message = "Недостаточно данных для формирования актуальной меты."
     elif mode == MODE_TROPHIES:
@@ -228,7 +294,15 @@ async def get_ladder_meta(mode: str) -> dict[str, Any]:
         "status": status,
         "message": message,
         "sample_note": SAMPLE_NOTE,
-        "updated_at": updated_at.isoformat() if updated_at else None,
+        # Compatibility field now means confirmed game-data freshness, not
+        # when the collector happened to run.
+        "updated_at": data_updated_at.isoformat() if data_updated_at else None,
+        "attempted_at": attempted_at.isoformat() if attempted_at else None,
+        "collection_status": str(attempt.get("status") or "legacy"),
+        "sample_started_at": sample_started_at.isoformat() if sample_started_at else None,
+        "last_battle_at": last_battle_at.isoformat() if last_battle_at else None,
+        "is_cumulative": True,
+        "sample_origin": SAMPLE_ORIGIN,
         "min_games": min_games,
         "decks": decks,
     }

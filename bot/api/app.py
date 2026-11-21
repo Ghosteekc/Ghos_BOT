@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from bot.api.errors import register_exception_handlers
+from bot.api.replay_guard import ReplayAvailabilityMiddleware
 from bot.api.routes import ai, battles, decks, meta, misc, pro, profile, referral
 from bot.config import settings
 
@@ -31,6 +32,7 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"],
         allow_headers=["Content-Type", "X-Telegram-Init-Data", "Bypass-Tunnel-Reminder"],
     )
+    app.add_middleware(ReplayAvailabilityMiddleware)
 
     app.include_router(profile.router)
     app.include_router(battles.router)

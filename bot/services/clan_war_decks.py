@@ -172,7 +172,7 @@ async def refresh_clan_war_snapshot(
             except ClashRoyaleAPIError as exc:
                 if exc.status == 429:
                     raise
-                logger.debug("Clan-war battlelog skip %s: %s", tag, exc)
+                logger.debug("Clan-war battlelog skipped: status=%s", exc.status)
                 return
         scanned += 1
         for battle in battles:

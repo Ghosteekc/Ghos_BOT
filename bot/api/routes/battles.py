@@ -3,6 +3,8 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from datetime import datetime, timezone
 
 from bot.api.deps import get_db, require_linked_player
 from bot.services.pro.entitlement import is_user_pro
@@ -28,7 +30,7 @@ from bot.api.schemas import (
 )
 from bot.services.battle_day_stats import ranked_battle_sides
 from bot.services.battle_mode import battle_mode_label
-from bot.models.database import User
+from bot.models.database import User, BattleCache
 from bot.services.battle_service import (
     BATTLE_LOG_LIMIT,
     delete_persisted_battles_for_user,
@@ -44,6 +46,32 @@ from bot.services.deck_analyzer import analyze_deck
 from bot.user_errors import http_error
 
 router = APIRouter(prefix="/api/battles", tags=["battles"])
+
+
+@router.get("/history-info")
+async def battle_history_info(
+    user: User = Depends(require_linked_player),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Bounds of persisted records, independent of the live battlelog."""
+    from bot.services.clash_api import normalize_tag
+
+    times = (await session.execute(
+        select(BattleCache.battle_time).where(
+            BattleCache.player_tag == normalize_tag(user.player_tag or "")
+        )
+    )).scalars().all()
+    parsed = []
+    for value in times:
+        try:
+            parsed.append(datetime.strptime(value[:15], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc))
+        except (TypeError, ValueError):
+            continue
+    return {
+        "saved_battles": len(times),
+        "earliest_battle_at": min(parsed).isoformat() if parsed else None,
+        "last_successful_sync_at": None,
+    }
 
 
 @router.delete("", response_model=BattleHistoryClearResponse)
@@ -109,15 +137,18 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
     opp_cards = _team_deck_cards(opponent)
     user_deck = [c.name for c in user_cards]
     opp_deck = [c.name for c in opp_cards]
-    won = team.get("crowns", 0) > opponent.get("crowns", 0)
     user_stats = analyze_deck(user_deck)
     duration = int(battle.get("gameDuration") or 0)
     top_reason: str | None = None
     matchup_score = 50.0
+    won = False
+    outcome = "unknown"
     try:
         analysis = analyze_battle_list_item(team, opponent, duration=duration)
         top_reason = analysis.outcome_summary or (analysis.reasons[0] if analysis.reasons else None)
         matchup_score = analysis.matchup_score
+        won = analysis.won
+        outcome = analysis.outcome
     except Exception:
         top_reason = None
     opp_name, opp_tag = resolve_opponent_fields(opponent)
@@ -129,6 +160,7 @@ def _build_battle_summary(index: int, battle: dict) -> BattleSummary:
         opponent_tag=opp_tag,
         opponent_trophies=opponent.get("startingTrophies") or opponent.get("trophyChange") or 0,
         won=won,
+        outcome=outcome,
         trophy_change=int(team.get("trophyChange") or 0),
         matchup_score=round(matchup_score, 1),
         duration=int(battle.get("gameDuration") or 0),
@@ -272,6 +304,7 @@ def _build_battle_detail(index: int, battle: dict) -> BattleDetailResponse:
     return BattleDetailResponse(
         index=index,
         won=analysis.won,
+        outcome=analysis.outcome,
         opponent_name=opp_name or analysis.opponent_name,
         opponent_tag=opp_tag,
         trophy_change=analysis.trophy_change,

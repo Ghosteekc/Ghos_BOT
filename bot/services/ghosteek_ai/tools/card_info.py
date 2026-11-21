@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bot.services.card_knowledge import resolve_canonical_card_name
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_profile import get_card_profile
 from bot.services.ghosteek_ai.context.ai_context import AIContext
@@ -30,13 +31,16 @@ class CardInfoTool(BaseTool):
             name = cards[0] if cards else None
         if not name or not isinstance(name, str):
             return ToolResult(tool=self.name, ok=False, error_code="NEED_CARD_NAME")
-        profile = get_card_profile(name)
+        canonical_name = resolve_canonical_card_name(name)
+        if canonical_name is None:
+            return ToolResult(tool=self.name, ok=False, error_code="UNKNOWN_CARD")
+        profile = get_card_profile(canonical_name)
         return ToolResult(
             tool=self.name,
             ok=True,
             data={
-                "name": name,
-                "name_ru": card_name_ru(name),
+                "name": canonical_name,
+                "name_ru": card_name_ru(canonical_name),
                 "elixir": profile.elixir,
                 "card_type": profile.card_type,
                 "roles": sorted(profile.roles),

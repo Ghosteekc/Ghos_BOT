@@ -599,13 +599,18 @@ async def ask_ghosteek_ai(
     ConversationManager.add_user_message(session, message)
 
     req_ctx = ConversationManager.merge_request_context(session, context)
-    # Local renderer follow-ups: previous facts / brief answer only (not full history).
-    if isinstance(session.last_render_facts, dict) and session.last_render_facts:
-        req_ctx["last_render_facts"] = dict(session.last_render_facts)
-    if session.last_answer_brief:
-        req_ctx["last_answer_brief"] = session.last_answer_brief
-    elif session.last_assistant_messages:
-        req_ctx["last_answer_brief"] = str(session.last_assistant_messages[-1])[:180]
+    # Previous renderer facts are not ambient knowledge.  Admit them only for
+    # an explicit short follow-up; ordinary chat and a new game request start
+    # from their own tool result.
+    from bot.services.ghosteek_ai.llm.local_renderer import detect_followup_kind
+
+    if detect_followup_kind(message):
+        if isinstance(session.last_render_facts, dict) and session.last_render_facts:
+            req_ctx["last_render_facts"] = dict(session.last_render_facts)
+        if session.last_answer_brief:
+            req_ctx["last_answer_brief"] = session.last_answer_brief
+        elif session.last_assistant_messages:
+            req_ctx["last_answer_brief"] = str(session.last_assistant_messages[-1])[:180]
 
     # Accepted CR replay is known, but Stage 4 coaching is not ready yet.
     from bot.services.ghosteek_ai.replay_followup import (

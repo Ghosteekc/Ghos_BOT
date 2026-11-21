@@ -38,6 +38,7 @@ def test_digest_caption_keeps_best_deck_statistics_on_the_collage():
         start=date(2026, 8, 31),
         end=date(2026, 9, 6),
         total=63,
+        scored_games=63,
         wins=36,
         losses=27,
         winrate=57.1,
@@ -48,6 +49,27 @@ def test_digest_caption_keeps_best_deck_statistics_on_the_collage():
         best_deck={"winrate": 61.9, "total": 42},
         best_deck_share=67,
         form_note="Винрейт стабильный — продолжай в том же духе.",
+    )
+    assert format_digest_caption(stats) == "\n".join(
+        [
+            "👻 Недельная сводка",
+            "31 авг — 6 сен 2026",
+            "",
+            "⚔️ Матчи: 63",
+            "🟢 Победы: 36",
+            "🔴 Поражения: 27",
+            "🤝 Ничьи: 0",
+            "📈 Винрейт: 57,1% (63 боёв с подтверждённым исходом)",
+            "",
+            "🏆 Кубки: 0",
+            "🔥 Серия побед: 7",
+            "📅 Лучший день: суббота — 9 побед",
+            "",
+            "🃏 Колода недели: сначала учитывается число боёв (до 12), затем винрейт и число боёв.",
+            "Доля — среди учтённых боёв недели с полной колодой; ничьи входят в расчёт винрейта.",
+            "",
+            "💬 Винрейт стабильный — продолжай в том же духе.",
+        ]
     )
 
 
@@ -76,23 +98,6 @@ def test_digest_keeps_trophy_road_and_league_cups_separate():
     assert "🏆 Кубки: +30" in format_digest_caption(stats)
     assert "🟣 Кубки лиги: -7" in format_digest_caption(stats)
 
-    assert format_digest_caption(stats) == "\n".join(
-        [
-            "👻 Недельная сводка",
-            "31 авг — 6 сен 2026",
-            "",
-            "⚔️ Матчи: 63",
-            "🟢 Победы: 36",
-            "🔴 Поражения: 27",
-            "📈 Винрейт: 57,1%",
-            "",
-            "🏆 Кубки: 0",
-            "🔥 Серия побед: 7",
-            "📅 Лучший день: суббота — 9 побед",
-            "",
-            "💬 Винрейт стабильный — продолжай в том же духе.",
-        ]
-    )
 
 
 def test_best_deck_collage_stats_are_compact_and_use_russian_decimal_separator():

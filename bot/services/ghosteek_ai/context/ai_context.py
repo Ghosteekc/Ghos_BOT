@@ -92,6 +92,7 @@ class DeckContext:
 class BattleContext:
     battle_index: int | None = None
     won: bool | None = None
+    outcome: str | None = None
     opponent_name: str | None = None
     matchup_score: Any = None
     outcome_summary: str | None = None
@@ -107,6 +108,7 @@ class BattleContext:
         return {
             "battle_index": self.battle_index,
             "won": self.won,
+            "outcome": self.outcome,
             "opponent_name": self.opponent_name,
             "matchup_score": self.matchup_score,
             "outcome_summary": self.outcome_summary,
@@ -120,6 +122,7 @@ class BattleContext:
         return {
             "battle_index": self.battle_index,
             "won": self.won,
+            "outcome": self.outcome,
             "opponent_name": self.opponent_name,
             "matchup_score": self.matchup_score,
             "outcome_summary": self.outcome_summary,
@@ -138,6 +141,7 @@ class BattleContext:
         return cls(
             battle_index=data.get("battle_index"),
             won=data.get("won"),
+            outcome=data.get("outcome"),
             opponent_name=data.get("opponent_name"),
             matchup_score=data.get("matchup_score"),
             outcome_summary=data.get("outcome_summary"),
@@ -159,11 +163,12 @@ class BattleContext:
         nested_raw = data.get("raw") if isinstance(data.get("raw"), dict) else None
         # state_dict from to_state_dict / structured payload
         if nested_raw is not None or any(
-            k in data for k in ("won", "opponent_name", "outcome_summary", "matchup_score")
+            k in data for k in ("won", "outcome", "opponent_name", "outcome_summary", "matchup_score")
         ):
             return cls(
                 battle_index=data.get("battle_index"),
                 won=data.get("won"),
+                outcome=data.get("outcome"),
                 opponent_name=data.get("opponent_name"),
                 matchup_score=data.get("matchup_score"),
                 outcome_summary=data.get("outcome_summary"),

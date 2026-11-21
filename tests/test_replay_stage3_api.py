@@ -72,6 +72,7 @@ def test_api_cr_like_status(monkeypatch) -> None:
     assert payload["replay_detection"]["status"] == "cr_replay"
     assert payload["replay_detection"]["confidence"] == 0.91
     assert payload["replay_detection"]["frames_analyzed"] == 20
+    assert payload["replay_facts"]["frames_analyzed"] == 20
 
 
 def test_api_not_cr_status(monkeypatch) -> None:

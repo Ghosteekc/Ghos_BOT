@@ -8,6 +8,7 @@ from typing import Any
 from bot.services.ghosteek_ai.constraints import CONSTRAINTS_SUMMARY
 from bot.services.ghosteek_ai.context.ai_context import AIContext
 from bot.services.ghosteek_ai.llm.messages import ChatMessage, MessageRole
+from bot.services.ghosteek_ai.llm.privacy import minimize_model_facts
 from bot.services.ghosteek_ai.models import ToolResult
 from bot.services.ghosteek_ai.voice import SYSTEM_PROMPT
 
@@ -121,9 +122,13 @@ class PromptBuilder:
     def build_ai_context(self, ctx: AIContext) -> list[ChatMessage]:
         payload = ctx.to_llm_dict()
         payload = {k: v for k, v in payload.items() if k not in {"raw_message", "tool_outputs"}}
+        # Identity is not needed to reason about the supplied game facts.
+        payload.pop("player", None)
+        if isinstance(payload.get("battle"), dict):
+            payload["battle"] = {k: v for k, v in payload["battle"].items() if k != "opponent_name"}
         if not payload:
             return []
-        content = "Контекст:\n" + json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
+        content = "Контекст:\n" + json.dumps(minimize_model_facts(payload), ensure_ascii=False, default=str, separators=(",", ":"))
         return [ChatMessage(role=MessageRole.SYSTEM, content=content)]
 
     def build_tool_results(self, ctx: AIContext) -> list[ChatMessage]:
@@ -207,7 +212,7 @@ class PromptBuilder:
             payload["data"] = data
         if tr.actions:
             payload["actions"] = tr.actions[:3]
-        text = json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
+        text = json.dumps(minimize_model_facts(payload), ensure_ascii=False, default=str, separators=(",", ":"))
         if len(text) > _TOOL_DATA_CHARS:
             return text[: _TOOL_DATA_CHARS - 1] + "…"
         return text
