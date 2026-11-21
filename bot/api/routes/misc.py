@@ -43,7 +43,11 @@ async def card_counters(
     del user
     card = resolve_canonical_card_name(card_name)
     if card is None:
-        raise http_error("E006", status=404, message="Карта не найдена")
+        catalog = await ensure_cards_loaded()
+        info = catalog.get(card_name.strip().lower())
+        if info is None:
+            raise http_error("E006", status=404, message="Карта не найдена")
+        return CardCountersResponse(card=info["name"], card_ru=ru(info["name"], short=False))
 
     counters, countered_by = strong_counter_relations(card)
     return CardCountersResponse(

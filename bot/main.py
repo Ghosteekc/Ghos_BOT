@@ -16,6 +16,7 @@ from bot.services import sync_service
 from bot.services import weekly_digest
 from bot.services.pro import reminders as pro_reminders
 from bot.services import meta_collector
+from bot.services.card_registry import run_periodic_card_refresh
 from bot.services.clash_api import ClashRoyaleClient
 from bot.services.ghosteek_ai.memory.in_memory import (
     InMemoryMemoryProvider,
@@ -119,6 +120,7 @@ async def main() -> None:
     digest_task = asyncio.create_task(weekly_digest.run_periodic(bot, stop_event))
     pro_reminder_task = asyncio.create_task(pro_reminders.run_periodic(bot, stop_event))
     meta_task = asyncio.create_task(meta_collector.run_periodic(stop_event))
+    card_refresh_task = asyncio.create_task(run_periodic_card_refresh(stop_event))
     api_task = asyncio.create_task(run_api(bot))
     warmup_task: asyncio.Task | None = None
     if settings.startup_warmup_enabled:
@@ -167,6 +169,7 @@ async def main() -> None:
         digest_task.cancel()
         pro_reminder_task.cancel()
         meta_task.cancel()
+        card_refresh_task.cancel()
         if warmup_task and not warmup_task.done():
             warmup_task.cancel()
         try:
@@ -190,6 +193,10 @@ async def main() -> None:
                 await warmup_task
             except asyncio.CancelledError:
                 pass
+        try:
+            await card_refresh_task
+        except asyncio.CancelledError:
+            pass
         try:
             await api_task
         except asyncio.CancelledError:

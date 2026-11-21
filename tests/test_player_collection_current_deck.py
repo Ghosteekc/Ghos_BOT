@@ -60,7 +60,6 @@ def test_collection_exposes_confirmed_current_deck_only(monkeypatch) -> None:
     monkeypatch.setattr(player_collection, "ensure_cards_loaded", load_catalog)
     monkeypatch.setattr(player_collection, "get_card_info", lambda name: catalog.get(name.lower()))
     monkeypatch.setattr(player_collection, "resolve_card_name", lambda name: catalog.get(name.lower(), {}).get("name"))
-    monkeypatch.setattr(player_collection, "canonical_card_names", lambda: set(c["name"] for c in catalog.values()))
 
     names = [card["name"] for card in catalog.values()]
     result = asyncio.run(player_collection.build_player_collection(_player_with_deck(names)))
@@ -77,7 +76,6 @@ def test_collection_omits_incomplete_or_unknown_current_deck(monkeypatch) -> Non
     monkeypatch.setattr(player_collection, "ensure_cards_loaded", load_catalog)
     monkeypatch.setattr(player_collection, "get_card_info", lambda name: catalog.get(name.lower()))
     monkeypatch.setattr(player_collection, "resolve_card_name", lambda name: catalog.get(name.lower(), {}).get("name"))
-    monkeypatch.setattr(player_collection, "canonical_card_names", lambda: set(c["name"] for c in catalog.values()))
 
     names = [card["name"] for card in catalog.values()]
     player = _player_with_deck(names)

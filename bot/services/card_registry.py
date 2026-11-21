@@ -1,7 +1,9 @@
 """Cache Clash Royale cards: ids, icons, deck share links."""
 
+import asyncio
 import logging
 import re
+import time
 
 from bot.config import settings
 from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
@@ -9,6 +11,10 @@ from bot.services.clash_api import ClashRoyaleAPIError, ClashRoyaleClient
 logger = logging.getLogger(__name__)
 
 _cards_by_name: dict[str, dict] | None = None
+_refresh_lock = asyncio.Lock()
+_next_refresh_at = 0.0
+_REFRESH_SECONDS = 3600
+_RETRY_SECONDS = 60
 
 # CDN URLs from /cards API can 404 until Supercell publishes the asset.
 _CARD_ICON_FALLBACKS: dict[str, str] = {}
@@ -23,16 +29,6 @@ _CARD_HERO_ICON_FALLBACKS: dict[str, str] = {
     "valkyrie": "/cards/valkyrie-hero.png",
     "berserker": "/cards/berserker-hero.png",
 }
-
-# Cards that have both Evolution and Hero in-game (dual-path).
-# Season APIs sometimes lag on maxEvolutionLevel / heroMedium.
-_DUAL_PATH_CARDS: frozenset[str] = frozenset({
-    "valkyrie",
-    "wizard",
-    "knight",
-    "musketeer",
-})
-
 
 def _normalize_name(name: str) -> str:
     return name.strip().lower()
@@ -76,53 +72,91 @@ def resolve_card_icon(name: str, api_icon: str) -> str:
 
 
 async def ensure_cards_loaded() -> dict[str, dict]:
-    global _cards_by_name
     if _cards_by_name is not None:
         return _cards_by_name
+    return await _refresh_cards()
 
-    client = ClashRoyaleClient()
-    try:
-        data = await client.get_cards()
-    except ClashRoyaleAPIError as e:
-        logger.warning(f"Could not load cards list: {e}")
-        _cards_by_name = {}
-        return _cards_by_name
-    finally:
-        await client.close()
 
-    result: dict[str, dict] = {}
-    for item in data.get("items", []):
-        name = item.get("name")
-        if not name:
+async def _refresh_cards() -> dict[str, dict]:
+    global _cards_by_name, _next_refresh_at
+    async with _refresh_lock:
+        if time.monotonic() < _next_refresh_at:
+            return _cards_by_name or {}
+
+        try:
+            async with ClashRoyaleClient() as client:
+                catalog = _parse_catalog(await client.get_cards())
+        except (ClashRoyaleAPIError, ValueError, TypeError) as exc:
+            _next_refresh_at = time.monotonic() + _RETRY_SECONDS
+            logger.warning("Card catalog refresh failed (%s); keeping previous catalog", type(exc).__name__)
+            return _cards_by_name or {}
+
+        previous_by_id = {card["id"]: card for card in (_cards_by_name or {}).values()}
+        changed = [card["name"] for card in catalog.values() if previous_by_id.get(card["id"]) != card]
+        _cards_by_name = catalog
+        _next_refresh_at = time.monotonic() + _REFRESH_SECONDS
+        logger.info("Card catalog refreshed: %d cards, %d added or changed", len(catalog), len(changed))
+        if previous_by_id and changed:
+            logger.info("Updated cards: %s", ", ".join(changed))
+        return catalog
+
+
+async def run_periodic_card_refresh(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        await _refresh_cards()
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=max(0, _next_refresh_at - time.monotonic()))
+        except asyncio.TimeoutError:
             continue
+
+
+def _parse_catalog(data: dict) -> dict[str, dict]:
+    items = data.get("items")
+    if not isinstance(items, list) or not items:
+        raise ValueError("Card catalog has no items")
+    cards_by_id: dict[int, dict] = {}
+    names: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid card record")
+        name = item.get("name")
+        card_id = item.get("id")
+        if not isinstance(name, str) or not name.strip() or type(card_id) is not int or card_id <= 0:
+            raise ValueError("Invalid card identity")
+        name = name.strip()
+        key = _normalize_name(name)
+        if card_id in cards_by_id or key in names:
+            raise ValueError("Duplicate card identity")
+        names.add(key)
         icons = item.get("iconUrls") or {}
+        if not isinstance(icons, dict) or any(not isinstance(url, str) for url in icons.values() if url is not None):
+            raise ValueError("Invalid card icons")
         api_icon = icons.get("medium") or icons.get("small") or ""
         evo_icon = _resolve_evolution_icon(name, icons.get("evolutionMedium") or "")
         hero_icon = _resolve_hero_icon(name, icons.get("heroMedium") or "")
         max_evo = int(item.get("maxEvolutionLevel") or 0)
-        key = _normalize_name(name)
         # The official cards API exposes an evolution variant through its
         # evolutionMedium art. Treat that API field as confirmation even when
         # maxEvolutionLevel is temporarily missing during a season rollout.
-        if evo_icon:
+        has_evolution = bool(evo_icon or (max_evo >= (3 if hero_icon else 1)))
+        if has_evolution:
             max_evo = max(max_evo, 1)
         # Dual-path (evo + hero): collection uses 1/2/3 evolutionLevel tiers.
-        if key in _DUAL_PATH_CARDS and (evo_icon or max_evo >= 1) and hero_icon:
+        if has_evolution and hero_icon:
             max_evo = max(max_evo, 3)
-        result[key] = {
+        cards_by_id[card_id] = {
             "name": name,
-            "id": item.get("id"),
+            "id": card_id,
             "icon": _resolve_card_icon(name, api_icon),
             "evolution_icon": evo_icon,
             "hero_icon": hero_icon,
+            "has_evolution": has_evolution,
             "max_evolution_level": max_evo,
             "elixir": item.get("elixirCost"),
             "rarity": item.get("rarity") or "",
             "max_level": int(item.get("maxLevel") or 0) or None,
         }
-    _cards_by_name = result
-    logger.info(f"Card registry loaded: {len(result)} cards")
-    return result
+    return {_normalize_name(card["name"]): card for card in cards_by_id.values()}
 
 
 def get_card_info(name: str) -> dict | None:

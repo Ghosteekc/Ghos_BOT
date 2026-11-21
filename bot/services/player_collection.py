@@ -6,7 +6,6 @@ import logging
 import re
 
 from bot.services.card_data import get_card_elixir
-from bot.services.card_knowledge import canonical_card_names
 from bot.services.card_level import to_display_level, to_display_max_level
 from bot.services.card_names_ru import card_name_ru
 from bot.services.card_registry import ensure_cards_loaded, get_card_info, resolve_card_icon, resolve_card_name
@@ -56,11 +55,13 @@ def _parse_card_upgrades(owned_raw: dict, info: dict | None = None) -> dict:
     icons = owned_raw.get("iconUrls") or {}
     meta = info or {}
     has_hero_cap = bool(icons.get("heroMedium") or meta.get("hero_icon"))
+    min_evo_tier = 3 if has_hero_cap else 1
     has_evo_cap = bool(
         icons.get("evolutionMedium")
         or meta.get("evolution_icon")
-        or int(owned_raw.get("maxEvolutionLevel") or 0) >= 1
-        or int(meta.get("max_evolution_level") or 0) >= 1
+        or meta.get("has_evolution")
+        or int(owned_raw.get("maxEvolutionLevel") or 0) >= min_evo_tier
+        or int(meta.get("max_evolution_level") or 0) >= min_evo_tier
     )
     evo_raw = owned_raw.get("evolutionLevel")
 
@@ -292,16 +293,28 @@ def _resolve_elixir(info: dict, owned_raw: dict | None, name: str) -> int | None
 
 
 async def build_player_collection(player: dict) -> dict:
-    await ensure_cards_loaded()
+    catalog = await ensure_cards_loaded()
+    catalog_names_by_id = {
+        info["id"]: key for key, info in catalog.items() if info.get("id") is not None
+    }
+
+    def catalog_key(raw: dict) -> str | None:
+        card_id = raw.get("id")
+        if card_id is not None:
+            return catalog_names_by_id.get(card_id) if type(card_id) is int else None
+        name = raw.get("name")
+        if isinstance(name, str) and _normalize_name(name) in catalog:
+            return _normalize_name(name)
+        return None
+
     player_cards: dict[str, dict] = {}
     for raw in player.get("cards") or []:
-        name = raw.get("name")
-        if name:
-            player_cards[_normalize_name(name)] = raw
+        key = catalog_key(raw)
+        if key is not None:
+            player_cards[key] = raw
 
     badges = player.get("badges") or []
     card_entries: list[dict] = []
-    catalog = await ensure_cards_loaded()
 
     for info in sorted(catalog.values(), key=lambda x: x["name"]):
         name = info["name"]
@@ -372,17 +385,18 @@ async def build_player_collection(player: dict) -> dict:
             })
 
     mastery_by_card: dict[str, dict] = {}
-    canonical_cards = canonical_card_names()
     for badge in badges:
         bname = badge.get("name") or ""
         if not bname.startswith("Mastery"):
             continue
         card_en = _mastery_card_name(bname)
-        if card_en is None or card_en not in canonical_cards:
+        if card_en is None:
             continue
-        info = get_card_info(card_en) or {}
+        info = catalog.get(_normalize_name(card_en))
+        if info is None:
+            continue
         owned_raw = player_cards.get(_normalize_name(card_en))
-        base, icon_evo, icon_hero = _resolve_icons(owned_raw, info or {})
+        base, icon_evo, icon_hero = _resolve_icons(owned_raw, info)
         upgrades = _parse_card_upgrades(owned_raw, info) if owned_raw else {
             "evolution_unlocked": False,
             "hero_unlocked": False,
@@ -434,13 +448,16 @@ async def build_player_collection(player: dict) -> dict:
     current_deck_raw = player.get("currentDeck") or []
     current_deck: list[str] = []
     if isinstance(current_deck_raw, list) and len(current_deck_raw) == 8:
-        resolved_deck = [
-            resolve_card_name(str(entry.get("name") or ""))
-            for entry in current_deck_raw
-            if isinstance(entry, dict)
-        ]
-        if len(resolved_deck) == 8 and all(resolved_deck):
-            current_deck = [name for name in resolved_deck if name is not None]
+        resolved_deck = []
+        for entry in current_deck_raw:
+            if not isinstance(entry, dict):
+                break
+            key = catalog_key(entry)
+            if key is None:
+                break
+            resolved_deck.append(catalog[key]["name"])
+        if len(set(resolved_deck)) == 8:
+            current_deck = resolved_deck
         else:
             logger.warning("Ignoring incomplete currentDeck in player collection payload")
 

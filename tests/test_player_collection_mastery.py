@@ -45,9 +45,3 @@ def test_known_internal_mastery_badge_still_resolves(
     )
 
     assert player_collection._mastery_card_name("MasteryArcher") == "Archers"
-
-
-def test_mastery_catalog_has_exactly_current_card_count() -> None:
-    from bot.services.card_knowledge import canonical_card_names
-
-    assert len(canonical_card_names()) == 122
